@@ -1291,15 +1291,16 @@ function updateTopBar() {
   // Cost: sum of all totalCostUSD
   const cost = sessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
 
-  // Cache hit: weighted average by total tokens
-  let totalToks = 0, cachedToks = 0;
+  // Cache hit: weighted average using backend-computed cacheHitPct
+  let totalToks = 0, weightedPct = 0;
   sessions.forEach(s => {
     const tot = (s.inputTokens || 0) + (s.outputTokens || 0);
-    const cached = s.cacheReadTokens || 0;
     totalToks += tot;
-    cachedToks += cached;
+    if (tot > 0 && s.cacheHitPct != null) {
+      weightedPct += s.cacheHitPct * tot;
+    }
   });
-  const cacheHit = totalToks > 0 ? Math.round((cachedToks / totalToks) * 100) : null;
+  const cacheHit = totalToks > 0 ? Math.round(weightedPct / totalToks) : null;
 
   setStatVal('stat-sessions', count);
   setStatVal('stat-cost', formatCost(cost));
@@ -1349,11 +1350,7 @@ function renderSessions() {
     let card = list.querySelector(`[data-sid="${sess.id}"]`);
     const active = isActive(sess);
     const selected = state.selectedSession === sess.id;
-    const cacheHit = (() => {
-      const tot = (sess.inputTokens || 0) + (sess.outputTokens || 0);
-      if (!tot) return null;
-      return Math.round(((sess.cacheReadTokens || 0) / tot) * 100);
-    })();
+    const cacheHit = sess.cacheHitPct != null ? Math.round(sess.cacheHitPct) : null;
     const totalTok = (sess.inputTokens || 0) + (sess.outputTokens || 0);
 
     const html = `
@@ -1419,6 +1416,7 @@ const MAX_FEED_ENTRIES = 500;
 
 function getMessageText(msg) {
   if (!msg) return '';
+  if (typeof msg.contentText === 'string' && msg.contentText) return msg.contentText;
   if (typeof msg.content === 'string') return msg.content;
   if (Array.isArray(msg.content)) {
     return msg.content.map(c => {
@@ -1464,36 +1462,34 @@ function addFeedEntry(session, message) {
   let content = '';
   let contentClass = '';
 
-  if (type === 'user') {
+  // Detect tool calls: backend sends toolName on assistant messages
+  const toolName = message.toolName || getToolName(message);
+  const isToolCall = toolName && (type === 'assistant' || type === 'tool_use');
+  const isToolResult = type === 'tool_result' || (type === 'user' && message.toolName);
+
+  if (isToolCall) {
+    content = `[${toolName}] ${truncate(getMessageText(message), 80)}`;
+    contentClass = 'tool';
+  } else if (isToolResult) {
+    content = truncate(getMessageText(message), 100);
+    contentClass = 'result';
+  } else if (type === 'user') {
     content = truncate(getMessageText(message), 120);
     contentClass = '';
   } else if (type === 'assistant') {
-    // Check if it's a tool use
-    const toolName = getToolName(message);
-    if (toolName) {
-      // Will be rendered as tool_use type separately, skip
-      content = truncate(getMessageText(message), 120);
-      contentClass = '';
-    } else {
-      content = truncate(getMessageText(message), 120);
-      contentClass = '';
-    }
-  } else if (type === 'tool_use') {
-    content = message.name || message.tool_name || truncate(getMessageText(message), 80);
-    contentClass = 'tool';
-  } else if (type === 'tool_result') {
-    content = truncate(getMessageText(message), 100);
-    contentClass = 'result';
+    content = truncate(getMessageText(message), 120);
+    contentClass = '';
   } else {
     content = truncate(getMessageText(message), 120);
     contentClass = 'dim';
   }
 
+  const displayType = isToolCall ? 'tool_use' : isToolResult ? 'tool_result' : type;
   const el = document.createElement('div');
-  el.className = `feed-entry type-${type}`;
+  el.className = `feed-entry type-${displayType}`;
   el.innerHTML =
     `<span class="fe-time">${formatTime(ts)}</span>` +
-    `<span class="fe-type ${type}">[${type}]</span>` +
+    `<span class="fe-type ${displayType}">[${displayType}]</span>` +
     `<span class="fe-content ${contentClass}">${escHtml(content)}</span>` +
     `<span class="fe-sid">${escHtml(sid)}</span>`;
 
