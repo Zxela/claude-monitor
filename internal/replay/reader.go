@@ -3,6 +3,7 @@ package replay
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"sort"
 	"time"
@@ -27,7 +28,7 @@ func ReadFile(path string) ([]Event, error) {
 
 	var events []Event
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	i := 0
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -41,7 +42,12 @@ func ReadFile(path string) ([]Event, error) {
 		events = append(events, Event{Index: i, ParsedMessage: *msg})
 		i++
 	}
-	return events, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "replay: scanner error reading %s: %v (some events may be missing)\n", path, err)
+		// Return partial events with non-nil error so callers can skip caching incomplete results.
+		return events, err
+	}
+	return events, nil
 }
 
 // IndexAt returns the index of the first event whose Timestamp is >= t.

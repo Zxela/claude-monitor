@@ -28,15 +28,43 @@ type Session struct {
 
 // Store is a thread-safe registry of sessions keyed by session ID.
 type Store struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
+	mu          sync.RWMutex
+	sessions    map[string]*Session
+	replayCache map[string][]byte // cached JSON bytes per session ID
 }
 
 // NewStore creates an empty Store.
 func NewStore() *Store {
 	return &Store{
-		sessions: make(map[string]*Session),
+		sessions:    make(map[string]*Session),
+		replayCache: make(map[string][]byte),
 	}
+}
+
+// GetReplayJSON returns cached manifest JSON for the given session ID, if present.
+func (s *Store) GetReplayJSON(id string) ([]byte, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, ok := s.replayCache[id]
+	return data, ok
+}
+
+// SetReplayJSON stores manifest JSON for the given session ID.
+// Uses a check-then-set under the write lock so concurrent callers don't
+// overwrite a freshly-invalidated entry with stale data.
+func (s *Store) SetReplayJSON(id string, data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.replayCache[id]; !exists {
+		s.replayCache[id] = data
+	}
+}
+
+// InvalidateReplayJSON removes the cached manifest JSON for the given session ID.
+func (s *Store) InvalidateReplayJSON(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.replayCache, id)
 }
 
 // Upsert creates or updates the session identified by sessionID.
@@ -56,6 +84,9 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	}
 
 	update(sess)
+
+	// Invalidate replay cache since new data was written.
+	delete(s.replayCache, sessionID)
 
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold

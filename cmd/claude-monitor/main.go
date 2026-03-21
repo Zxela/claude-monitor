@@ -171,9 +171,18 @@ func main() {
 			http.Error(w, "session file not available", http.StatusBadRequest)
 			return
 		}
-		events, err := replay.ReadFile(sess.FilePath)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		// Return cached JSON if available (invalidated on each new message).
+		if cached, hit := store.GetReplayJSON(id); hit {
+			w.Write(cached)
+			return
+		}
+
+		events, scanErr := replay.ReadFile(sess.FilePath)
+		if scanErr != nil && len(events) == 0 {
+			http.Error(w, scanErr.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -198,11 +207,19 @@ func main() {
 				CostUSD:     e.CostUSD,
 			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		data, err := json.Marshal(map[string]any{
 			"sessionId": id,
 			"events":    out,
 		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Only cache if the file was fully read (no scanner errors).
+		if scanErr == nil {
+			store.SetReplayJSON(id, data)
+		}
+		w.Write(data)
 	})
 
 	// Health check.

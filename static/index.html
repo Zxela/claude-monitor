@@ -1104,9 +1104,8 @@ const SPRITES = {
 
 // Frame alternation ticker
 let _spriteFrame = 0;
-setInterval(() => {
+function tickSprites() {
   _spriteFrame = (_spriteFrame + 1) % 2;
-  // Update all visible sprites
   if (state.currentView === 'pixels') {
     document.querySelectorAll('.agent-card').forEach(card => {
       const sid = card.dataset.id;
@@ -1116,7 +1115,17 @@ setInterval(() => {
       if (spriteEl) renderSprite(ss.state, spriteEl);
     });
   }
-}, 1000);
+}
+let spriteIntervalId = setInterval(tickSprites, 1000);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearInterval(spriteIntervalId);
+    spriteIntervalId = null;
+  } else if (!spriteIntervalId) {
+    spriteIntervalId = setInterval(tickSprites, 1000);
+  }
+});
 
 function renderSprite(spriteState, el) {
   const frames = SPRITES[spriteState] || SPRITES.idle;
@@ -1176,7 +1185,10 @@ function renderPixelView() {
 
   // Remove stale cards
   [...grid.querySelectorAll('.agent-card')].forEach(card => {
-    if (!currentIds.has(card.dataset.id)) card.remove();
+    if (!currentIds.has(card.dataset.id)) {
+      delete sessionState[card.dataset.id];
+      card.remove();
+    }
   });
 
   sessions.forEach(sess => {
