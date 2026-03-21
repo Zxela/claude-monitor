@@ -13,11 +13,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/zxela-claude/claude-monitor/internal/hub"
 	"github.com/zxela-claude/claude-monitor/internal/parser"
+	"github.com/zxela-claude/claude-monitor/internal/replay"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
 )
@@ -133,6 +135,74 @@ func main() {
 		if err := json.NewEncoder(w).Encode(sessions); err != nil {
 			log.Printf("api/sessions encode error: %v", err)
 		}
+	})
+
+	// Replay SSE stream route — registered BEFORE the manifest route.
+	mux.HandleFunc("/api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, ok := store.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if sess.FilePath == "" {
+			http.Error(w, "session file not available", http.StatusBadRequest)
+			return
+		}
+		events, err := replay.ReadFile(sess.FilePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+		speed, _ := strconv.ParseFloat(r.URL.Query().Get("speed"), 64)
+		replay.Stream(w, r, events, replay.StreamParams{FromIndex: from, Speed: speed})
+	})
+
+	// Replay manifest — returns all events with timestamps for the scrubber.
+	mux.HandleFunc("/api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, ok := store.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if sess.FilePath == "" {
+			http.Error(w, "session file not available", http.StatusBadRequest)
+			return
+		}
+		events, err := replay.ReadFile(sess.FilePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		type manifestEvent struct {
+			Index       int       `json:"index"`
+			Timestamp   time.Time `json:"timestamp"`
+			Type        string    `json:"type"`
+			Role        string    `json:"role"`
+			ContentText string    `json:"contentText"`
+			ToolName    string    `json:"toolName,omitempty"`
+			CostUSD     float64   `json:"costUSD"`
+		}
+		out := make([]manifestEvent, len(events))
+		for i, e := range events {
+			out[i] = manifestEvent{
+				Index:       e.Index,
+				Timestamp:   e.Timestamp,
+				Type:        e.Type,
+				Role:        e.Role,
+				ContentText: e.ContentText,
+				ToolName:    e.ToolName,
+				CostUSD:     e.CostUSD,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"sessionId": id,
+			"events":    out,
+		})
 	})
 
 	// Health check.
