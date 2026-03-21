@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Monitor</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #ccc; padding: 1rem; }
+    h1 { color: #fff; }
+    #sessions { margin-top: 1rem; }
+    .session { border: 1px solid #333; padding: 0.5rem; margin-bottom: 0.5rem; border-radius: 4px; }
+    .session.active { border-color: #0a0; }
+    .label { color: #888; font-size: 0.85em; }
+    #log { margin-top: 2rem; max-height: 300px; overflow-y: auto; font-size: 0.8em; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Claude Monitor</h1>
+  <div id="sessions"><em>Loading...</em></div>
+  <div id="log"></div>
+
+  <script>
+    const sessionsEl = document.getElementById('sessions');
+    const logEl = document.getElementById('log');
+    const sessions = {};
+
+    function fmt(n) { return n.toLocaleString(); }
+    function fmtCost(c) { return '$' + c.toFixed(4); }
+
+    function render() {
+      const list = Object.values(sessions).sort((a, b) =>
+        new Date(b.lastActive) - new Date(a.lastActive));
+      if (!list.length) { sessionsEl.innerHTML = '<em>No sessions yet.</em>'; return; }
+      sessionsEl.innerHTML = list.map(s => `
+        <div class="session ${s.isActive ? 'active' : ''}">
+          <strong>${s.projectName || s.id}</strong>
+          <span class="label"> (${s.id.slice(0, 8)})</span><br>
+          Cost: ${fmtCost(s.totalCostUSD)} &nbsp;
+          In: ${fmt(s.inputTokens)} &nbsp;
+          Out: ${fmt(s.outputTokens)} &nbsp;
+          Cache: ${s.cacheHitPct.toFixed(1)}% &nbsp;
+          Msgs: ${s.messageCount}
+        </div>`).join('');
+    }
+
+    function appendLog(text) {
+      const div = document.createElement('div');
+      div.textContent = new Date().toISOString().slice(11, 23) + ' ' + text;
+      logEl.appendChild(div);
+      if (logEl.children.length > 200) logEl.removeChild(logEl.firstChild);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // Initial load.
+    fetch('/api/sessions').then(r => r.json()).then(list => {
+      list.forEach(s => sessions[s.id] = s);
+      render();
+    });
+
+    // Live updates.
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+    ws.onmessage = e => {
+      const ev = JSON.parse(e.data);
+      if (ev.session) { sessions[ev.session.id] = ev.session; render(); }
+      if (ev.message) appendLog(`[${ev.event}] ${ev.session.projectName}: ${ev.message.contentText}`);
+    };
+    ws.onclose = () => appendLog('WebSocket disconnected');
+    ws.onerror = err => appendLog('WebSocket error: ' + err);
+  </script>
+</body>
+</html>
