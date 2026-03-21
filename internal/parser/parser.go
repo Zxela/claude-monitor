@@ -19,7 +19,11 @@ type rawMessage struct {
 	SessionID string          `json:"sessionId"`
 	UUID      string          `json:"uuid"`
 	// Top-level content for non-wrapped messages (e.g. tool_use lines).
-	Content json.RawMessage `json:"content"`
+	Content    json.RawMessage `json:"content"`
+	ParentUUID string          `json:"parentUuid"`
+	CWD        string          `json:"cwd"`
+	GitBranch  string          `json:"gitBranch"`
+	IsSidechain bool           `json:"isSidechain"`
 }
 
 type rawInner struct {
@@ -27,6 +31,7 @@ type rawInner struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
 	Usage   rawUsage        `json:"usage"`
+	Model   string          `json:"model"`
 }
 
 type rawUsage struct {
@@ -57,6 +62,11 @@ type ParsedMessage struct {
 	Timestamp    time.Time `json:"timestamp"`
 	SessionID    string    `json:"sessionId"`
 	UUID         string    `json:"uuid"`
+	ParentUUID   string    `json:"parentUuid,omitempty"`
+	CWD          string    `json:"cwd,omitempty"`
+	GitBranch    string    `json:"gitBranch,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	IsSidechain  bool      `json:"isSidechain,omitempty"`
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -99,6 +109,12 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		SessionID:    raw.SessionID,
 		UUID:         raw.UUID,
 	}
+
+	msg.ParentUUID = raw.ParentUUID
+	msg.CWD = raw.CWD
+	msg.GitBranch = raw.GitBranch
+	msg.Model = raw.Message.Model
+	msg.IsSidechain = raw.IsSidechain
 
 	// Prefer message.content, fall back to top-level content.
 	contentRaw := raw.Message.Content
