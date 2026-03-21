@@ -110,6 +110,19 @@ func main() {
 				} else {
 					s.ProjectName = ev.ProjectDir // use dir name as display name
 				}
+				if msg.CWD != "" {
+					s.CWD = msg.CWD
+				}
+				if msg.GitBranch != "" {
+					s.GitBranch = msg.GitBranch
+				}
+				if msg.Model != "" {
+					s.Model = msg.Model
+				}
+				if msg.ParentUUID != "" && s.ParentID == "" {
+					s.ParentID = msg.ParentUUID
+					s.IsSubagent = true
+				}
 				s.TotalCost += msg.CostUSD
 				s.InputTokens += msg.InputTokens
 				s.OutputTokens += msg.OutputTokens
@@ -121,6 +134,11 @@ func main() {
 					s.LastActive = time.Now()
 				}
 			})
+
+			// Link parent-child if subagent
+			if sess.IsSubagent && sess.ParentID != "" {
+				store.LinkChild(sess.ParentID, ev.SessionID)
+			}
 
 			eventType := "message"
 			if isNew {

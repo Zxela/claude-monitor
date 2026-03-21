@@ -24,6 +24,12 @@ type Session struct {
 	LastActive   time.Time `json:"lastActive"`
 	IsActive     bool      `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt    time.Time `json:"startedAt"`
+	ParentID     string    `json:"parentId,omitempty"`
+	Children     []string  `json:"children,omitempty"`
+	CWD          string    `json:"cwd,omitempty"`
+	GitBranch    string    `json:"gitBranch,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	IsSubagent   bool      `json:"isSubagent,omitempty"`
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
@@ -111,6 +117,20 @@ func (s *Store) All() []*Session {
 		out = append(out, &cp)
 	}
 	return out
+}
+
+// LinkChild records that childID is a subagent of parentID.
+func (s *Store) LinkChild(parentID, childID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if parent, ok := s.sessions[parentID]; ok {
+		for _, c := range parent.Children {
+			if c == childID {
+				return // already linked
+			}
+		}
+		parent.Children = append(parent.Children, childID)
+	}
 }
 
 // Get returns the session for the given ID and whether it was found.
