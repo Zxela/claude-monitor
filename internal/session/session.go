@@ -91,6 +91,9 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold
 
+	// NOTE: CacheTokens includes both cache reads and cache creation tokens.
+	// Ideally CacheHitPct would use only cache read tokens, but we only store
+	// the combined value. This is a known limitation.
 	totalInput := sess.InputTokens + sess.CacheTokens
 	if totalInput > 0 {
 		sess.CacheHitPct = float64(sess.CacheTokens) / float64(totalInput) * 100

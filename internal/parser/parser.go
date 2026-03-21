@@ -15,8 +15,6 @@ const maxContentPreview = 200
 type rawMessage struct {
 	Type      string          `json:"type"`
 	Message   rawInner        `json:"message"`
-	CostUSD   float64         `json:"costUSD"`
-	Usage     rawUsage        `json:"usage"`
 	Timestamp time.Time       `json:"timestamp"`
 	SessionID string          `json:"sessionId"`
 	UUID      string          `json:"uuid"`
@@ -27,13 +25,14 @@ type rawMessage struct {
 type rawInner struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
+	Usage   rawUsage        `json:"usage"`
 }
 
 type rawUsage struct {
-	InputTokens           int64 `json:"input_tokens"`
-	OutputTokens          int64 `json:"output_tokens"`
-	CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
-	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 }
 
 // contentBlock represents one element inside a content array.
@@ -65,13 +64,22 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		return nil, fmt.Errorf("json unmarshal: %w", err)
 	}
 
+	usage := raw.Message.Usage
+	cacheReadTokens := usage.CacheReadInputTokens
+	cacheCreationTokens := usage.CacheCreationInputTokens
+
+	cost := float64(usage.InputTokens)*3.0/1e6 +
+		float64(usage.OutputTokens)*15.0/1e6 +
+		float64(cacheReadTokens)*0.30/1e6 +
+		float64(cacheCreationTokens)*3.75/1e6
+
 	msg := &ParsedMessage{
 		Type:         raw.Type,
 		Role:         raw.Message.Role,
-		CostUSD:      raw.CostUSD,
-		InputTokens:  raw.Usage.InputTokens,
-		OutputTokens: raw.Usage.OutputTokens,
-		CacheTokens:  raw.Usage.CacheReadInputTokens + raw.Usage.CacheWriteInputTokens,
+		CostUSD:      cost,
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		CacheTokens:  cacheReadTokens + cacheCreationTokens,
 		Timestamp:    raw.Timestamp,
 		SessionID:    raw.SessionID,
 		UUID:         raw.UUID,
