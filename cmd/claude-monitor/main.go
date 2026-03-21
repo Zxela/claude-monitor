@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zxela-claude/claude-monitor/internal/docker"
 	"github.com/zxela-claude/claude-monitor/internal/hub"
 	"github.com/zxela-claude/claude-monitor/internal/parser"
 	"github.com/zxela-claude/claude-monitor/internal/replay"
@@ -50,6 +51,8 @@ func main() {
 	port := flag.Int("port", 7700, "HTTP listen port")
 	var extraPaths repeatable
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
+	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
+	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	flag.Parse()
 
 	store := session.NewStore()
@@ -67,6 +70,26 @@ func main() {
 	go h.Run()
 	events := w.Start(ctx)
 
+	if *dockerEnabled {
+		dc := docker.NewClient(*dockerSocket)
+		dockerCh, err := docker.Watch(ctx, dc, 30*time.Second)
+		if err != nil {
+			log.Printf("docker discovery: %v (continuing without Docker)", err)
+		} else {
+			go func() {
+				for ev := range dockerCh {
+					if ev.Added {
+						log.Printf("docker: watching %s (%s)", ev.HostPath, ev.ContainerName)
+						w.Add(ev.HostPath, ev.ContainerName)
+					} else {
+						log.Printf("docker: stopped watching %s (%s)", ev.HostPath, ev.ContainerName)
+						w.Remove(ev.HostPath)
+					}
+				}
+			}()
+		}
+	}
+
 	// Process watcher events: parse, update store, broadcast.
 	go func() {
 		for ev := range events {
@@ -82,7 +105,11 @@ func main() {
 			sess := store.Upsert(ev.SessionID, func(s *session.Session) {
 				s.FilePath = ev.FilePath
 				s.ProjectDir = ev.ProjectDir
-				s.ProjectName = ev.ProjectDir // use dir name as display name
+				if ev.Label != "" {
+					s.ProjectName = ev.Label + " / " + ev.ProjectDir
+				} else {
+					s.ProjectName = ev.ProjectDir // use dir name as display name
+				}
 				s.TotalCost += msg.CostUSD
 				s.InputTokens += msg.InputTokens
 				s.OutputTokens += msg.OutputTokens

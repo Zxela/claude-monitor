@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -29,6 +30,9 @@ type Event struct {
 	ProjectDir string
 	FilePath   string
 	Line       []byte
+	// Label is an optional prefix set when the path was added via Add (e.g. a
+	// Docker container name). Empty for default/extra paths.
+	Label string
 }
 
 // fileState tracks our read position within a single JSONL file.
@@ -40,7 +44,9 @@ type fileState struct {
 // Watcher monitors JSONL files and emits Events for each new line.
 type Watcher struct {
 	fsw       *fsnotify.Watcher
-	basePaths []string         // directories to scan
+	mu        sync.Mutex
+	basePaths []string              // directories to scan
+	labels    map[string]string     // basePath -> label (container name)
 	states    map[string]*fileState
 	events    chan Event
 }
@@ -59,9 +65,75 @@ func New(extraPaths []string) (*Watcher, error) {
 	return &Watcher{
 		fsw:       fsw,
 		basePaths: paths,
+		labels:    make(map[string]string),
 		states:    make(map[string]*fileState),
 		events:    make(chan Event, 512),
 	}, nil
+}
+
+// Add begins watching path at runtime, tagging sessions from that path with
+// label (e.g. a Docker container name). If path is already watched, it is a
+// no-op.
+func (w *Watcher) Add(path, label string) {
+	w.mu.Lock()
+	for _, p := range w.basePaths {
+		if p == path {
+			w.mu.Unlock()
+			return // already present
+		}
+	}
+	w.basePaths = append(w.basePaths, path)
+	if label != "" {
+		w.labels[path] = label
+	}
+	w.mu.Unlock()
+
+	// Scan outside the lock so we don't stall the run goroutine during a
+	// potentially slow directory walk. fsnotify.Watcher is goroutine-safe.
+	w.scanPathNoLock(path)
+}
+
+// Remove stops watching path and discards tracked state for all files under it.
+func (w *Watcher) Remove(path string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Remove from basePaths.
+	updated := w.basePaths[:0]
+	for _, p := range w.basePaths {
+		if p != path {
+			updated = append(updated, p)
+		}
+	}
+	w.basePaths = updated
+	delete(w.labels, path)
+
+	// Collect directories that housed files under the removed path, then delete
+	// their file states.
+	expanded := expandHome(path)
+	removedDirs := make(map[string]struct{})
+	for filePath := range w.states {
+		if strings.HasPrefix(filePath, expanded) {
+			removedDirs[filepath.Dir(filePath)] = struct{}{}
+			delete(w.states, filePath)
+		}
+	}
+
+	// Only remove a directory watch if no remaining tracked file lives there.
+	// (Two base paths can share a parent directory; removing the watch would
+	// silently kill events for the other path's files.)
+	for dir := range removedDirs {
+		stillNeeded := false
+		for remaining := range w.states {
+			if filepath.Dir(remaining) == dir {
+				stillNeeded = true
+				break
+			}
+		}
+		if !stillNeeded {
+			_ = w.fsw.Remove(dir)
+		}
+	}
 }
 
 // Start begins watching and returns a channel of Events. It runs until ctx
@@ -75,7 +147,9 @@ func (w *Watcher) run(ctx context.Context) {
 	defer close(w.events)
 
 	// Initial scan.
+	w.mu.Lock()
 	w.scanAll()
+	w.mu.Unlock()
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -91,7 +165,9 @@ func (w *Watcher) run(ctx context.Context) {
 				return
 			}
 			if ev.Has(fsnotify.Write) && strings.HasSuffix(ev.Name, ".jsonl") {
+				w.mu.Lock()
 				w.readNewLines(ev.Name)
+				w.mu.Unlock()
 			}
 
 		case err, ok := <-w.fsw.Errors:
@@ -102,33 +178,74 @@ func (w *Watcher) run(ctx context.Context) {
 
 		case <-ticker.C:
 			// Poll for newly created JSONL files.
+			w.mu.Lock()
 			w.scanAll()
+			w.mu.Unlock()
 		}
 	}
 }
 
 // scanAll walks all base paths looking for JSONL files not yet tracked.
+// Caller must hold w.mu.
 func (w *Watcher) scanAll() {
 	for _, base := range w.basePaths {
-		expanded := expandHome(base)
-		if _, err := os.Stat(expanded); os.IsNotExist(err) {
-			continue
-		}
-		if err := filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil // skip unreadable entries
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if strings.HasSuffix(path, ".jsonl") {
-				w.ensureTracked(path)
-			}
-			return nil
-		}); err != nil {
-			log.Printf("watcher walk error (%s): %v", expanded, err)
-		}
+		w.scanPath(base)
 	}
+}
+
+// scanPath walks a single base path looking for JSONL files not yet tracked.
+// Caller must hold w.mu.
+func (w *Watcher) scanPath(base string) {
+	expanded := expandHome(base)
+	if _, err := os.Stat(expanded); os.IsNotExist(err) {
+		return
+	}
+	if err := filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, ".jsonl") {
+			w.ensureTracked(path)
+		}
+		return nil
+	}); err != nil {
+		log.Printf("watcher walk error (%s): %v", expanded, err)
+	}
+}
+
+// scanPathNoLock walks base and registers any JSONL files found without holding
+// w.mu for the duration of the walk. It acquires w.mu only briefly per file so
+// the run goroutine is not stalled during a slow directory traversal.
+// Safe to call concurrently with run. Used by Add.
+func (w *Watcher) scanPathNoLock(base string) {
+	expanded := expandHome(base)
+	if _, err := os.Stat(expanded); os.IsNotExist(err) {
+		return
+	}
+	_ = filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		// fsnotify.Watcher is goroutine-safe; add the watch outside the lock.
+		if err := w.fsw.Add(dir); err != nil {
+			log.Printf("watcher add dir error (%s): %v", dir, err)
+		}
+		// Hold the lock only long enough to update the state map.
+		w.mu.Lock()
+		if _, ok := w.states[path]; !ok {
+			w.states[path] = &fileState{path: path, offset: info.Size()}
+		}
+		w.mu.Unlock()
+		return nil
+	})
 }
 
 // ensureTracked registers a JSONL file for watching if not already tracked.
@@ -209,9 +326,11 @@ func (w *Watcher) readNewLines(path string) {
 }
 
 // emit constructs and sends an Event for a single JSONL line.
+// Caller must hold w.mu.
 func (w *Watcher) emit(filePath string, line []byte) {
 	sessionID := sessionIDFromPath(filePath)
 	projectDir := projectDirFromPath(filePath)
+	label := w.labelForPath(filePath)
 
 	select {
 	case w.events <- Event{
@@ -219,10 +338,23 @@ func (w *Watcher) emit(filePath string, line []byte) {
 		ProjectDir: projectDir,
 		FilePath:   filePath,
 		Line:       append([]byte(nil), line...), // copy
+		Label:      label,
 	}:
 	default:
 		log.Printf("watcher event channel full, dropping line from %s", filePath)
 	}
+}
+
+// labelForPath returns the label for the base path that contains filePath.
+// Caller must hold w.mu.
+func (w *Watcher) labelForPath(filePath string) string {
+	for base, label := range w.labels {
+		expanded := expandHome(base)
+		if strings.HasPrefix(filePath, expanded) {
+			return label
+		}
+	}
+	return ""
 }
 
 // sessionIDFromPath derives a session ID from the JSONL filename.
