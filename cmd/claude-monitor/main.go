@@ -114,7 +114,21 @@ func main() {
 				s.InputTokens += msg.InputTokens
 				s.OutputTokens += msg.OutputTokens
 				s.CacheTokens += msg.CacheTokens
-				s.MessageCount++
+				// Only count real conversation messages (user/assistant), and
+				// deduplicate streaming chunks that share the same message ID.
+				if msg.IsConversationMessage() {
+					if s.SeenMessageIDs == nil {
+						s.SeenMessageIDs = make(map[string]bool)
+					}
+					if msg.MessageID != "" {
+						if !s.SeenMessageIDs[msg.MessageID] {
+							s.SeenMessageIDs[msg.MessageID] = true
+							s.MessageCount++
+						}
+					} else {
+						s.MessageCount++
+					}
+				}
 				if !msg.Timestamp.IsZero() {
 					s.LastActive = msg.Timestamp
 				} else {

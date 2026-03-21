@@ -20,10 +20,11 @@ type Session struct {
 	OutputTokens int64     `json:"outputTokens"`
 	CacheTokens  int64     `json:"cacheTokens"`
 	CacheHitPct  float64   `json:"cacheHitPct"`
-	MessageCount int       `json:"messageCount"`
-	LastActive   time.Time `json:"lastActive"`
-	IsActive     bool      `json:"isActive"` // true if lastActive < 30s ago
-	StartedAt    time.Time `json:"startedAt"`
+	MessageCount   int              `json:"messageCount"`
+	LastActive     time.Time        `json:"lastActive"`
+	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
+	StartedAt      time.Time        `json:"startedAt"`
+	SeenMessageIDs map[string]bool  `json:"-"` // tracks message IDs to deduplicate streaming chunks
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.

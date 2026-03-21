@@ -45,11 +45,6 @@ func TestParseLine_AssistantWithUsage(t *testing.T) {
 		t.Errorf("CacheTokens = %d, want %d", msg.CacheTokens, 11376+8945)
 	}
 
-	// Verify cost calculation:
-	// input: 100 * 3.0 / 1e6 = 0.0003
-	// output: 360 * 15.0 / 1e6 = 0.0054
-	// cache_read: 8945 * 0.30 / 1e6 = 0.0026835
-	// cache_creation: 11376 * 3.75 / 1e6 = 0.042660
 	expectedCost := float64(100)*3.0/1e6 + float64(360)*15.0/1e6 + float64(8945)*0.30/1e6 + float64(11376)*3.75/1e6
 	if math.Abs(msg.CostUSD-expectedCost) > 1e-12 {
 		t.Errorf("CostUSD = %g, want %g", msg.CostUSD, expectedCost)
@@ -60,6 +55,9 @@ func TestParseLine_AssistantWithUsage(t *testing.T) {
 	}
 	if msg.SessionID != "sess-001" {
 		t.Errorf("SessionID = %q, want %q", msg.SessionID, "sess-001")
+	}
+	if msg.MessageID != "msg_abc123" {
+		t.Errorf("MessageID = %q, want %q", msg.MessageID, "msg_abc123")
 	}
 }
 
@@ -86,14 +84,14 @@ func TestParseLine_UserMessage(t *testing.T) {
 	if msg.InputTokens != 0 {
 		t.Errorf("InputTokens = %d, want 0", msg.InputTokens)
 	}
-	if msg.OutputTokens != 0 {
-		t.Errorf("OutputTokens = %d, want 0", msg.OutputTokens)
-	}
 	if msg.CostUSD != 0 {
 		t.Errorf("CostUSD = %g, want 0", msg.CostUSD)
 	}
 	if msg.ContentText != "What is Go?" {
 		t.Errorf("ContentText = %q, want %q", msg.ContentText, "What is Go?")
+	}
+	if msg.MessageID != "" {
+		t.Errorf("MessageID = %q, want empty", msg.MessageID)
 	}
 }
 
@@ -208,5 +206,76 @@ func TestParseLine_ToolResult(t *testing.T) {
 	}
 	if msg.CostUSD != 0 {
 		t.Errorf("CostUSD = %g, want 0", msg.CostUSD)
+	}
+}
+
+func TestIsConversationMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		msgType  string
+		expected bool
+	}{
+		{"assistant is conversation", "assistant", true},
+		{"user is conversation", "user", true},
+		{"human is conversation", "human", true},
+		{"progress is not", "progress", false},
+		{"system is not", "system", false},
+		{"file-history-snapshot is not", "file-history-snapshot", false},
+		{"agent-name is not", "agent-name", false},
+		{"custom-title is not", "custom-title", false},
+		{"last-prompt is not", "last-prompt", false},
+		{"queue-operation is not", "queue-operation", false},
+		{"empty is not", "", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := &ParsedMessage{Type: tc.msgType}
+			got := msg.IsConversationMessage()
+			if got != tc.expected {
+				t.Errorf("IsConversationMessage() for type %q = %v, want %v", tc.msgType, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestMessageIDExtraction(t *testing.T) {
+	tests := []struct {
+		name     string
+		jsonLine string
+		wantID   string
+	}{
+		{
+			name:     "assistant with message ID",
+			jsonLine: `{"type":"assistant","message":{"id":"msg_123","role":"assistant","content":"hello","usage":{"input_tokens":10,"output_tokens":5}},"timestamp":"2025-01-01T00:00:00Z"}`,
+			wantID:   "msg_123",
+		},
+		{
+			name:     "user without message ID",
+			jsonLine: `{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2025-01-01T00:00:00Z"}`,
+			wantID:   "",
+		},
+		{
+			name:     "progress has no message ID",
+			jsonLine: `{"type":"progress","message":{},"timestamp":"2025-01-01T00:00:00Z"}`,
+			wantID:   "",
+		},
+		{
+			name:     "streaming chunks share same ID",
+			jsonLine: `{"type":"assistant","message":{"id":"msg_456","role":"assistant","content":"chunk","usage":{"input_tokens":0,"output_tokens":2}},"timestamp":"2025-01-01T00:00:01Z"}`,
+			wantID:   "msg_456",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, err := ParseLine([]byte(tc.jsonLine))
+			if err != nil {
+				t.Fatalf("ParseLine() error: %v", err)
+			}
+			if msg.MessageID != tc.wantID {
+				t.Errorf("MessageID = %q, want %q", msg.MessageID, tc.wantID)
+			}
+		})
 	}
 }

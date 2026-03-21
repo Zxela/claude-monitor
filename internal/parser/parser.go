@@ -23,6 +23,7 @@ type rawMessage struct {
 }
 
 type rawInner struct {
+	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
 	Usage   rawUsage        `json:"usage"`
@@ -45,6 +46,7 @@ type contentBlock struct {
 // ParsedMessage is the normalised representation of one JSONL line.
 type ParsedMessage struct {
 	Type         string    `json:"type"`
+	MessageID    string    `json:"messageId,omitempty"`
 	Role         string    `json:"role"`
 	ContentText  string    `json:"contentText"` // extracted plain-text preview
 	ToolName     string    `json:"toolName,omitempty"`
@@ -55,6 +57,18 @@ type ParsedMessage struct {
 	Timestamp    time.Time `json:"timestamp"`
 	SessionID    string    `json:"sessionId"`
 	UUID         string    `json:"uuid"`
+}
+
+// IsConversationMessage returns true if this message represents a real
+// conversation event (user or assistant turn), as opposed to metadata lines
+// like progress, system, file-history-snapshot, agent-name, etc.
+func (m *ParsedMessage) IsConversationMessage() bool {
+	switch m.Type {
+	case "assistant", "user", "human":
+		return true
+	default:
+		return false
+	}
 }
 
 // ParseLine unmarshals a single JSONL line and returns a ParsedMessage.
@@ -75,6 +89,7 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 
 	msg := &ParsedMessage{
 		Type:         raw.Type,
+		MessageID:    raw.Message.ID,
 		Role:         raw.Message.Role,
 		CostUSD:      cost,
 		InputTokens:  usage.InputTokens,
