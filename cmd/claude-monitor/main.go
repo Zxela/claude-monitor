@@ -226,11 +226,6 @@ func main() {
 				}
 			}
 
-			// Don't broadcast historical data — only used for bootstrapping stats.
-			if ev.Bootstrap {
-				continue
-			}
-
 			payload, err := json.Marshal(broadcastEvent{
 				Event:   eventType,
 				Session: sess,
