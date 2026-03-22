@@ -246,6 +246,30 @@
     background: rgba(0,255,136,0.05);
     animation: pulse 1.8s ease-in-out infinite;
   }
+  .session-status-badge {
+    font-size: 9px;
+    letter-spacing: 1px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  .status-thinking {
+    color: var(--yellow);
+    border: 1px solid rgba(255,204,0,0.3);
+    background: rgba(255,204,0,0.05);
+  }
+  .status-tool_use {
+    color: var(--blue);
+    border: 1px solid rgba(0,136,255,0.3);
+    background: rgba(0,136,255,0.05);
+  }
+  .status-waiting {
+    color: var(--green);
+    border: 1px solid rgba(0,255,136,0.3);
+    background: rgba(0,255,136,0.05);
+  }
+  .session-dot.thinking { background: var(--yellow); }
+  .session-dot.tool { background: var(--blue); }
 
   .session-stats {
     font-size: 11px;
@@ -1355,9 +1379,9 @@ function renderSessions() {
 
     const html = `
       <div class="session-row1">
-        <span class="session-dot${active ? ' active' : ''}"></span>
-        <span class="session-name">${truncate(sess.name || sess.id, 22)}</span>
-        ${active ? '<span class="session-active-badge">LIVE</span>' : ''}
+        <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
+        <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 22)}</span>
+        ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
       </div>
       <div class="session-stats">
         <span class="cost">${formatCost(sess.totalCostUSD)}</span>
@@ -1367,8 +1391,10 @@ function renderSessions() {
       </div>
       <div class="session-meta">
         <span class="sid">${(sess.id || '').slice(0, 8)}</span>
+        ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
         <span class="sep">·</span>
         <span>${formatAge(sess.lastActive)}</span>
+        ${sess.gitBranch ? `<span class="sep">·</span><span class="branch">${escHtml(sess.gitBranch)}</span>` : ''}
       </div>
       <button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
     `;
@@ -1443,8 +1469,13 @@ function getToolName(msg) {
 }
 
 function addFeedEntry(session, message) {
+  if (!message) return;
   // Filter by selected session
   if (state.selectedSession && session.id !== state.selectedSession) return;
+  // Skip empty/noise entries
+  const text = getMessageText(message);
+  if (!text && !message.toolName) return;
+  if (text === '[thinking...]') return;
 
   const feed = document.getElementById('feed');
   const empty = document.getElementById('feed-empty');
@@ -1465,7 +1496,7 @@ function addFeedEntry(session, message) {
   // Detect tool calls: backend sends toolName on assistant messages
   const toolName = message.toolName || getToolName(message);
   const isToolCall = toolName && (type === 'assistant' || type === 'tool_use');
-  const isToolResult = type === 'tool_result' || (type === 'user' && message.toolName);
+  const isToolResult = type === 'tool_result' || (type === 'user' && (message.contentText || '').startsWith('[tool_result]'));
 
   if (isToolCall) {
     content = `[${toolName}] ${truncate(getMessageText(message), 80)}`;
@@ -1707,21 +1738,23 @@ function updateSessionState(id, session, message) {
   if (!sessionState[id]) {
     sessionState[id] = { state: 'idle', toolName: null };
   }
+  // Use backend-provided status when available
+  if (session && session.status) {
+    sessionState[id].state = session.status === 'tool_use' ? 'tool' : session.status;
+  }
   if (session && session.isActive === false) {
     sessionState[id].state = 'idle';
     sessionState[id].toolName = null;
     return;
   }
+  // Track tool name locally for display
   if (message) {
     const toolName = message.toolName || getToolName(message);
     if (toolName) {
-      sessionState[id].state = 'tool';
       sessionState[id].toolName = toolName;
     } else if (message.role === 'user') {
-      sessionState[id].state = 'typing';
       sessionState[id].toolName = null;
     } else if (message.role === 'assistant') {
-      sessionState[id].state = 'thinking';
       sessionState[id].toolName = null;
     }
   }

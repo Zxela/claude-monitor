@@ -147,6 +147,18 @@ func main() {
 				} else {
 					s.LastActive = time.Now()
 				}
+				// Derive session status from message signals.
+				if msg.StopReason == "end_turn" {
+					s.Status = "waiting"
+				} else if msg.StopReason == "tool_use" {
+					s.Status = "tool_use"
+				} else if msg.ToolName != "" {
+					s.Status = "tool_use"
+				} else if msg.Role == "assistant" {
+					s.Status = "thinking"
+				} else if msg.Role == "user" {
+					s.Status = "thinking"
+				}
 			})
 
 			// Link parent-child if subagent
@@ -159,10 +171,18 @@ func main() {
 				eventType = "session_new"
 			}
 
+			// Skip broadcasting empty streaming chunks (no content, no tool)
+			// to reduce noise in the live feed. Still broadcast session_new
+			// and session updates for stats.
+			broadcastMsg := msg
+			if eventType == "message" && msg.ContentText == "" && msg.ToolName == "" && !msg.IsConversationMessage() {
+				broadcastMsg = nil
+			}
+
 			payload, err := json.Marshal(broadcastEvent{
 				Event:   eventType,
 				Session: sess,
-				Message: msg,
+				Message: broadcastMsg,
 			})
 			if err != nil {
 				log.Printf("marshal error: %v", err)

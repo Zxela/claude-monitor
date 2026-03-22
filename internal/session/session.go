@@ -24,7 +24,8 @@ type Session struct {
 	LastActive     time.Time        `json:"lastActive"`
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt      time.Time        `json:"startedAt"`
-	SeenMessageIDs map[string]bool  `json:"-"` // tracks message IDs to deduplicate streaming chunks
+	Status         string           `json:"status"` // idle, thinking, tool_use, waiting
+	SeenMessageIDs map[string]bool  `json:"-"`      // tracks message IDs to deduplicate streaming chunks
 	ParentID       string           `json:"parentId,omitempty"`
 	Children       []string         `json:"children,omitempty"`
 	CWD            string           `json:"cwd,omitempty"`
@@ -97,6 +98,9 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold
+	if !sess.IsActive {
+		sess.Status = "idle"
+	}
 
 	// NOTE: CacheTokens includes both cache reads and cache creation tokens.
 	// Ideally CacheHitPct would use only cache read tokens, but we only store

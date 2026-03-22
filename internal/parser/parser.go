@@ -30,8 +30,9 @@ type rawInner struct {
 	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
-	Usage   rawUsage        `json:"usage"`
-	Model   string          `json:"model"`
+	Usage      rawUsage        `json:"usage"`
+	Model      string          `json:"model"`
+	StopReason *string         `json:"stop_reason"`
 }
 
 type rawUsage struct {
@@ -67,6 +68,7 @@ type ParsedMessage struct {
 	GitBranch    string    `json:"gitBranch,omitempty"`
 	Model        string    `json:"model,omitempty"`
 	IsSidechain  bool      `json:"isSidechain,omitempty"`
+	StopReason   string    `json:"stopReason,omitempty"`
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -115,6 +117,9 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	msg.GitBranch = raw.GitBranch
 	msg.Model = raw.Message.Model
 	msg.IsSidechain = raw.IsSidechain
+	if raw.Message.StopReason != nil {
+		msg.StopReason = *raw.Message.StopReason
+	}
 
 	// Prefer message.content, fall back to top-level content.
 	contentRaw := raw.Message.Content
@@ -146,20 +151,37 @@ func extractContent(raw json.RawMessage) (string, string) {
 		return "", ""
 	}
 
+	var firstText string
+	var toolName string
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if b.Text != "" {
-				return truncate(b.Text, maxContentPreview), ""
+			if b.Text != "" && firstText == "" {
+				firstText = truncate(b.Text, maxContentPreview)
+			}
+		case "thinking":
+			if firstText == "" {
+				firstText = "[thinking...]"
 			}
 		case "tool_use":
-			return fmt.Sprintf("[tool: %s]", b.Name), b.Name
+			toolName = b.Name
+			if firstText == "" {
+				firstText = fmt.Sprintf("[tool: %s]", b.Name)
+			}
 		case "tool_result":
-			return "[tool_result]", ""
+			if firstText == "" {
+				firstText = "[tool_result]"
+			}
 		}
 	}
-
-	return "", ""
+	// Prefer text over tool name in preview, but always return tool name.
+	if toolName != "" {
+		if firstText == "" {
+			firstText = fmt.Sprintf("[tool: %s]", toolName)
+		}
+		return firstText, toolName
+	}
+	return firstText, ""
 }
 
 // truncate returns at most n runes from s (valid UTF-8 boundary aware).
