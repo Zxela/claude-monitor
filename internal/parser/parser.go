@@ -161,7 +161,12 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	if raw.Type == "progress" && raw.Data.Type == "hook_progress" {
 		msg.HookEvent = raw.Data.HookEvent
 		msg.HookName = raw.Data.HookName
-		msg.ContentText = fmt.Sprintf("[hook: %s] %s", raw.Data.HookEvent, raw.Data.HookName)
+		// Extract tool name from hookName (e.g. "PostToolUse:Read" → "Read")
+		hookTool := raw.Data.HookName
+		if i := len(raw.Data.HookEvent); i < len(raw.Data.HookName) && raw.Data.HookName[i] == ':' {
+			hookTool = raw.Data.HookName[i+1:]
+		}
+		msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
 	}
 
 	// Skip content extraction for hook messages (contentText already set above).
