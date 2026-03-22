@@ -26,5 +26,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr merge --repo ${{ github.repository }} --squash \
+          gh pr merge --repo ${{ github.repository }} --merge \
             ${{ fromJSON(steps.release.outputs.prs)[0].number }}
