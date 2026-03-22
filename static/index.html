@@ -460,6 +460,34 @@
     white-space: nowrap;
     font-size: 12px;
   }
+  .fe-expand {
+    display: inline-block;
+    cursor: pointer;
+    color: var(--cyan);
+    font-size: 10px;
+    font-weight: bold;
+    margin-left: 6px;
+    padding: 0 4px;
+    border: 1px solid rgba(0,204,255,0.3);
+    border-radius: 2px;
+    line-height: 14px;
+    vertical-align: middle;
+    user-select: none;
+  }
+  .fe-expand:hover { background: rgba(0,204,255,0.1); }
+  .fe-full-content {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 6px 8px;
+    margin: 4px 0 2px 0;
+    max-height: 300px;
+    overflow-y: auto;
+  }
 
   .fe-content.dim  { color: var(--text-dim); }
   .fe-content.tool { color: var(--yellow); }
@@ -1582,6 +1610,10 @@ function toggleSubagents(parentId) {
   } else {
     state.expandedParents.add(parentId);
   }
+  // Also select the parent to show its feed
+  state.selectedSession = parentId;
+  updateFeedFilter();
+  loadRecentMessages(parentId);
   renderSessions();
 }
 
@@ -1617,7 +1649,7 @@ async function loadRecentMessages(sessionId) {
       addFeedEntry(sess, msg);
     });
   } catch (e) {
-    // silently fail — live feed will still work
+    console.error('loadRecentMessages failed:', e);
   }
 }
 
@@ -1711,12 +1743,23 @@ function addFeedEntry(session, message) {
   }
 
   const displayType = isToolCall ? 'tool_use' : isToolResult ? 'tool_result' : type;
+  const hasFullContent = message.fullContent && message.fullContent.length > content.length;
+
   const el = document.createElement('div');
   el.className = `feed-entry type-${displayType}`;
+
+  let expandHtml = '';
+  if (hasFullContent) {
+    const fullId = 'full-' + Math.random().toString(36).slice(2, 8);
+    expandHtml =
+      `<span class="fe-expand" onclick="event.stopPropagation(); toggleExpand('${fullId}')">+</span>` +
+      `<pre class="fe-full-content" id="${fullId}" style="display:none">${escHtml(message.fullContent)}</pre>`;
+  }
+
   el.innerHTML =
     `<span class="fe-time">${formatTime(ts)}</span>` +
     `<span class="fe-type ${displayType}">[${displayType}]</span>` +
-    `<span class="fe-content ${contentClass}">${escHtml(content)}</span>` +
+    `<span class="fe-content ${contentClass}">${escHtml(content)}${expandHtml}</span>` +
     `<span class="fe-sid">${escHtml(sid)}</span>`;
 
   if (isToolCall) {
@@ -1735,6 +1778,19 @@ function addFeedEntry(session, message) {
 
   if (state.autoScroll) {
     feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+function toggleExpand(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const btn = el.previousElementSibling;
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    if (btn) btn.textContent = '−';
+  } else {
+    el.style.display = 'none';
+    if (btn) btn.textContent = '+';
   }
 }
 

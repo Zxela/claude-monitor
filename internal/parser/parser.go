@@ -55,7 +55,8 @@ type ParsedMessage struct {
 	Type         string    `json:"type"`
 	MessageID    string    `json:"messageId,omitempty"`
 	Role         string    `json:"role"`
-	ContentText  string    `json:"contentText"` // extracted plain-text preview
+	ContentText  string    `json:"contentText"`            // extracted plain-text preview (truncated)
+	FullContent  string    `json:"fullContent,omitempty"`  // full untruncated content (for expand)
 	ToolName     string    `json:"toolName,omitempty"`
 	CostUSD      float64   `json:"costUSD"`
 	InputTokens  int64     `json:"inputTokens"`
@@ -151,37 +152,45 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		contentRaw = raw.Content
 	}
 
-	msg.ContentText, msg.ToolName = extractContent(contentRaw)
+	msg.ContentText, msg.ToolName, msg.FullContent = extractContent(contentRaw)
 
 	return msg, nil
 }
 
 // extractContent attempts to decode content as a string first, then as a
-// content-block array. Returns (textPreview, toolName).
-func extractContent(raw json.RawMessage) (string, string) {
+// content-block array. Returns (textPreview, toolName, fullText).
+func extractContent(raw json.RawMessage) (string, string, string) {
 	if len(raw) == 0 {
-		return "", ""
+		return "", "", ""
 	}
 
 	// Try plain string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return truncate(s, maxContentPreview), ""
+		full := s
+		if len([]rune(full)) <= maxContentPreview {
+			return full, "", "" // no need for separate full content
+		}
+		return truncate(s, maxContentPreview), "", full
 	}
 
 	// Try array of content blocks.
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", ""
+		return "", "", ""
 	}
 
 	var firstText string
+	var fullText string
 	var toolName string
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
 			if b.Text != "" && firstText == "" {
 				firstText = truncate(b.Text, maxContentPreview)
+				if len([]rune(b.Text)) > maxContentPreview {
+					fullText = b.Text
+				}
 			}
 		case "thinking":
 			if firstText == "" {
@@ -196,20 +205,22 @@ func extractContent(raw json.RawMessage) (string, string) {
 			if firstText == "" {
 				if b.Content != "" {
 					firstText = truncate(b.Content, maxContentPreview)
+					if len([]rune(b.Content)) > maxContentPreview {
+						fullText = b.Content
+					}
 				} else {
 					firstText = "[tool_result]"
 				}
 			}
 		}
 	}
-	// Prefer text over tool name in preview, but always return tool name.
 	if toolName != "" {
 		if firstText == "" {
 			firstText = fmt.Sprintf("[tool: %s]", toolName)
 		}
-		return firstText, toolName
+		return firstText, toolName, fullText
 	}
-	return firstText, ""
+	return firstText, "", fullText
 }
 
 // truncate returns at most n runes from s (valid UTF-8 boundary aware).
