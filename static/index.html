@@ -2364,8 +2364,8 @@ function addFeedEntry(session, message) {
       `<pre class="fe-full-content" id="${fullId}" style="display:none">${escHtml(message.fullContent)}</pre>`;
   }
 
-  // Show result label for inherited types (e.g. "agent" result instead of "tool_result")
-  const typeLabel = isToolResult ? displayType + '_result' : displayType;
+  // Show result label for inherited types (e.g. "agent_result" instead of generic "tool_result")
+  const typeLabel = isToolResult && displayType !== 'tool_result' ? displayType + '_result' : displayType;
   el.innerHTML =
     `<span class="fe-time">${formatTime(ts)}</span>` +
     `<span class="fe-type ${displayType}">[${typeLabel}]</span>` +
@@ -2584,7 +2584,9 @@ function escHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/`/g, '&#96;')
+    .replace(/\$\{/g, '&#36;{');
 }
 
 // ── Scroll management ──────────────────────────────────────────
