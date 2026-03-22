@@ -1953,8 +1953,31 @@ function isActive(session) {
   return (Date.now() - new Date(session.lastActive).getTime()) < 30_000;
 }
 
-// ── Top bar ────────────────────────────────────────────────────
+// ── Debounced rendering ─────────────────────────────────────────
+// Coalesce rapid-fire WS messages into one render per animation frame.
+let _renderRAF = 0;
+let _topBarRAF = 0;
+
+function renderSessions() {
+  if (!_renderRAF) {
+    _renderRAF = requestAnimationFrame(() => {
+      _renderRAF = 0;
+      _renderSessionsNow();
+    });
+  }
+}
+
 function updateTopBar() {
+  if (!_topBarRAF) {
+    _topBarRAF = requestAnimationFrame(() => {
+      _topBarRAF = 0;
+      _updateTopBarNow();
+    });
+  }
+}
+
+// ── Top bar ────────────────────────────────────────────────────
+function _updateTopBarNow() {
   const sessions = Object.values(state.sessions);
   const activeSessions = sessions.filter(isActive);
 
@@ -2024,7 +2047,7 @@ function updateFilterCounts() {
 }
 
 // ── Sessions list ──────────────────────────────────────────────
-function renderSessions() {
+function _renderSessionsNow() {
   const list = document.getElementById('sessions-list');
   const noSess = document.getElementById('no-sessions');
   const allSessions = Object.values(state.sessions)
