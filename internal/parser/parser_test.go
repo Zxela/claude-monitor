@@ -203,8 +203,8 @@ func TestParseLine_ToolResult(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if msg.ContentText != "[tool_result]" {
-		t.Errorf("ContentText = %q, want %q", msg.ContentText, "[tool_result]")
+	if msg.ContentText != "file contents here" {
+		t.Errorf("ContentText = %q, want %q", msg.ContentText, "file contents here")
 	}
 	if msg.CostUSD != 0 {
 		t.Errorf("CostUSD = %g, want 0", msg.CostUSD)

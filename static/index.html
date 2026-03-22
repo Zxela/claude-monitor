@@ -1648,7 +1648,7 @@ function addFeedEntry(session, message) {
   // Detect tool calls: backend sends toolName on assistant messages
   const toolName = message.toolName || getToolName(message);
   const isToolCall = toolName && (type === 'assistant' || type === 'tool_use');
-  const isToolResult = type === 'tool_result' || (type === 'user' && (message.contentText || '').startsWith('[tool_result]'));
+  const isToolResult = type === 'tool_result' || (type === 'user' && state.lastToolEntry);
 
   if (isToolCall) {
     content = `[${toolName}] ${truncate(getMessageText(message), 80)}`;

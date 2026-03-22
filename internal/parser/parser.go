@@ -44,9 +44,10 @@ type rawUsage struct {
 
 // contentBlock represents one element inside a content array.
 type contentBlock struct {
-	Type  string `json:"type"`
-	Text  string `json:"text,omitempty"`
-	Name  string `json:"name,omitempty"` // for tool_use blocks
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	Name    string `json:"name,omitempty"`    // for tool_use blocks
+	Content string `json:"content,omitempty"` // for tool_result blocks (string form)
 }
 
 // ParsedMessage is the normalised representation of one JSONL line.
@@ -193,7 +194,11 @@ func extractContent(raw json.RawMessage) (string, string) {
 			}
 		case "tool_result":
 			if firstText == "" {
-				firstText = "[tool_result]"
+				if b.Content != "" {
+					firstText = truncate(b.Content, maxContentPreview)
+				} else {
+					firstText = "[tool_result]"
+				}
 			}
 		}
 	}
