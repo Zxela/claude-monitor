@@ -404,6 +404,74 @@ func TestParseLine_RealWorldSample(t *testing.T) {
 	}
 }
 
+func TestComputeCost_ByModel(t *testing.T) {
+	t.Parallel()
+	usage := rawUsage{
+		InputTokens:              1000000,
+		OutputTokens:             1000000,
+		CacheReadInputTokens:     1000000,
+		CacheCreationInputTokens: 1000000,
+	}
+
+	tests := []struct {
+		name     string
+		model    string
+		wantCost float64
+	}{
+		{"opus", "claude-opus-4-6", 15.0 + 75.0 + 1.50 + 18.75},
+		{"sonnet", "claude-sonnet-4-6", 3.0 + 15.0 + 0.30 + 3.75},
+		{"haiku", "claude-haiku-4-5", 0.80 + 4.0 + 0.08 + 1.0},
+		{"unknown falls back to sonnet", "claude-unknown-99", 3.0 + 15.0 + 0.30 + 3.75},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := computeCost(tc.model, usage)
+			if math.Abs(got-tc.wantCost) > 1e-9 {
+				t.Errorf("computeCost(%q) = %g, want %g", tc.model, got, tc.wantCost)
+			}
+		})
+	}
+}
+
+func TestParseLine_OpusPricing(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{
+		"type": "assistant",
+		"message": {
+			"id": "msg_opus1",
+			"role": "assistant",
+			"model": "claude-opus-4-6",
+			"content": [{"type": "text", "text": "Opus response"}],
+			"usage": {
+				"input_tokens": 100,
+				"output_tokens": 200,
+				"cache_creation_input_tokens": 300,
+				"cache_read_input_tokens": 400
+			}
+		},
+		"timestamp": "2026-03-21T12:00:00Z",
+		"sessionId": "sess-opus",
+		"uuid": "uuid-opus"
+	}`)
+
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedCost := float64(100)*15.0/1e6 +
+		float64(200)*75.0/1e6 +
+		float64(400)*1.50/1e6 +
+		float64(300)*18.75/1e6
+	if math.Abs(msg.CostUSD-expectedCost) > 1e-12 {
+		t.Errorf("CostUSD = %g, want %g (should use Opus pricing)", msg.CostUSD, expectedCost)
+	}
+	if msg.Model != "claude-opus-4-6" {
+		t.Errorf("Model = %q, want %q", msg.Model, "claude-opus-4-6")
+	}
+}
+
 func TestParseLine_TopLevelContentFallback(t *testing.T) {
 	t.Parallel()
 	line := []byte(`{"type":"tool_result","content":"tool output here","sessionId":"sess-9","uuid":"uuid-9","timestamp":"2024-01-01T00:00:00Z"}`)
