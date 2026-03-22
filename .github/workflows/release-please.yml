@@ -19,3 +19,12 @@ jobs:
         id: release
         with:
           release-type: go
+
+      # Auto-merge the release PR so releases ship without manual intervention
+      - name: Auto-merge release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr merge --repo ${{ github.repository }} --squash \
+            ${{ fromJSON(steps.release.outputs.prs)[0].number }}
