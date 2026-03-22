@@ -1,0 +1,15 @@
+# Binaries
+claude-monitor
+claude-monitor.exe
+/dist/
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

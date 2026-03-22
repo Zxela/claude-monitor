@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run tests
+        run: go test ./... -count=1
+
+      - name: Check HTML sync
+        run: diff static/index.html cmd/claude-monitor/static/index.html
+
+      - name: Build binaries
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-linux-amd64 ./cmd/claude-monitor
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-linux-arm64 ./cmd/claude-monitor
+          # macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-darwin-amd64 ./cmd/claude-monitor
+          # macOS arm64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-darwin-arm64 ./cmd/claude-monitor
+
+          # Checksums
+          cd dist && sha256sum * > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/claude-monitor-linux-amd64
+            dist/claude-monitor-linux-arm64
+            dist/claude-monitor-darwin-amd64
+            dist/claude-monitor-darwin-arm64
+            dist/checksums.txt
