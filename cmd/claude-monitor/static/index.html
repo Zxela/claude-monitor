@@ -235,6 +235,7 @@
   .session-card-content {
     flex: 1;
     min-width: 0;
+    position: relative;
   }
 
   .session-card::before {
@@ -683,6 +684,74 @@
     color: var(--blue);
   }
 
+  .timeline-btn {
+    background: none;
+    border: 1px solid rgba(0,204,255,0.2);
+    color: var(--cyan);
+    font-family: var(--font);
+    font-size: 10px;
+    padding: 2px 6px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    margin-top: 4px;
+    margin-right: 4px;
+    border-radius: 2px;
+  }
+  .timeline-btn:hover {
+    background: rgba(0,204,255,0.1);
+  }
+
+  #timeline-panel {
+    flex: 0 0 120px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--bg2);
+  }
+  #timeline-content {
+    display: flex;
+    align-items: stretch;
+    height: 80px;
+    padding: 8px;
+    gap: 1px;
+    min-width: 100%;
+  }
+  .tl-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 4px;
+    border-radius: 2px;
+    font-size: 8px;
+    color: rgba(255,255,255,0.6);
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    position: relative;
+  }
+  .tl-segment:hover { opacity: 0.8; }
+  .tl-segment.type-user        { background: rgba(68,136,255,0.5); }
+  .tl-segment.type-assistant   { background: rgba(0,255,136,0.3); }
+  .tl-segment.type-tool_use    { background: rgba(255,204,0,0.5); }
+  .tl-segment.type-tool_result { background: rgba(0,204,255,0.4); }
+  .tl-segment.type-hook        { background: rgba(204,136,255,0.3); }
+  .tl-segment.type-system      { background: rgba(102,102,128,0.3); }
+
+  .tl-tooltip {
+    position: fixed;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text);
+    pointer-events: none;
+    z-index: 100;
+    max-width: 300px;
+    font-family: var(--font);
+  }
+
   /* ── List View wrapper ───────────────────────────────────────── */
   #list-view {
     flex: 1 1 auto;
@@ -974,6 +1043,15 @@
         <div id="sessions-list">
           <div id="no-sessions">AWAITING SESSIONS...</div>
         </div>
+      </div>
+
+      <!-- Timeline Panel -->
+      <div id="timeline-panel" style="display:none;">
+        <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>TIMELINE</span>
+          <button onclick="closeTimeline()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-family:var(--font);">✕</button>
+        </div>
+        <div id="timeline-content"></div>
       </div>
 
       <!-- Feed Panel -->
@@ -1698,7 +1776,7 @@ function renderSessions() {
           <span>${formatAge(sess.lastActive)}</span>
           ${sess.startedAt ? `<span class="sep">·</span><span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
         </div>
-        <button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
+        <button class="timeline-btn" onclick="event.stopPropagation(); openTimeline('${escHtml(sess.id)}')" title="Timeline">◑ TIMELINE</button><button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
       </div>
     `;
 
@@ -1712,8 +1790,8 @@ function renderSessions() {
     if (hasChildren) {
       card.style.cursor = 'pointer';
       card.addEventListener('click', (e) => {
-        // Let replay button handle its own click
-        if (e.target.closest('.replay-btn')) return;
+        // Let replay/timeline buttons handle their own click
+        if (e.target.closest('.replay-btn') || e.target.closest('.timeline-btn')) return;
         toggleSubagents(sess.id);
       });
     } else {
@@ -2064,6 +2142,96 @@ document.getElementById('feed').addEventListener('scroll', function() {
     document.getElementById('scroll-lock-btn').classList.add('visible');
   }
 });
+
+// ── Timeline Waterfall ─────────────────────────────────────────
+
+async function openTimeline(sessionId) {
+  try {
+    const resp = await fetch(`/api/sessions/${sessionId}/replay`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const events = data.events || [];
+    if (events.length < 2) return;
+
+    const panel = document.getElementById('timeline-panel');
+    const content = document.getElementById('timeline-content');
+    panel.style.display = '';
+    content.innerHTML = '';
+
+    // Compute durations between consecutive events
+    const segments = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
+      const nextTs = i < events.length - 1 ? new Date(events[i+1].timestamp).getTime() : null;
+      const thisTs = new Date(ev.timestamp).getTime();
+      const duration = nextTs ? Math.max(nextTs - thisTs, 100) : 1000;
+
+      const type = ev.role || ev.type || 'system';
+      const toolName = ev.toolName || '';
+      const isToolCall = toolName && type === 'assistant';
+      const displayType = isToolCall ? 'tool_use' : (ev.hookEvent ? 'hook' : type);
+
+      segments.push({ ...ev, duration, displayType, toolName });
+    }
+
+    // Total duration for proportional widths
+    const totalDuration = segments.reduce((a, s) => a + s.duration, 0);
+
+    // Remove tooltip if exists
+    const existingTooltip = document.querySelector('.tl-tooltip');
+    if (existingTooltip) existingTooltip.remove();
+
+    segments.forEach((seg, idx) => {
+      const pct = Math.max((seg.duration / totalDuration) * 100, 0.3);
+      const el = document.createElement('div');
+      el.className = `tl-segment type-${seg.displayType}`;
+      el.style.flex = `${pct} 0 0`;
+
+      // Show label on wider segments
+      if (pct > 3) {
+        const label = seg.toolName || seg.displayType;
+        el.textContent = label.length > 8 ? label.slice(0, 7) + '\u2026' : label;
+      }
+
+      // Hover tooltip
+      el.addEventListener('mouseenter', (e) => {
+        let tooltip = document.querySelector('.tl-tooltip');
+        if (!tooltip) {
+          tooltip = document.createElement('div');
+          tooltip.className = 'tl-tooltip';
+          document.body.appendChild(tooltip);
+        }
+        const durSec = (seg.duration / 1000).toFixed(1);
+        const preview = (seg.contentText || '').slice(0, 80);
+        tooltip.innerHTML = `<strong>[${seg.displayType}]</strong> ${seg.toolName ? seg.toolName + ' \u2014 ' : ''}${durSec}s<br><span style="color:var(--text-dim)">${escHtml(preview)}</span>`;
+        tooltip.style.display = '';
+        tooltip.style.left = e.pageX + 10 + 'px';
+        tooltip.style.top = e.pageY - 40 + 'px';
+      });
+      el.addEventListener('mousemove', (e) => {
+        const tooltip = document.querySelector('.tl-tooltip');
+        if (tooltip) {
+          tooltip.style.left = e.pageX + 10 + 'px';
+          tooltip.style.top = e.pageY - 40 + 'px';
+        }
+      });
+      el.addEventListener('mouseleave', () => {
+        const tooltip = document.querySelector('.tl-tooltip');
+        if (tooltip) tooltip.style.display = 'none';
+      });
+
+      content.appendChild(el);
+    });
+  } catch (e) {
+    console.error('openTimeline failed:', e);
+  }
+}
+
+function closeTimeline() {
+  document.getElementById('timeline-panel').style.display = 'none';
+  const tooltip = document.querySelector('.tl-tooltip');
+  if (tooltip) tooltip.remove();
+}
 
 // ── Replay Player ──────────────────────────────────────────────
 
