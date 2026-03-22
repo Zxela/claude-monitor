@@ -86,8 +86,8 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	sess, ok := s.sessions[sessionID]
 	if !ok {
 		sess = &Session{
-			ID:        sessionID,
-			StartedAt: time.Now(),
+			ID: sessionID,
+			// StartedAt will be set from first message timestamp
 		}
 		s.sessions[sessionID] = sess
 	}

@@ -139,7 +139,10 @@ func main() {
 			}
 			if !msg.Timestamp.IsZero() {
 				s.LastActive = msg.Timestamp
-			} else {
+				if s.StartedAt.IsZero() || msg.Timestamp.Before(s.StartedAt) {
+					s.StartedAt = msg.Timestamp
+				}
+			} else if !ev.Bootstrap {
 				s.LastActive = time.Now()
 			}
 			if msg.StopReason == "end_turn" {

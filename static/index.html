@@ -1375,6 +1375,20 @@ function formatAge(ts) {
   return Math.floor(h / 24) + 'd ago';
 }
 
+function formatDuration(startTs, endTs) {
+  if (!startTs) return '';
+  const start = new Date(startTs).getTime();
+  const end = endTs ? new Date(endTs).getTime() : Date.now();
+  const s = Math.max(0, Math.floor((end - start) / 1000));
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  if (h < 24) return h + 'h' + (rm ? rm + 'm' : '');
+  return Math.floor(h / 24) + 'd' + (h % 24 ? (h % 24) + 'h' : '');
+}
+
 function formatTime(ts) {
   const d = ts ? new Date(ts) : new Date();
   return d.toTimeString().slice(0, 8);
@@ -1547,6 +1561,7 @@ function renderSessions() {
         ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
         <span class="sep">·</span>
         <span>${formatAge(sess.lastActive)}</span>
+        ${sess.startedAt ? `<span class="sep">·</span><span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
       </div>
       <button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
     `;
