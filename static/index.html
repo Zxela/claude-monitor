@@ -2487,7 +2487,17 @@ async function openTimeline(sessionId) {
     const resp = await fetch(`/api/sessions/${sessionId}/replay`);
     if (!resp.ok) return;
     const data = await resp.json();
-    const events = data.events || [];
+    const rawEvents = data.events || [];
+    if (rawEvents.length < 2) return;
+
+    // Filter to meaningful events only — skip progress, system, file-history, etc.
+    const events = rawEvents.filter(ev => {
+      const role = ev.role || '';
+      const type = ev.type || '';
+      if (role === 'user' || role === 'assistant') return true;
+      if (type === 'tool_use' || type === 'tool_result') return true;
+      return false;
+    });
     if (events.length < 2) return;
 
     const panel = document.getElementById('timeline-panel');
@@ -2495,18 +2505,20 @@ async function openTimeline(sessionId) {
     panel.style.display = '';
     content.innerHTML = '';
 
-    // Compute durations between consecutive events
+    // Compute durations between consecutive events, clamping to sane values
     const segments = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i];
-      const nextTs = i < events.length - 1 ? new Date(events[i+1].timestamp).getTime() : null;
       const thisTs = new Date(ev.timestamp).getTime();
-      const duration = nextTs ? Math.max(nextTs - thisTs, 100) : 1000;
+      const nextTs = i < events.length - 1 ? new Date(events[i+1].timestamp).getTime() : null;
+      let duration = nextTs ? (nextTs - thisTs) : 1000;
+      // Clamp: min 100ms, max 60s (avoid huge gaps from idle time)
+      duration = Math.max(100, Math.min(60000, duration));
 
       const type = ev.role || ev.type || 'system';
       const toolName = ev.toolName || '';
       const isToolCall = toolName && type === 'assistant';
-      const displayType = isToolCall ? 'tool_use' : (ev.hookEvent ? 'hook' : type);
+      const displayType = isToolCall ? 'tool_use' : type;
 
       segments.push({ ...ev, duration, displayType, toolName });
     }
