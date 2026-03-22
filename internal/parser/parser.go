@@ -23,7 +23,15 @@ type rawMessage struct {
 	ParentUUID string          `json:"parentUuid"`
 	CWD        string          `json:"cwd"`
 	GitBranch  string          `json:"gitBranch"`
-	IsSidechain bool           `json:"isSidechain"`
+	IsSidechain bool            `json:"isSidechain"`
+	Data        rawProgressData `json:"data"`
+}
+
+type rawProgressData struct {
+	Type      string `json:"type"`
+	HookEvent string `json:"hookEvent"`
+	HookName  string `json:"hookName"`
+	Command   string `json:"command"`
 }
 
 type rawInner struct {
@@ -44,10 +52,11 @@ type rawUsage struct {
 
 // contentBlock represents one element inside a content array.
 type contentBlock struct {
-	Type    string `json:"type"`
-	Text    string `json:"text,omitempty"`
-	Name    string `json:"name,omitempty"`    // for tool_use blocks
-	Content string `json:"content,omitempty"` // for tool_result blocks (string form)
+	Type    string          `json:"type"`
+	Text    string          `json:"text,omitempty"`
+	Name    string          `json:"name,omitempty"`    // for tool_use blocks
+	Content string          `json:"content,omitempty"` // for tool_result blocks (string form)
+	Input   json.RawMessage `json:"input,omitempty"`   // for tool_use blocks (raw input params)
 }
 
 // ParsedMessage is the normalised representation of one JSONL line.
@@ -71,6 +80,9 @@ type ParsedMessage struct {
 	Model        string    `json:"model,omitempty"`
 	IsSidechain  bool      `json:"isSidechain,omitempty"`
 	StopReason   string    `json:"stopReason,omitempty"`
+	HookEvent    string    `json:"hookEvent,omitempty"`
+	HookName     string    `json:"hookName,omitempty"`
+	ToolDetail   string    `json:"toolDetail,omitempty"` // extra context for Agent/Skill calls
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -145,6 +157,12 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	if raw.Message.StopReason != nil {
 		msg.StopReason = *raw.Message.StopReason
 	}
+	// Extract hook data from progress messages.
+	if raw.Type == "progress" && raw.Data.Type == "hook_progress" {
+		msg.HookEvent = raw.Data.HookEvent
+		msg.HookName = raw.Data.HookName
+		msg.ContentText = fmt.Sprintf("[hook: %s] %s", raw.Data.HookEvent, raw.Data.HookName)
+	}
 
 	// Prefer message.content, fall back to top-level content.
 	contentRaw := raw.Message.Content
@@ -152,37 +170,37 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		contentRaw = raw.Content
 	}
 
-	msg.ContentText, msg.ToolName, msg.FullContent = extractContent(contentRaw)
+	msg.ContentText, msg.ToolName, msg.FullContent, msg.ToolDetail = extractContent(contentRaw)
 
 	return msg, nil
 }
 
 // extractContent attempts to decode content as a string first, then as a
-// content-block array. Returns (textPreview, toolName, fullText).
-func extractContent(raw json.RawMessage) (string, string, string) {
+// content-block array. Returns (textPreview, toolName, fullText, toolDetail).
+func extractContent(raw json.RawMessage) (string, string, string, string) {
 	if len(raw) == 0 {
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	// Try plain string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		full := s
-		if len([]rune(full)) <= maxContentPreview {
-			return full, "", "" // no need for separate full content
+		if len([]rune(s)) <= maxContentPreview {
+			return s, "", "", ""
 		}
-		return truncate(s, maxContentPreview), "", full
+		return truncate(s, maxContentPreview), "", s, ""
 	}
 
 	// Try array of content blocks.
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	var firstText string
 	var fullText string
 	var toolName string
+	var toolDetail string
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -201,6 +219,37 @@ func extractContent(raw json.RawMessage) (string, string, string) {
 			if firstText == "" {
 				firstText = fmt.Sprintf("[tool: %s]", b.Name)
 			}
+			// Extract detail for Agent and Skill calls.
+			if (b.Name == "Agent" || b.Name == "Skill") && len(b.Input) > 0 {
+				var inp map[string]interface{}
+				if json.Unmarshal(b.Input, &inp) == nil {
+					if b.Name == "Agent" {
+						desc, _ := inp["description"].(string)
+						st, _ := inp["subagent_type"].(string)
+						name, _ := inp["name"].(string)
+						parts := []string{}
+						if st != "" {
+							parts = append(parts, st)
+						}
+						if name != "" {
+							parts = append(parts, name)
+						}
+						if desc != "" {
+							parts = append(parts, desc)
+						}
+						if len(parts) > 0 {
+							toolDetail = fmt.Sprintf("%s", joinParts(parts))
+							firstText = fmt.Sprintf("[agent: %s]", toolDetail)
+						}
+					} else if b.Name == "Skill" {
+						skill, _ := inp["skill"].(string)
+						if skill != "" {
+							toolDetail = skill
+							firstText = fmt.Sprintf("[skill: %s]", skill)
+						}
+					}
+				}
+			}
 		case "tool_result":
 			if firstText == "" {
 				if b.Content != "" {
@@ -218,9 +267,20 @@ func extractContent(raw json.RawMessage) (string, string, string) {
 		if firstText == "" {
 			firstText = fmt.Sprintf("[tool: %s]", toolName)
 		}
-		return firstText, toolName, fullText
+		return firstText, toolName, fullText, toolDetail
 	}
-	return firstText, "", fullText
+	return firstText, "", fullText, toolDetail
+}
+
+func joinParts(parts []string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += " / "
+		}
+		result += p
+	}
+	return result
 }
 
 // truncate returns at most n runes from s (valid UTF-8 boundary aware).

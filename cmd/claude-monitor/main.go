@@ -284,13 +284,15 @@ func main() {
 		// Filter to meaningful messages only
 		var filtered []replay.Event
 		for _, ev := range events {
-			if ev.ContentText == "" && ev.ToolName == "" {
+			if ev.ContentText == "" && ev.ToolName == "" && ev.HookEvent == "" {
 				continue
 			}
 			if ev.ContentText == "[thinking...]" {
 				continue
 			}
-			if !ev.IsConversationMessage() {
+			// Include conversation messages, hooks, and agent/skill calls
+			isHook := ev.HookEvent != ""
+			if !ev.IsConversationMessage() && !isHook {
 				continue
 			}
 			filtered = append(filtered, ev)

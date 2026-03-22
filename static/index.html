@@ -424,6 +424,9 @@
   .fe-type.tool_result { color: var(--cyan); }
   .fe-type.error       { color: var(--red); }
   .fe-type.system      { color: var(--text-dim); }
+  .fe-type.hook        { color: var(--purple); }
+  .feed-entry.type-hook { border-left-color: rgba(204,136,255,0.3); }
+  .fe-content.hook     { color: var(--purple); opacity: 0.7; font-size: 11px; }
 
   .feed-entry.type-user        { border-left-color: rgba(68,136,255,0.3); }
   .feed-entry.type-assistant   { border-left-color: rgba(0,255,136,0.25); }
@@ -1720,13 +1723,26 @@ function addFeedEntry(session, message) {
   let content = '';
   let contentClass = '';
 
+  // Detect hooks
+  const isHook = !!message.hookEvent;
+
   // Detect tool calls: backend sends toolName on assistant messages
   const toolName = message.toolName || getToolName(message);
-  const isToolCall = toolName && (type === 'assistant' || type === 'tool_use');
-  const isToolResult = type === 'tool_result' || (type === 'user' && state.lastToolEntry);
+  const isToolCall = !isHook && toolName && (type === 'assistant' || type === 'tool_use');
+  const isToolResult = !isHook && (type === 'tool_result' || (type === 'user' && state.lastToolEntry));
 
-  if (isToolCall) {
-    content = `[${toolName}] ${truncate(getMessageText(message), 80)}`;
+  if (isHook) {
+    content = getMessageText(message);
+    contentClass = 'hook';
+  } else if (isToolCall) {
+    const detail = message.toolDetail || '';
+    if (toolName === 'Agent' && detail) {
+      content = `[agent: ${detail}]`;
+    } else if (toolName === 'Skill' && detail) {
+      content = `[skill: ${detail}]`;
+    } else {
+      content = `[${toolName}] ${truncate(getMessageText(message), 80)}`;
+    }
     contentClass = 'tool';
   } else if (isToolResult) {
     content = truncate(getMessageText(message), 100);
@@ -1742,7 +1758,7 @@ function addFeedEntry(session, message) {
     contentClass = 'dim';
   }
 
-  const displayType = isToolCall ? 'tool_use' : isToolResult ? 'tool_result' : type;
+  const displayType = isHook ? 'hook' : isToolCall ? 'tool_use' : isToolResult ? 'tool_result' : type;
   const hasFullContent = message.fullContent && message.fullContent.length > content.length;
 
   const el = document.createElement('div');
