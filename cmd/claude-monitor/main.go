@@ -263,6 +263,49 @@ func main() {
 		}
 	})
 
+	// Recent messages for a session — returns last N parsed messages for feed population.
+	mux.HandleFunc("/api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, ok := store.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if sess.FilePath == "" {
+			http.Error(w, "session file not available", http.StatusBadRequest)
+			return
+		}
+		events, err := replay.ReadFile(sess.FilePath)
+		if err != nil && len(events) == 0 {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Filter to meaningful messages only
+		var filtered []replay.Event
+		for _, ev := range events {
+			if ev.ContentText == "" && ev.ToolName == "" {
+				continue
+			}
+			if ev.ContentText == "[thinking...]" {
+				continue
+			}
+			if !ev.IsConversationMessage() {
+				continue
+			}
+			filtered = append(filtered, ev)
+		}
+
+		// Return last 50
+		limit := 50
+		if len(filtered) > limit {
+			filtered = filtered[len(filtered)-limit:]
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(filtered)
+	})
+
 	// Replay SSE stream route — registered BEFORE the manifest route.
 	mux.HandleFunc("/api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

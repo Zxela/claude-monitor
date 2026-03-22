@@ -1586,9 +1586,39 @@ function toggleSubagents(parentId) {
 }
 
 function toggleSession(id) {
-  state.selectedSession = (state.selectedSession === id) ? null : id;
+  const wasSelected = state.selectedSession === id;
+  state.selectedSession = wasSelected ? null : id;
   renderSessions();
   updateFeedFilter();
+
+  // Load recent messages when selecting a session
+  if (!wasSelected && id) {
+    loadRecentMessages(id);
+  }
+}
+
+async function loadRecentMessages(sessionId) {
+  try {
+    const resp = await fetch(`/api/sessions/${sessionId}/recent`);
+    if (!resp.ok) return;
+    const messages = await resp.json();
+    if (!messages || !Array.isArray(messages)) return;
+
+    // Clear feed and populate with recent messages
+    const feed = document.getElementById('feed');
+    feed.innerHTML = '';
+    state.eventCount = 0;
+    state.lastToolEntry = null;
+
+    const sess = state.sessions[sessionId];
+    if (!sess) return;
+
+    messages.forEach(msg => {
+      addFeedEntry(sess, msg);
+    });
+  } catch (e) {
+    // silently fail — live feed will still work
+  }
 }
 
 function updateFeedFilter() {
