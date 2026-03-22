@@ -1,0 +1,39 @@
+#!/bin/bash
+set -e
+
+echo "=== Pre-commit checks ==="
+
+# 1. Go build
+echo ">> go build..."
+go build ./... || { echo "FAIL: build failed"; exit 1; }
+
+# 2. Go vet
+echo ">> go vet..."
+go vet ./... || { echo "FAIL: vet failed"; exit 1; }
+
+# 3. Go test
+echo ">> go test..."
+go test ./... 2>/dev/null || { echo "FAIL: tests failed"; exit 1; }
+
+# 4. Check HTML files are in sync
+echo ">> checking HTML sync..."
+if ! diff -q static/index.html cmd/claude-monitor/static/index.html > /dev/null 2>&1; then
+    echo "FAIL: static/index.html and cmd/claude-monitor/static/index.html are out of sync"
+    echo "Run: cp static/index.html cmd/claude-monitor/static/index.html"
+    exit 1
+fi
+
+# 5. Check go mod tidy
+echo ">> checking go.mod..."
+cp go.mod go.mod.bak
+cp go.sum go.sum.bak
+go mod tidy
+if ! diff -q go.mod go.mod.bak > /dev/null 2>&1 || ! diff -q go.sum go.sum.bak > /dev/null 2>&1; then
+    mv go.mod.bak go.mod
+    mv go.sum.bak go.sum
+    echo "FAIL: go.mod is not tidy. Run: go mod tidy"
+    exit 1
+fi
+rm -f go.mod.bak go.sum.bak
+
+echo "=== All checks passed ==="
