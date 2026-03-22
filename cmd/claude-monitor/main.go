@@ -132,7 +132,8 @@ func main() {
 			s.TotalCost += msg.CostUSD
 			s.InputTokens += msg.InputTokens
 			s.OutputTokens += msg.OutputTokens
-			s.CacheTokens += msg.CacheTokens
+			s.CacheReadTokens += msg.CacheReadTokens
+				s.CacheCreationTokens += msg.CacheCreationTokens
 			if msg.IsConversationMessage() {
 				if s.SeenMessageIDs == nil {
 					s.SeenMessageIDs = make(map[string]bool)

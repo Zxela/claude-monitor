@@ -19,8 +19,9 @@ type Session struct {
 	TotalCost    float64   `json:"totalCostUSD"`
 	InputTokens  int64     `json:"inputTokens"`
 	OutputTokens int64     `json:"outputTokens"`
-	CacheTokens  int64     `json:"cacheTokens"`
-	CacheHitPct  float64   `json:"cacheHitPct"`
+	CacheReadTokens     int64   `json:"cacheReadTokens"`
+	CacheCreationTokens int64   `json:"cacheCreationTokens"`
+	CacheHitPct         float64 `json:"cacheHitPct"`
 	MessageCount   int              `json:"messageCount"`
 	LastActive     time.Time        `json:"lastActive"`
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
@@ -103,12 +104,11 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		sess.Status = "idle"
 	}
 
-	// NOTE: CacheTokens includes both cache reads and cache creation tokens.
-	// Ideally CacheHitPct would use only cache read tokens, but we only store
-	// the combined value. This is a known limitation.
-	totalInput := sess.InputTokens + sess.CacheTokens
+	// Cache hit % = cache reads / (non-cached input + cache reads).
+	// Excludes cache creation tokens since those are writes, not hits.
+	totalInput := sess.InputTokens + sess.CacheReadTokens
 	if totalInput > 0 {
-		sess.CacheHitPct = float64(sess.CacheTokens) / float64(totalInput) * 100
+		sess.CacheHitPct = float64(sess.CacheReadTokens) / float64(totalInput) * 100
 	}
 
 	return sess

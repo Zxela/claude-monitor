@@ -43,8 +43,11 @@ func TestParseLine_AssistantWithUsage(t *testing.T) {
 	if msg.OutputTokens != 360 {
 		t.Errorf("OutputTokens = %d, want %d", msg.OutputTokens, 360)
 	}
-	if msg.CacheTokens != 11376+8945 {
-		t.Errorf("CacheTokens = %d, want %d", msg.CacheTokens, 11376+8945)
+	if msg.CacheReadTokens != 8945 {
+		t.Errorf("CacheReadTokens = %d, want %d", msg.CacheReadTokens, 8945)
+	}
+	if msg.CacheCreationTokens != 11376 {
+		t.Errorf("CacheCreationTokens = %d, want %d", msg.CacheCreationTokens, 11376)
 	}
 
 	expectedCost := float64(100)*3.0/1e6 + float64(360)*15.0/1e6 + float64(8945)*0.30/1e6 + float64(11376)*3.75/1e6
@@ -386,8 +389,8 @@ func TestParseLine_RealWorldSample(t *testing.T) {
 	if msg.InputTokens != 512 {
 		t.Errorf("InputTokens: got %d, want 512", msg.InputTokens)
 	}
-	if msg.CacheTokens != 128 {
-		t.Errorf("CacheTokens: got %d, want 128", msg.CacheTokens)
+	if msg.CacheReadTokens != 128 {
+		t.Errorf("CacheReadTokens: got %d, want 128", msg.CacheReadTokens)
 	}
 	// Cost computed from tokens: 512*3/1e6 + 64*15/1e6 + 128*0.30/1e6
 	expectedCost := float64(512)*3.0/1e6 + float64(64)*15.0/1e6 + float64(128)*0.30/1e6

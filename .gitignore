@@ -1,6 +1,6 @@
-# Binaries
-claude-monitor
-claude-monitor.exe
+# Binaries (root level only, not cmd/claude-monitor directory)
+/claude-monitor
+/claude-monitor.exe
 /dist/
 /tmp/
 

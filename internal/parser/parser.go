@@ -70,7 +70,8 @@ type ParsedMessage struct {
 	CostUSD      float64   `json:"costUSD"`
 	InputTokens  int64     `json:"inputTokens"`
 	OutputTokens int64     `json:"outputTokens"`
-	CacheTokens  int64     `json:"cacheTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
 	Timestamp    time.Time `json:"timestamp"`
 	SessionID    string    `json:"sessionId"`
 	UUID         string    `json:"uuid"`
@@ -143,7 +144,8 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		CostUSD:      cost,
 		InputTokens:  usage.InputTokens,
 		OutputTokens: usage.OutputTokens,
-		CacheTokens:  cacheReadTokens + cacheCreationTokens,
+		CacheReadTokens:     cacheReadTokens,
+		CacheCreationTokens: cacheCreationTokens,
 		Timestamp:    raw.Timestamp,
 		SessionID:    raw.SessionID,
 		UUID:         raw.UUID,

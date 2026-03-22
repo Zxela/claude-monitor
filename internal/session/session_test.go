@@ -158,11 +158,12 @@ func TestIsActive_FalseWhenOldLastActive(t *testing.T) {
 func TestCacheHitPct_CalculatedCorrectly(t *testing.T) {
 	t.Parallel()
 	s := NewStore()
-	// cacheHitPct = cacheTokens / (inputTokens + cacheTokens) * 100
+	// cacheHitPct = cacheReadTokens / (inputTokens + cacheReadTokens) * 100
 	// = 400 / (600 + 400) * 100 = 40.0
 	sess := s.Upsert("cache-session", func(sess *Session) {
 		sess.InputTokens = 600
-		sess.CacheTokens = 400
+		sess.CacheReadTokens = 400
+		sess.CacheCreationTokens = 5000 // should NOT affect cache hit %
 	})
 	if sess.CacheHitPct != 40.0 {
 		t.Errorf("CacheHitPct: got %f, want 40.0", sess.CacheHitPct)
@@ -174,7 +175,7 @@ func TestCacheHitPct_ZeroWhenNoTokens(t *testing.T) {
 	s := NewStore()
 	sess := s.Upsert("no-token-session", func(sess *Session) {
 		sess.InputTokens = 0
-		sess.CacheTokens = 0
+		sess.CacheReadTokens = 0
 	})
 	if sess.CacheHitPct != 0.0 {
 		t.Errorf("CacheHitPct: got %f, want 0.0", sess.CacheHitPct)
