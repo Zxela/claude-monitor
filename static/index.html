@@ -1781,6 +1781,8 @@ function addFeedEntry(session, message) {
       content = `[agent: ${detail}]`;
     } else if (toolName === 'Skill' && detail) {
       content = `[skill: ${detail}]`;
+    } else if (detail) {
+      content = `[${toolName}] ${truncate(detail, 80)}`;
     } else {
       content = `[${toolName}] ${truncate(getMessageText(message), 80)}`;
     }

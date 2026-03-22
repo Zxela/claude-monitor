@@ -225,34 +225,52 @@ func extractContent(raw json.RawMessage) (string, string, string, string) {
 			if firstText == "" {
 				firstText = fmt.Sprintf("[tool: %s]", b.Name)
 			}
-			// Extract detail for Agent and Skill calls.
-			if (b.Name == "Agent" || b.Name == "Skill") && len(b.Input) > 0 {
+			// Extract tool input detail.
+			if len(b.Input) > 0 {
 				var inp map[string]interface{}
 				if json.Unmarshal(b.Input, &inp) == nil {
-					if b.Name == "Agent" {
+					switch b.Name {
+					case "Agent":
 						desc, _ := inp["description"].(string)
 						st, _ := inp["subagent_type"].(string)
 						name, _ := inp["name"].(string)
 						parts := []string{}
-						if st != "" {
-							parts = append(parts, st)
-						}
-						if name != "" {
-							parts = append(parts, name)
-						}
-						if desc != "" {
-							parts = append(parts, desc)
-						}
+						if st != "" { parts = append(parts, st) }
+						if name != "" { parts = append(parts, name) }
+						if desc != "" { parts = append(parts, desc) }
 						if len(parts) > 0 {
-							toolDetail = fmt.Sprintf("%s", joinParts(parts))
+							toolDetail = joinParts(parts)
 							firstText = fmt.Sprintf("[agent: %s]", toolDetail)
 						}
-					} else if b.Name == "Skill" {
+					case "Skill":
 						skill, _ := inp["skill"].(string)
 						if skill != "" {
 							toolDetail = skill
 							firstText = fmt.Sprintf("[skill: %s]", skill)
 						}
+					case "Bash":
+						cmd, _ := inp["command"].(string)
+						desc, _ := inp["description"].(string)
+						if desc != "" { toolDetail = desc } else { toolDetail = truncate(cmd, 120) }
+					case "Read":
+						fp, _ := inp["file_path"].(string)
+						toolDetail = fp
+					case "Write":
+						fp, _ := inp["file_path"].(string)
+						toolDetail = fp
+					case "Edit":
+						fp, _ := inp["file_path"].(string)
+						toolDetail = fp
+					case "Grep":
+						pat, _ := inp["pattern"].(string)
+						toolDetail = pat
+					case "Glob":
+						pat, _ := inp["pattern"].(string)
+						toolDetail = pat
+					default:
+						// Generic: stringify first key-value pair
+						summary := truncate(string(b.Input), 100)
+						toolDetail = summary
 					}
 				}
 			}
