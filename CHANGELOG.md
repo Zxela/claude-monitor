@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/Zxela/claude-monitor/compare/v1.0.2...v1.0.3) (2026-03-22)
+
+
+### Bug Fixes
+
+* consolidate release pipeline into single workflow ([2f4b3a0](https://github.com/Zxela/claude-monitor/commit/2f4b3a01abadfd8ec512e09b6fe8731815d5abbf))
+
 ## [1.0.2](https://github.com/Zxela/claude-monitor/compare/v1.0.1...v1.0.2) (2026-03-22)
 
 
