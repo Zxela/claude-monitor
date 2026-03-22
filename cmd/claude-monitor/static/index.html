@@ -183,20 +183,12 @@
     font-size: 8px;
   }
 
-  .session-card .subagent-toggle {
-    cursor: pointer;
-    font-size: 10px;
-    color: var(--text-dim);
-    padding: 2px 4px;
-    border: none;
-    background: none;
-    font-family: var(--font);
-  }
-  .session-card .subagent-toggle:hover { color: var(--text); }
-  .subagent-count {
+  .subagent-chevron {
     font-size: 9px;
     color: var(--purple);
-    opacity: 0.7;
+    opacity: 0.8;
+    margin-left: auto;
+    padding: 0 4px;
   }
 
   #sessions-list {
@@ -1537,16 +1529,14 @@ function renderSessions() {
     const totalTok = (sess.inputTokens || 0) + (sess.outputTokens || 0);
     const expanded = state.expandedParents.has(sess.id);
 
-    // Subagent toggle for parents with children
-    const toggleHtml = (!isSub && childCount > 0)
-      ? `<button class="subagent-toggle" onclick="event.stopPropagation(); toggleSubagents('${sess.id}')">${expanded ? '▾' : '▸'}</button><span class="subagent-count">${childCount}</span>`
-      : '';
+    const hasChildren = !isSub && childCount > 0;
+    const chevron = hasChildren ? `<span class="subagent-chevron">${expanded ? '▾' : '▸'} ${childCount}</span>` : '';
 
     const html = `
       <div class="session-row1">
         <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
         <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
-        ${toggleHtml}
+        ${chevron}
         ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
       </div>
       <div class="session-stats">
@@ -1572,7 +1562,16 @@ function renderSessions() {
       (isSub ? ' subagent' : '');
     card.dataset.sid = sess.id;
     card.innerHTML = html;
-    card.addEventListener('click', () => toggleSession(sess.id));
+    if (hasChildren) {
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', (e) => {
+        // Let replay button handle its own click
+        if (e.target.closest('.replay-btn')) return;
+        toggleSubagents(sess.id);
+      });
+    } else {
+      card.addEventListener('click', () => toggleSession(sess.id));
+    }
     list.appendChild(card);
   });
 }
