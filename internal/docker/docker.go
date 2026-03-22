@@ -68,8 +68,13 @@ func (c *Client) FindClaudePaths(ctx context.Context) ([]MountedPath, error) {
 			name = strings.TrimPrefix(ct.Names[0], "/")
 		}
 		for _, m := range ct.Mounts {
-			if m.Type == "bind" && strings.HasSuffix(m.Destination, ".claude/projects") {
+			// Match mounts ending in .claude/projects directly
+			if strings.HasSuffix(m.Destination, ".claude/projects") {
 				out = append(out, MountedPath{ContainerName: name, HostPath: m.Source})
+			} else if strings.HasSuffix(m.Destination, ".claude") || strings.HasSuffix(m.Source, ".claude") {
+				// Mount is to .claude — add the projects subdir on the host side
+				hostProjects := m.Source + "/projects"
+				out = append(out, MountedPath{ContainerName: name, HostPath: hostProjects})
 			}
 		}
 	}

@@ -13,7 +13,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,6 +46,19 @@ func (r *repeatable) Set(v string) error {
 	return nil
 }
 
+// parentSessionIDFromPath extracts the parent session ID from a subagent JSONL
+// file path. Subagent files live at:
+//   .../projects/<hash>/<parent-session-id>/subagents/agent-<id>.jsonl
+func parentSessionIDFromPath(filePath string) string {
+	dir := filepath.Dir(filePath)   // .../subagents/
+	dirName := filepath.Base(dir)
+	if dirName == "subagents" {
+		parentDir := filepath.Dir(dir) // .../<parent-session-id>/
+		return filepath.Base(parentDir)
+	}
+	return ""
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(os.Stderr)
@@ -55,6 +70,14 @@ func main() {
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	flag.Parse()
 
+	// Auto-enable Docker discovery if the socket exists and --docker wasn't explicitly set.
+	if !*dockerEnabled {
+		if _, err := os.Stat(*dockerSocket); err == nil {
+			*dockerEnabled = true
+			log.Println("docker socket found, auto-enabling container discovery")
+		}
+	}
+
 	store := session.NewStore()
 	h := hub.NewHub()
 
@@ -62,6 +85,100 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create watcher: %v", err)
 	}
+
+	// processEvent parses a watcher event and updates the session store.
+	// Returns the parsed message, session, and whether it's a new session.
+	processEvent := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
+		msg, err := parser.ParseLine(ev.Line)
+		if err != nil {
+			return nil, nil, false
+		}
+		_, exists := store.Get(ev.SessionID)
+		isNew := !exists
+
+		sess := store.Upsert(ev.SessionID, func(s *session.Session) {
+			s.FilePath = ev.FilePath
+			s.ProjectDir = ev.ProjectDir
+			if ev.Label != "" {
+				s.ProjectName = ev.Label + " / " + ev.ProjectDir
+			} else if s.ProjectName == "" {
+				s.ProjectName = ev.ProjectDir
+			}
+			if msg.CWD != "" {
+				s.CWD = msg.CWD
+			}
+			if msg.GitBranch != "" {
+				s.GitBranch = msg.GitBranch
+			}
+			if msg.Model != "" {
+				s.Model = msg.Model
+			}
+			if msg.Type == "custom-title" && msg.ContentText != "" {
+				s.SessionName = msg.ContentText
+			} else if msg.Type == "agent-name" && msg.ContentText != "" && s.SessionName == "" {
+				s.SessionName = msg.ContentText
+			}
+			if s.SessionName != "" {
+				s.ProjectName = s.SessionName
+			}
+			if msg.IsSidechain || msg.ParentUUID != "" {
+				if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
+					if s.ParentID == "" {
+						s.ParentID = parentSID
+						s.IsSubagent = true
+					}
+				}
+			}
+			s.TotalCost += msg.CostUSD
+			s.InputTokens += msg.InputTokens
+			s.OutputTokens += msg.OutputTokens
+			s.CacheReadTokens += msg.CacheReadTokens
+				s.CacheCreationTokens += msg.CacheCreationTokens
+			if msg.IsConversationMessage() {
+				if s.SeenMessageIDs == nil {
+					s.SeenMessageIDs = make(map[string]bool)
+				}
+				if msg.MessageID != "" {
+					if !s.SeenMessageIDs[msg.MessageID] {
+						s.SeenMessageIDs[msg.MessageID] = true
+						s.MessageCount++
+					}
+				} else {
+					s.MessageCount++
+				}
+			}
+			if !msg.Timestamp.IsZero() {
+				s.LastActive = msg.Timestamp
+				if s.StartedAt.IsZero() || msg.Timestamp.Before(s.StartedAt) {
+					s.StartedAt = msg.Timestamp
+				}
+			} else if !ev.Bootstrap {
+				s.LastActive = time.Now()
+			}
+			if msg.StopReason == "end_turn" {
+				s.Status = "waiting"
+			} else if msg.StopReason == "tool_use" {
+				s.Status = "tool_use"
+			} else if msg.ToolName != "" {
+				s.Status = "tool_use"
+			} else if msg.Role == "assistant" {
+				s.Status = "thinking"
+			} else if msg.Role == "user" {
+				s.Status = "thinking"
+			}
+		})
+
+		if sess.IsSubagent && sess.ParentID != "" {
+			store.LinkChild(sess.ParentID, ev.SessionID)
+		}
+
+		return msg, sess, isNew
+	}
+
+	// Bootstrap callback: process historical lines for stats only (no broadcast).
+	w.SetBootstrapCallback(func(ev watcher.Event) {
+		processEvent(ev)
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -72,7 +189,7 @@ func main() {
 
 	if *dockerEnabled {
 		dc := docker.NewClient(*dockerSocket)
-		dockerCh, err := docker.Watch(ctx, dc, 30*time.Second)
+		dockerCh, err := docker.Watch(ctx, dc, 5*time.Second)
 		if err != nil {
 			log.Printf("docker discovery: %v (continuing without Docker)", err)
 		} else {
@@ -93,65 +210,14 @@ func main() {
 	// Process watcher events: parse, update store, broadcast.
 	go func() {
 		for ev := range events {
-			msg, err := parser.ParseLine(ev.Line)
-			if err != nil {
-				log.Printf("parse error (%s): %v", ev.FilePath, err)
+			msg, sess, isNew := processEvent(ev)
+			if msg == nil {
 				continue
 			}
-			// Determine whether this is the first message for this session.
-			_, isNew := store.Get(ev.SessionID)
-			isNew = !isNew
 
-			sess := store.Upsert(ev.SessionID, func(s *session.Session) {
-				s.FilePath = ev.FilePath
-				s.ProjectDir = ev.ProjectDir
-				if ev.Label != "" {
-					s.ProjectName = ev.Label + " / " + ev.ProjectDir
-				} else {
-					s.ProjectName = ev.ProjectDir // use dir name as display name
-				}
-				if msg.CWD != "" {
-					s.CWD = msg.CWD
-				}
-				if msg.GitBranch != "" {
-					s.GitBranch = msg.GitBranch
-				}
-				if msg.Model != "" {
-					s.Model = msg.Model
-				}
-				if msg.ParentUUID != "" && s.ParentID == "" {
-					s.ParentID = msg.ParentUUID
-					s.IsSubagent = true
-				}
-				s.TotalCost += msg.CostUSD
-				s.InputTokens += msg.InputTokens
-				s.OutputTokens += msg.OutputTokens
-				s.CacheTokens += msg.CacheTokens
-				// Only count real conversation messages (user/assistant), and
-				// deduplicate streaming chunks that share the same message ID.
-				if msg.IsConversationMessage() {
-					if s.SeenMessageIDs == nil {
-						s.SeenMessageIDs = make(map[string]bool)
-					}
-					if msg.MessageID != "" {
-						if !s.SeenMessageIDs[msg.MessageID] {
-							s.SeenMessageIDs[msg.MessageID] = true
-							s.MessageCount++
-						}
-					} else {
-						s.MessageCount++
-					}
-				}
-				if !msg.Timestamp.IsZero() {
-					s.LastActive = msg.Timestamp
-				} else {
-					s.LastActive = time.Now()
-				}
-			})
-
-			// Link parent-child if subagent
-			if sess.IsSubagent && sess.ParentID != "" {
-				store.LinkChild(sess.ParentID, ev.SessionID)
+			// Don't broadcast historical data — only used for bootstrapping stats.
+			if ev.Bootstrap {
+				continue
 			}
 
 			eventType := "message"
@@ -159,10 +225,21 @@ func main() {
 				eventType = "session_new"
 			}
 
+			broadcastMsg := msg
+			if eventType == "message" {
+				if msg.Role == "assistant" && msg.StopReason == "" && msg.ToolName == "" {
+					// Skip intermediate streaming chunks (no stop_reason, no tool)
+					broadcastMsg = nil
+				} else if !msg.IsConversationMessage() && msg.ContentText == "" {
+					// Skip empty non-conversation messages
+					broadcastMsg = nil
+				}
+			}
+
 			payload, err := json.Marshal(broadcastEvent{
 				Event:   eventType,
 				Session: sess,
-				Message: msg,
+				Message: broadcastMsg,
 			})
 			if err != nil {
 				log.Printf("marshal error: %v", err)
@@ -194,6 +271,108 @@ func main() {
 		if err := json.NewEncoder(w).Encode(sessions); err != nil {
 			log.Printf("api/sessions encode error: %v", err)
 		}
+	})
+
+	// Cross-session search — searches ContentText and ToolDetail across all sessions.
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]"))
+			return
+		}
+		limitStr := r.URL.Query().Get("limit")
+		limit := 50
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+
+		queryLower := strings.ToLower(query)
+
+		type searchResult struct {
+			SessionID   string `json:"sessionId"`
+			SessionName string `json:"sessionName"`
+			parser.ParsedMessage
+		}
+
+		var results []searchResult
+		for _, sess := range store.All() {
+			if sess.FilePath == "" {
+				continue
+			}
+			events, err := replay.ReadFile(sess.FilePath)
+			if err != nil && len(events) == 0 {
+				continue
+			}
+			displayName := sess.ProjectName
+			if sess.SessionName != "" {
+				displayName = sess.SessionName
+			}
+			for _, ev := range events {
+				if len(results) >= limit {
+					break
+				}
+				text := strings.ToLower(ev.ContentText + " " + ev.ToolDetail + " " + ev.ToolName)
+				if strings.Contains(text, queryLower) {
+					results = append(results, searchResult{
+						SessionID:     sess.ID,
+						SessionName:   displayName,
+						ParsedMessage: ev.ParsedMessage,
+					})
+				}
+			}
+			if len(results) >= limit {
+				break
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+	})
+
+	// Recent messages for a session — returns last N parsed messages for feed population.
+	mux.HandleFunc("/api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, ok := store.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if sess.FilePath == "" {
+			http.Error(w, "session file not available", http.StatusBadRequest)
+			return
+		}
+		events, err := replay.ReadFile(sess.FilePath)
+		if err != nil && len(events) == 0 {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Filter to meaningful messages only
+		var filtered []replay.Event
+		for _, ev := range events {
+			if ev.ContentText == "" && ev.ToolName == "" && ev.HookEvent == "" {
+				continue
+			}
+			if ev.ContentText == "[thinking...]" {
+				continue
+			}
+			// Include conversation messages, hooks, and agent/skill calls
+			isHook := ev.HookEvent != ""
+			if !ev.IsConversationMessage() && !isHook {
+				continue
+			}
+			filtered = append(filtered, ev)
+		}
+
+		// Return last 50
+		limit := 50
+		if len(filtered) > limit {
+			filtered = filtered[len(filtered)-limit:]
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(filtered)
 	})
 
 	// Replay SSE stream route — registered BEFORE the manifest route.

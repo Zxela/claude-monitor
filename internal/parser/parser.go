@@ -4,6 +4,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -23,15 +24,24 @@ type rawMessage struct {
 	ParentUUID string          `json:"parentUuid"`
 	CWD        string          `json:"cwd"`
 	GitBranch  string          `json:"gitBranch"`
-	IsSidechain bool           `json:"isSidechain"`
+	IsSidechain bool            `json:"isSidechain"`
+	Data        rawProgressData `json:"data"`
+}
+
+type rawProgressData struct {
+	Type      string `json:"type"`
+	HookEvent string `json:"hookEvent"`
+	HookName  string `json:"hookName"`
+	Command   string `json:"command"`
 }
 
 type rawInner struct {
 	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
-	Usage   rawUsage        `json:"usage"`
-	Model   string          `json:"model"`
+	Usage      rawUsage        `json:"usage"`
+	Model      string          `json:"model"`
+	StopReason *string         `json:"stop_reason"`
 }
 
 type rawUsage struct {
@@ -43,9 +53,13 @@ type rawUsage struct {
 
 // contentBlock represents one element inside a content array.
 type contentBlock struct {
-	Type  string `json:"type"`
-	Text  string `json:"text,omitempty"`
-	Name  string `json:"name,omitempty"` // for tool_use blocks
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Name      string          `json:"name,omitempty"`       // for tool_use blocks
+	ID        string          `json:"id,omitempty"`         // tool_use block ID
+	Content   json.RawMessage `json:"content,omitempty"`    // for tool_result blocks (string or array)
+	Input     json.RawMessage `json:"input,omitempty"`      // for tool_use blocks (raw input params)
+	ToolUseID string          `json:"tool_use_id,omitempty"` // for tool_result blocks: links to tool_use
 }
 
 // ParsedMessage is the normalised representation of one JSONL line.
@@ -53,12 +67,14 @@ type ParsedMessage struct {
 	Type         string    `json:"type"`
 	MessageID    string    `json:"messageId,omitempty"`
 	Role         string    `json:"role"`
-	ContentText  string    `json:"contentText"` // extracted plain-text preview
+	ContentText  string    `json:"contentText"`            // extracted plain-text preview (truncated)
+	FullContent  string    `json:"fullContent,omitempty"`  // full untruncated content (for expand)
 	ToolName     string    `json:"toolName,omitempty"`
 	CostUSD      float64   `json:"costUSD"`
 	InputTokens  int64     `json:"inputTokens"`
 	OutputTokens int64     `json:"outputTokens"`
-	CacheTokens  int64     `json:"cacheTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
 	Timestamp    time.Time `json:"timestamp"`
 	SessionID    string    `json:"sessionId"`
 	UUID         string    `json:"uuid"`
@@ -67,6 +83,14 @@ type ParsedMessage struct {
 	GitBranch    string    `json:"gitBranch,omitempty"`
 	Model        string    `json:"model,omitempty"`
 	IsSidechain  bool      `json:"isSidechain,omitempty"`
+	StopReason   string    `json:"stopReason,omitempty"`
+	HookEvent    string    `json:"hookEvent,omitempty"`
+	HookName     string    `json:"hookName,omitempty"`
+	ToolDetail   string    `json:"toolDetail,omitempty"` // extra context for Agent/Skill calls
+	IsAgent      bool      `json:"isAgent,omitempty"`      // true when toolName is "Agent"
+	ToolUseID    string    `json:"toolUseId,omitempty"`    // first tool_use block ID
+	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
+	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -81,6 +105,32 @@ func (m *ParsedMessage) IsConversationMessage() bool {
 	}
 }
 
+type modelPricing struct {
+	InputPerMTok       float64
+	OutputPerMTok      float64
+	CacheReadPerMTok   float64
+	CacheCreatePerMTok float64
+}
+
+var pricingTable = map[string]modelPricing{
+	"claude-opus-4-6":   {15.0, 75.0, 1.50, 18.75},
+	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
+	"claude-haiku-4-5":  {0.80, 4.0, 0.08, 1.0},
+}
+
+var defaultPricing = pricingTable["claude-sonnet-4-6"]
+
+func computeCost(model string, usage rawUsage) float64 {
+	p, ok := pricingTable[model]
+	if !ok {
+		p = defaultPricing
+	}
+	return float64(usage.InputTokens)*p.InputPerMTok/1e6 +
+		float64(usage.OutputTokens)*p.OutputPerMTok/1e6 +
+		float64(usage.CacheReadInputTokens)*p.CacheReadPerMTok/1e6 +
+		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
+}
+
 // ParseLine unmarshals a single JSONL line and returns a ParsedMessage.
 func ParseLine(line []byte) (*ParsedMessage, error) {
 	var raw rawMessage
@@ -92,10 +142,7 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	cacheReadTokens := usage.CacheReadInputTokens
 	cacheCreationTokens := usage.CacheCreationInputTokens
 
-	cost := float64(usage.InputTokens)*3.0/1e6 +
-		float64(usage.OutputTokens)*15.0/1e6 +
-		float64(cacheReadTokens)*0.30/1e6 +
-		float64(cacheCreationTokens)*3.75/1e6
+	cost := computeCost(raw.Message.Model, usage)
 
 	msg := &ParsedMessage{
 		Type:         raw.Type,
@@ -104,7 +151,8 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		CostUSD:      cost,
 		InputTokens:  usage.InputTokens,
 		OutputTokens: usage.OutputTokens,
-		CacheTokens:  cacheReadTokens + cacheCreationTokens,
+		CacheReadTokens:     cacheReadTokens,
+		CacheCreationTokens: cacheCreationTokens,
 		Timestamp:    raw.Timestamp,
 		SessionID:    raw.SessionID,
 		UUID:         raw.UUID,
@@ -115,51 +163,220 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	msg.GitBranch = raw.GitBranch
 	msg.Model = raw.Message.Model
 	msg.IsSidechain = raw.IsSidechain
-
-	// Prefer message.content, fall back to top-level content.
-	contentRaw := raw.Message.Content
-	if len(contentRaw) == 0 {
-		contentRaw = raw.Content
+	if raw.Message.StopReason != nil {
+		msg.StopReason = *raw.Message.StopReason
+	}
+	// Extract hook data from progress messages.
+	if raw.Type == "progress" && raw.Data.Type == "hook_progress" {
+		msg.HookEvent = raw.Data.HookEvent
+		msg.HookName = raw.Data.HookName
+		// Extract tool name from hookName (e.g. "PostToolUse:Read" → "Read")
+		hookTool := raw.Data.HookName
+		if i := len(raw.Data.HookEvent); i < len(raw.Data.HookName) && raw.Data.HookName[i] == ':' {
+			hookTool = raw.Data.HookName[i+1:]
+		}
+		msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
 	}
 
-	msg.ContentText, msg.ToolName = extractContent(contentRaw)
+	// Skip content extraction for hook messages (contentText already set above).
+	if msg.HookEvent == "" {
+		contentRaw := raw.Message.Content
+		if len(contentRaw) == 0 {
+			contentRaw = raw.Content
+		}
+		ci := extractContent(contentRaw)
+		msg.ContentText = ci.text
+		msg.ToolName = ci.toolName
+		msg.FullContent = ci.fullText
+		msg.ToolDetail = ci.toolDetail
+		msg.ToolUseID = ci.toolUseID
+		msg.ForToolUseID = ci.forToolUseID
+		msg.IsAgent = msg.ToolName == "Agent"
+		// Populate ToolUseIDs for batched tool calls
+		if len(ci.toolUseAll) > 1 {
+			ids := make([]string, len(ci.toolUseAll))
+			for i, tu := range ci.toolUseAll {
+				ids[i] = tu.ID
+			}
+			msg.ToolUseIDs = ids
+		}
+	}
 
 	return msg, nil
 }
 
+// toolUseEntry records metadata for a single tool_use block in a content array.
+type toolUseEntry struct {
+	ID      string // tool_use block ID
+	Name    string // tool name (e.g. "Agent", "Bash")
+	IsAgent bool
+}
+
+// contentInfo bundles everything extracted from a content field.
+type contentInfo struct {
+	text         string // preview text (truncated)
+	toolName     string
+	fullText     string // untruncated content
+	toolDetail   string
+	toolUseID    string         // first tool_use block ID
+	toolUseAll   []toolUseEntry // all tool_use blocks (for batched calls)
+	forToolUseID string         // tool_use_id from tool_result block
+}
+
 // extractContent attempts to decode content as a string first, then as a
-// content-block array. Returns (textPreview, toolName).
-func extractContent(raw json.RawMessage) (string, string) {
+// content-block array.
+func extractContent(raw json.RawMessage) contentInfo {
 	if len(raw) == 0 {
-		return "", ""
+		return contentInfo{}
 	}
 
 	// Try plain string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return truncate(s, maxContentPreview), ""
+		if len([]rune(s)) <= maxContentPreview {
+			return contentInfo{text: s}
+		}
+		return contentInfo{text: truncate(s, maxContentPreview), fullText: s}
 	}
 
 	// Try array of content blocks.
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", ""
+		return contentInfo{}
 	}
 
+	var info contentInfo
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if b.Text != "" {
-				return truncate(b.Text, maxContentPreview), ""
+			if b.Text != "" && info.text == "" {
+				info.text = truncate(b.Text, maxContentPreview)
+				if len([]rune(b.Text)) > maxContentPreview {
+					info.fullText = b.Text
+				}
+			}
+		case "thinking":
+			if info.text == "" {
+				info.text = "[thinking...]"
 			}
 		case "tool_use":
-			return fmt.Sprintf("[tool: %s]", b.Name), b.Name
+			info.toolName = b.Name
+			if info.toolUseID == "" {
+				info.toolUseID = b.ID // first tool_use ID
+			}
+			info.toolUseAll = append(info.toolUseAll, toolUseEntry{
+				ID: b.ID, Name: b.Name, IsAgent: b.Name == "Agent",
+			})
+			if info.text == "" {
+				info.text = fmt.Sprintf("[tool: %s]", b.Name)
+			}
+			// Store full input JSON as expandable content (only if text block didn't set it).
+			if info.fullText == "" && len(b.Input) > 0 {
+				prettyInput, err := json.MarshalIndent(json.RawMessage(b.Input), "", "  ")
+				if err == nil && len(prettyInput) > maxContentPreview {
+					info.fullText = string(prettyInput)
+				}
+			}
+			// Extract tool input detail.
+			if len(b.Input) > 0 {
+				var inp map[string]interface{}
+				if json.Unmarshal(b.Input, &inp) == nil {
+					switch b.Name {
+					case "Agent":
+						desc, _ := inp["description"].(string)
+						st, _ := inp["subagent_type"].(string)
+						name, _ := inp["name"].(string)
+						parts := []string{}
+						if st != "" { parts = append(parts, st) }
+						if name != "" { parts = append(parts, name) }
+						if desc != "" { parts = append(parts, desc) }
+						if len(parts) > 0 {
+							info.toolDetail = strings.Join(parts, " / ")
+							info.text = fmt.Sprintf("[agent: %s]", info.toolDetail)
+						}
+					case "Skill":
+						skill, _ := inp["skill"].(string)
+						if skill != "" {
+							info.toolDetail = skill
+							info.text = fmt.Sprintf("[skill: %s]", skill)
+						}
+					case "Bash":
+						cmd, _ := inp["command"].(string)
+						desc, _ := inp["description"].(string)
+						if desc != "" { info.toolDetail = desc } else { info.toolDetail = truncate(cmd, 120) }
+					case "Read":
+						fp, _ := inp["file_path"].(string)
+						info.toolDetail = fp
+					case "Write":
+						fp, _ := inp["file_path"].(string)
+						info.toolDetail = fp
+					case "Edit":
+						fp, _ := inp["file_path"].(string)
+						info.toolDetail = fp
+					case "Grep":
+						pat, _ := inp["pattern"].(string)
+						info.toolDetail = pat
+					case "Glob":
+						pat, _ := inp["pattern"].(string)
+						info.toolDetail = pat
+					default:
+						// Generic: stringify first key-value pair
+						summary := truncate(string(b.Input), 100)
+						info.toolDetail = summary
+					}
+				}
+			}
 		case "tool_result":
-			return "[tool_result]", ""
+			info.forToolUseID = b.ToolUseID
+			if info.text == "" {
+				resultText := extractToolResultContent(b.Content)
+				// Fallback to Text field if Content didn't produce anything.
+				if resultText == "" && b.Text != "" {
+					resultText = b.Text
+				}
+				if resultText != "" {
+					info.text = truncate(resultText, maxContentPreview)
+					if len([]rune(resultText)) > maxContentPreview {
+						info.fullText = resultText
+					}
+				} else {
+					info.text = "[tool_result]"
+				}
+			}
 		}
 	}
+	if info.toolName != "" && info.text == "" {
+		info.text = fmt.Sprintf("[tool: %s]", info.toolName)
+	}
+	return info
+}
 
-	return "", ""
+// extractToolResultContent handles tool_result content that can be either a
+// plain string or an array of content blocks like [{"type":"text","text":"..."}].
+func extractToolResultContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Try plain string first.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Try array of content blocks.
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
 }
 
 // truncate returns at most n runes from s (valid UTF-8 boundary aware).

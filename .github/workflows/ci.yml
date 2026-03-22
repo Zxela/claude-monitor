@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -v -count=1
+
+      - name: Vet
+        run: go vet ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Check embedded HTML in sync
+        run: |
+          diff static/index.html cmd/claude-monitor/static/index.html || {
+            echo "ERROR: static/index.html and cmd/claude-monitor/static/index.html are out of sync"
+            echo "Run: cp static/index.html cmd/claude-monitor/static/index.html"
+            exit 1
+          }
+
+      - name: Check no debug code
+        run: |
+          if grep -rn 'fmt\.Println\|log\.Fatal\b' internal/ cmd/ --include='*.go' | grep -v '_test.go' | grep -v 'log.Fatalf'; then
+            echo "WARNING: Found debug print statements"
+          fi

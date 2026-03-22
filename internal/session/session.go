@@ -14,17 +14,20 @@ type Session struct {
 	ID           string    `json:"id"`
 	ProjectDir   string    `json:"projectDir"`
 	ProjectName  string    `json:"projectName"`
+	SessionName  string    `json:"sessionName,omitempty"`
 	FilePath     string    `json:"filePath"`
 	TotalCost    float64   `json:"totalCostUSD"`
 	InputTokens  int64     `json:"inputTokens"`
 	OutputTokens int64     `json:"outputTokens"`
-	CacheTokens  int64     `json:"cacheTokens"`
-	CacheHitPct  float64   `json:"cacheHitPct"`
+	CacheReadTokens     int64   `json:"cacheReadTokens"`
+	CacheCreationTokens int64   `json:"cacheCreationTokens"`
+	CacheHitPct         float64 `json:"cacheHitPct"`
 	MessageCount   int              `json:"messageCount"`
 	LastActive     time.Time        `json:"lastActive"`
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt      time.Time        `json:"startedAt"`
-	SeenMessageIDs map[string]bool  `json:"-"` // tracks message IDs to deduplicate streaming chunks
+	Status         string           `json:"status"` // idle, thinking, tool_use, waiting
+	SeenMessageIDs map[string]bool  `json:"-"`      // tracks message IDs to deduplicate streaming chunks
 	ParentID       string           `json:"parentId,omitempty"`
 	Children       []string         `json:"children,omitempty"`
 	CWD            string           `json:"cwd,omitempty"`
@@ -84,8 +87,8 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	sess, ok := s.sessions[sessionID]
 	if !ok {
 		sess = &Session{
-			ID:        sessionID,
-			StartedAt: time.Now(),
+			ID: sessionID,
+			// StartedAt will be set from first message timestamp
 		}
 		s.sessions[sessionID] = sess
 	}
@@ -97,13 +100,15 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold
+	if !sess.IsActive {
+		sess.Status = "idle"
+	}
 
-	// NOTE: CacheTokens includes both cache reads and cache creation tokens.
-	// Ideally CacheHitPct would use only cache read tokens, but we only store
-	// the combined value. This is a known limitation.
-	totalInput := sess.InputTokens + sess.CacheTokens
+	// Cache hit % = cache reads / (non-cached input + cache reads).
+	// Excludes cache creation tokens since those are writes, not hits.
+	totalInput := sess.InputTokens + sess.CacheReadTokens
 	if totalInput > 0 {
-		sess.CacheHitPct = float64(sess.CacheTokens) / float64(totalInput) * 100
+		sess.CacheHitPct = float64(sess.CacheReadTokens) / float64(totalInput) * 100
 	}
 
 	return sess
