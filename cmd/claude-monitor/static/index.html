@@ -424,6 +424,31 @@
   .fe-type.tool_result { color: var(--cyan); }
   .fe-type.error       { color: var(--red); }
   .fe-type.system      { color: var(--text-dim); }
+  #feed-type-filters {
+    display: flex;
+    gap: 3px;
+    padding: 3px 8px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+  .feed-filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-dim);
+    font-family: var(--font);
+    font-size: 9px;
+    padding: 1px 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .feed-filter-btn:hover { border-color: var(--border2); }
+  .feed-filter-btn.active[data-feedtype="user"]        { color: var(--blue); border-color: rgba(68,136,255,0.4); background: rgba(68,136,255,0.08); }
+  .feed-filter-btn.active[data-feedtype="assistant"]   { color: var(--green); border-color: rgba(0,255,136,0.4); background: rgba(0,255,136,0.08); }
+  .feed-filter-btn.active[data-feedtype="tool_use"]    { color: var(--yellow); border-color: rgba(255,204,0,0.4); background: rgba(255,204,0,0.08); }
+  .feed-filter-btn.active[data-feedtype="tool_result"] { color: var(--cyan); border-color: rgba(0,204,255,0.4); background: rgba(0,204,255,0.08); }
+  .feed-filter-btn.active[data-feedtype="hook"]        { color: var(--purple); border-color: rgba(204,136,255,0.4); background: rgba(204,136,255,0.08); }
+
   .fe-type.hook        { color: var(--purple); }
   .feed-entry.type-hook { border-left-color: rgba(204,136,255,0.3); }
   .fe-content.hook     { color: var(--purple); opacity: 0.7; font-size: 11px; }
@@ -899,6 +924,13 @@
           <span>LIVE FEED</span>
           <span id="feed-filter-label"></span>
         </div>
+        <div id="feed-type-filters">
+          <button class="feed-filter-btn active" data-feedtype="user" onclick="toggleFeedType('user')">user</button>
+          <button class="feed-filter-btn active" data-feedtype="assistant" onclick="toggleFeedType('assistant')">assistant</button>
+          <button class="feed-filter-btn active" data-feedtype="tool_use" onclick="toggleFeedType('tool_use')">tools</button>
+          <button class="feed-filter-btn active" data-feedtype="tool_result" onclick="toggleFeedType('tool_result')">results</button>
+          <button class="feed-filter-btn active" data-feedtype="hook" onclick="toggleFeedType('hook')">hooks</button>
+        </div>
         <div id="feed">
           <div id="feed-empty">
             WAITING FOR EVENTS...<br>
@@ -968,6 +1000,7 @@ const state = {
   currentView: 'list', // 'list' | 'pixels'
   sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
+  feedTypeFilters: { user: true, assistant: true, tool_use: true, tool_result: true, hook: true },
   // Replay state
   replay: {
     sessionId: null,
@@ -1796,6 +1829,11 @@ function addFeedEntry(session, message) {
     state.lastToolEntry = null;
   }
 
+  // Hide if this type is filtered out
+  if (!state.feedTypeFilters[displayType]) {
+    el.style.display = 'none';
+  }
+
   feed.appendChild(el);
   state.eventCount++;
   document.getElementById('event-count').textContent = state.eventCount;
@@ -1803,6 +1841,17 @@ function addFeedEntry(session, message) {
   if (state.autoScroll) {
     feed.scrollTop = feed.scrollHeight;
   }
+}
+
+function toggleFeedType(type) {
+  state.feedTypeFilters[type] = !state.feedTypeFilters[type];
+  const btn = document.querySelector(`.feed-filter-btn[data-feedtype="${type}"]`);
+  if (btn) btn.classList.toggle('active', state.feedTypeFilters[type]);
+
+  // Show/hide existing entries of this type
+  document.querySelectorAll(`.feed-entry.type-${type}`).forEach(el => {
+    el.style.display = state.feedTypeFilters[type] ? '' : 'none';
+  });
 }
 
 function toggleExpand(id) {
