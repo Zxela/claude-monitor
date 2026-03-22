@@ -368,6 +368,27 @@
   .feed-entry.type-tool_result { border-left-color: rgba(0,204,255,0.25); }
   .feed-entry.type-error       { border-left-color: rgba(255,68,68,0.4); }
 
+  .feed-entry.tool-group-start {
+    margin-bottom: 0;
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+  }
+  .feed-entry.tool-group-end {
+    margin-top: 0;
+    padding-left: 28px;
+    border-radius: 0 0 3px 3px;
+    font-size: 11px;
+    opacity: 0.75;
+    border-left: 2px solid rgba(0,204,255,0.2);
+  }
+
+  .session-card.subagent {
+    margin-left: 16px;
+    border-left: 2px solid rgba(136, 0, 255, 0.4);
+    opacity: 0.85;
+    font-size: 0.95em;
+  }
+
   .fe-content {
     flex: 1;
     color: var(--text);
@@ -830,6 +851,7 @@ const state = {
   selectedSession: null,
   eventCount: 0,
   autoScroll: true,
+  lastToolEntry: null,
   wsRetryDelay: 1000,
   ws: null,
   currentView: 'list', // 'list' | 'pixels'
@@ -1334,9 +1356,26 @@ function renderSessions() {
   // Remove "no sessions" placeholder
   if (noSess) noSess.remove();
 
+  // Build hierarchy
+  const parentSessions = sessions.filter(s => !s.isSubagent);
+  const subagentsByParent = {};
+  sessions.filter(s => s.isSubagent).forEach(s => {
+    const pid = s.parentId || '__orphan__';
+    if (!subagentsByParent[pid]) subagentsByParent[pid] = [];
+    subagentsByParent[pid].push(s);
+  });
+
+  const orderedSessions = [];
+  parentSessions.forEach(p => {
+      orderedSessions.push(p);
+      (subagentsByParent[p.id] || []).forEach(c => orderedSessions.push(c));
+  });
+  // Orphan subagents at the end
+  (subagentsByParent['__orphan__'] || []).forEach(c => orderedSessions.push(c));
+
   // Update or create cards
   const existing = new Set([...list.querySelectorAll('.session-card')].map(el => el.dataset.sid));
-  const current  = new Set(sessions.map(s => s.id));
+  const current  = new Set(orderedSessions.map(s => s.id));
 
   // Remove stale
   existing.forEach(sid => {
@@ -1346,7 +1385,7 @@ function renderSessions() {
     }
   });
 
-  sessions.forEach((sess, idx) => {
+  orderedSessions.forEach((sess, idx) => {
     let card = list.querySelector(`[data-sid="${sess.id}"]`);
     const active = isActive(sess);
     const selected = state.selectedSession === sess.id;
@@ -1390,7 +1429,8 @@ function renderSessions() {
     card.innerHTML = html;
     card.className = 'session-card' +
       (active    ? ' active'   : '') +
-      (selected  ? ' selected' : '');
+      (selected  ? ' selected' : '') +
+      (sess.isSubagent ? ' subagent' : '');
   });
 }
 
@@ -1492,6 +1532,16 @@ function addFeedEntry(session, message) {
     `<span class="fe-type ${displayType}">[${displayType}]</span>` +
     `<span class="fe-content ${contentClass}">${escHtml(content)}</span>` +
     `<span class="fe-sid">${escHtml(sid)}</span>`;
+
+  if (isToolCall) {
+    el.classList.add('tool-group-start');
+    state.lastToolEntry = el;
+  } else if (isToolResult && state.lastToolEntry) {
+    el.classList.add('tool-group-end');
+    state.lastToolEntry = null;
+  } else {
+    state.lastToolEntry = null;
+  }
 
   feed.appendChild(el);
   state.eventCount++;
