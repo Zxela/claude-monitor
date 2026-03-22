@@ -183,6 +183,25 @@
     font-size: 8px;
   }
 
+  .inline-sprite-wrap {
+    flex: 0 0 24px;
+    height: 32px;
+    overflow: visible;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 4px;
+  }
+  .inline-sprite-wrap .sprite {
+    display: inline-block;
+    width: 1px;
+    height: 1px;
+    transform: scale(2);
+    transform-origin: top left;
+    margin: 8px 6px 16px 6px;
+    flex-shrink: 0;
+  }
+
   .subagent-chevron {
     font-size: 9px;
     color: var(--purple);
@@ -202,7 +221,10 @@
   #sessions-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 
   .session-card {
-    padding: 10px 10px 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 6px 10px 6px 4px;
     margin-bottom: 4px;
     border: 1px solid var(--border);
     border-radius: 3px;
@@ -211,6 +233,10 @@
     transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
     position: relative;
     overflow: hidden;
+  }
+  .session-card-content {
+    flex: 1;
+    min-width: 0;
   }
 
   .session-card::before {
@@ -320,6 +346,7 @@
   }
 
   .session-stats .cost  { color: var(--yellow); }
+  .session-stats .cost-rate { color: var(--text-dim); font-size: 9px; opacity: 0.6; }
   .session-stats .tok   { color: var(--cyan); }
   .session-stats .cache { color: var(--purple); }
 
@@ -1274,15 +1301,14 @@ const SPRITES = {
 let _spriteFrame = 0;
 function tickSprites() {
   _spriteFrame = (_spriteFrame + 1) % 2;
-  if (state.currentView === 'pixels') {
-    document.querySelectorAll('.agent-card').forEach(card => {
-      const sid = card.dataset.id;
-      const ss = sessionState[sid];
-      if (!ss) return;
-      const spriteEl = card.querySelector('.sprite');
-      if (spriteEl) renderSprite(ss.state, spriteEl);
-    });
-  }
+  // Animate all sprites — both in session cards and pixel grid
+  document.querySelectorAll('[data-sprite-sid]').forEach(el => {
+    const sid = el.dataset.spriteSid;
+    const ss = sessionState[sid];
+    if (!ss) return;
+    const spriteEl = el.querySelector('.sprite');
+    if (spriteEl) renderSprite(ss.state || 'idle', spriteEl);
+  });
 }
 let spriteIntervalId = setInterval(tickSprites, 1000);
 
@@ -1437,6 +1463,14 @@ function formatAge(ts) {
   const h = Math.floor(m / 60);
   if (h < 24)   return h + 'h ago';
   return Math.floor(h / 24) + 'd ago';
+}
+
+function formatCostRate(sess) {
+  if (!sess.totalCostUSD || !sess.startedAt || !sess.lastActive) return '';
+  const mins = (new Date(sess.lastActive) - new Date(sess.startedAt)) / 60000;
+  if (mins < 1) return '';
+  const rate = sess.totalCostUSD / mins;
+  return `${formatCost(rate)}/min`;
 }
 
 function formatDuration(startTs, endTs) {
@@ -1604,27 +1638,37 @@ function renderSessions() {
     const hasChildren = !isSub && childCount > 0;
     const chevron = hasChildren ? `<span class="subagent-chevron">${expanded ? '▾' : '▸'} ${childCount}</span>` : '';
 
+    const spriteState = (sessionState[sess.id] || {}).state || 'idle';
+    const spriteFrames = SPRITES[spriteState] || SPRITES.idle;
+    const spriteBoxShadow = spriteFrames[_spriteFrame % spriteFrames.length];
+
     const html = `
-      <div class="session-row1">
-        <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
-        <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
-        ${chevron}
-        ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
+      <div class="inline-sprite-wrap" data-sprite-sid="${sess.id}">
+        <div class="sprite" style="box-shadow:${spriteBoxShadow}"></div>
       </div>
-      <div class="session-stats">
-        <span class="cost">${formatCost(sess.totalCostUSD)}</span>
-        <span class="sep">·</span>
-        <span class="tok">${formatTokens(totalTok)} tok</span>
-        ${cacheHit !== null ? `<span class="sep">·</span><span class="cache">${cacheHit}% cache</span>` : ''}
+      <div class="session-card-content">
+        <div class="session-row1">
+          <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
+          <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
+          ${chevron}
+          ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
+        </div>
+        <div class="session-stats">
+          <span class="cost">${formatCost(sess.totalCostUSD)}</span>
+          ${sess.startedAt && sess.lastActive ? `<span class="cost-rate">${formatCostRate(sess)}</span>` : ''}
+          <span class="sep">·</span>
+          <span class="tok">${formatTokens(totalTok)} tok</span>
+          ${cacheHit !== null ? `<span class="sep">·</span><span class="cache">${cacheHit}% cache</span>` : ''}
+        </div>
+        <div class="session-meta">
+          <span class="sid">${(sess.id || '').slice(0, 8)}</span>
+          ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
+          <span class="sep">·</span>
+          <span>${formatAge(sess.lastActive)}</span>
+          ${sess.startedAt ? `<span class="sep">·</span><span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
+        </div>
+        <button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
       </div>
-      <div class="session-meta">
-        <span class="sid">${(sess.id || '').slice(0, 8)}</span>
-        ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
-        <span class="sep">·</span>
-        <span>${formatAge(sess.lastActive)}</span>
-        ${sess.startedAt ? `<span class="sep">·</span><span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
-      </div>
-      <button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
     `;
 
     const card = document.createElement('div');
