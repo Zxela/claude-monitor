@@ -107,6 +107,7 @@
     color: var(--text-dim);
     font-size: 11px;
     letter-spacing: 1px;
+    position: relative;
     white-space: nowrap;
     transition: color 0.3s;
   }
@@ -760,6 +761,70 @@
   }
 
   /* ── View Toggle ─────────────────────────────────────────────── */
+  .budget-gear {
+    cursor: pointer;
+    font-size: 10px;
+    opacity: 0.5;
+  }
+  .budget-gear:hover { opacity: 1; }
+  #budget-popover {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 8px 10px;
+    z-index: 50;
+    font-size: 11px;
+    color: var(--text);
+    width: 180px;
+  }
+  #budget-popover label { display: block; margin-bottom: 4px; font-size: 10px; color: var(--text-dim); }
+  #budget-popover input {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 11px;
+    padding: 3px 6px;
+    margin-bottom: 6px;
+  }
+  .budget-actions { display: flex; gap: 4px; }
+  .budget-actions button {
+    flex: 1;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 10px;
+    padding: 2px;
+    cursor: pointer;
+  }
+  .budget-actions button:hover { border-color: var(--border2); }
+  .over-budget { color: var(--red) !important; animation: budgetPulse 1s ease-in-out infinite; }
+  @keyframes budgetPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  #budget-banner {
+    background: rgba(255,68,68,0.1);
+    border-bottom: 1px solid rgba(255,68,68,0.3);
+    color: var(--red);
+    text-align: center;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-family: var(--font);
+    display: none;
+  }
+  #budget-banner button {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-family: var(--font); margin-left: 8px;
+  }
+
   .search-box {
     display: flex;
     align-items: center;
@@ -1000,8 +1065,16 @@
       <span class="val green" id="stat-sessions">0</span>
     </div>
     <div class="topbar-stat">
-      <span>TOTAL SPEND</span>
+      <span>TOTAL SPEND <span class="budget-gear" onclick="event.stopPropagation(); toggleBudgetPopover()" title="Set budget alert">⚙</span></span>
       <span class="val yellow" id="stat-cost">$0.000</span>
+      <div id="budget-popover" style="display:none;">
+        <label>Alert when total exceeds:</label>
+        <input type="number" id="budget-input" step="1" min="0" placeholder="e.g. 100" />
+        <div class="budget-actions">
+          <button onclick="saveBudget()">Set</button>
+          <button onclick="clearBudget()">Clear</button>
+        </div>
+      </div>
     </div>
     <div class="topbar-stat">
       <span>ACTIVE COST</span>
@@ -1020,6 +1093,8 @@
       <button class="view-btn" id="btn-pixels" onclick="setView('pixels')">PIXELS</button>
     </div>
   </div>
+
+  <div id="budget-banner">⚠ Budget alert: total spend exceeded threshold! <button onclick="dismissBudgetBanner()">dismiss</button></div>
 
   <!-- Main -->
   <div id="main">
@@ -1638,6 +1713,7 @@ function updateTopBar() {
   setStatVal('stat-cost', formatCost(totalCost));
   setStatVal('stat-active-cost', formatCost(activeCost));
   setStatVal('stat-cache', cacheHit !== null ? cacheHit + '%' : '—');
+  checkBudget(totalCost);
 }
 
 function setStatVal(id, val) {
@@ -1995,6 +2071,62 @@ function addFeedEntry(session, message) {
 
   if (state.autoScroll) {
     feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+// ── Budget alerts ─────────────────────────────────────────────
+state.budgetThreshold = parseFloat(localStorage.getItem('budget')) || null;
+state.budgetDismissed = false;
+
+function toggleBudgetPopover() {
+  const pop = document.getElementById('budget-popover');
+  const inp = document.getElementById('budget-input');
+  if (pop.style.display === 'none') {
+    pop.style.display = '';
+    if (state.budgetThreshold) inp.value = state.budgetThreshold;
+    inp.focus();
+  } else {
+    pop.style.display = 'none';
+  }
+}
+
+function saveBudget() {
+  const val = parseFloat(document.getElementById('budget-input').value);
+  if (val > 0) {
+    state.budgetThreshold = val;
+    localStorage.setItem('budget', val);
+    state.budgetDismissed = false;
+  }
+  document.getElementById('budget-popover').style.display = 'none';
+  updateTopBar();
+}
+
+function clearBudget() {
+  state.budgetThreshold = null;
+  localStorage.removeItem('budget');
+  state.budgetDismissed = false;
+  document.getElementById('budget-popover').style.display = 'none';
+  document.getElementById('budget-banner').style.display = 'none';
+  const costEl = document.getElementById('stat-cost');
+  if (costEl) costEl.classList.remove('over-budget');
+  updateTopBar();
+}
+
+function dismissBudgetBanner() {
+  document.getElementById('budget-banner').style.display = 'none';
+  state.budgetDismissed = true;
+}
+
+function checkBudget(totalCost) {
+  if (!state.budgetThreshold) return;
+  const costEl = document.getElementById('stat-cost');
+  const banner = document.getElementById('budget-banner');
+  if (totalCost >= state.budgetThreshold) {
+    if (costEl) costEl.classList.add('over-budget');
+    if (!state.budgetDismissed) banner.style.display = '';
+  } else {
+    if (costEl) costEl.classList.remove('over-budget');
+    banner.style.display = 'none';
   }
 }
 
