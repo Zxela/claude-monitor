@@ -70,6 +70,14 @@ func main() {
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	flag.Parse()
 
+	// Auto-enable Docker discovery if the socket exists and --docker wasn't explicitly set.
+	if !*dockerEnabled {
+		if _, err := os.Stat(*dockerSocket); err == nil {
+			*dockerEnabled = true
+			log.Println("docker socket found, auto-enabling container discovery")
+		}
+	}
+
 	store := session.NewStore()
 	h := hub.NewHub()
 
