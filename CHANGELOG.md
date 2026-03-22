@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/Zxela/claude-monitor/compare/v1.0.3...v1.1.0) (2026-03-22)
+
+
+### Features
+
+* add agent display type, fix tool_use expand, fix tool_result parsing ([e1391a3](https://github.com/Zxela/claude-monitor/commit/e1391a3c0ade0f2b68446a29305f02982a4cea3a))
+
+
+### Bug Fixes
+
+* escape backticks and template literals in feed content ([4070175](https://github.com/Zxela/claude-monitor/commit/40701753f739b32e00a6f93f040623982213fcc5))
+
+
+### Performance Improvements
+
+* debounce UI renders with requestAnimationFrame ([f5fa41b](https://github.com/Zxela/claude-monitor/commit/f5fa41bed0c15d94906e4ea6da6b3540bca53215))
+* debounce UI renders with requestAnimationFrame ([e049e8d](https://github.com/Zxela/claude-monitor/commit/e049e8d6823f84e338fd90cc3ce2a5d102a2f76a))
+
 ## [1.0.3](https://github.com/Zxela/claude-monitor/compare/v1.0.2...v1.0.3) (2026-03-22)
 
 
