@@ -152,6 +152,53 @@
     text-transform: uppercase;
   }
 
+  #session-filter-bar {
+    display: flex;
+    gap: 2px;
+    padding: 4px 6px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+  .filter-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-family: var(--font);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    padding: 3px 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--border2); color: var(--text); }
+  .filter-btn.active {
+    background: rgba(0,255,136,0.08);
+    border-color: rgba(0,255,136,0.3);
+    color: var(--green);
+  }
+  .filter-btn span {
+    opacity: 0.6;
+    font-size: 8px;
+  }
+
+  .session-card .subagent-toggle {
+    cursor: pointer;
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 2px 4px;
+    border: none;
+    background: none;
+    font-family: var(--font);
+  }
+  .session-card .subagent-toggle:hover { color: var(--text); }
+  .subagent-count {
+    font-size: 9px;
+    color: var(--purple);
+    opacity: 0.7;
+  }
+
   #sessions-list {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -801,6 +848,11 @@
       <!-- Sessions Panel -->
       <div id="sessions-panel">
         <div class="panel-header">SESSIONS</div>
+        <div id="session-filter-bar">
+          <button class="filter-btn active" data-filter="active" onclick="setSessionFilter('active')">Active <span id="filter-count-active">0</span></button>
+          <button class="filter-btn" data-filter="recent" onclick="setSessionFilter('recent')">Recent <span id="filter-count-recent">0</span></button>
+          <button class="filter-btn" data-filter="all" onclick="setSessionFilter('all')">All <span id="filter-count-all">0</span></button>
+        </div>
         <div id="sessions-list">
           <div id="no-sessions">AWAITING SESSIONS...</div>
         </div>
@@ -879,6 +931,8 @@ const state = {
   wsRetryDelay: 1000,
   ws: null,
   currentView: 'list', // 'list' | 'pixels'
+  sessionFilter: 'active', // 'active' | 'recent' | 'all'
+  expandedParents: new Set(), // parent session IDs with expanded subagent list
   // Replay state
   replay: {
     sessionId: null,
@@ -1224,6 +1278,7 @@ function renderPixelView() {
   if (!grid) return;
 
   const sessions = Object.values(state.sessions)
+    .filter(matchesFilter)
     .sort((a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0));
 
   // Track which IDs we rendered
@@ -1363,63 +1418,111 @@ function setStatVal(id, val) {
   }
 }
 
+// ── Session filtering ──────────────────────────────────────────
+function isRecent(session) {
+  if (!session.lastActive) return false;
+  return (Date.now() - new Date(session.lastActive).getTime()) < 3600_000; // 1 hour
+}
+
+function matchesFilter(session) {
+  if (state.sessionFilter === 'active') return isActive(session);
+  if (state.sessionFilter === 'recent') return isRecent(session);
+  return true; // 'all'
+}
+
+function setSessionFilter(filter) {
+  state.sessionFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+  renderSessions();
+  if (state.currentView === 'pixels') renderPixelView();
+}
+
+function updateFilterCounts() {
+  const all = Object.values(state.sessions);
+  const active = all.filter(isActive).length;
+  const recent = all.filter(isRecent).length;
+  const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  el('filter-count-active', active);
+  el('filter-count-recent', recent);
+  el('filter-count-all', all.length);
+}
+
 // ── Sessions list ──────────────────────────────────────────────
 function renderSessions() {
   const list = document.getElementById('sessions-list');
   const noSess = document.getElementById('no-sessions');
-  const sessions = Object.values(state.sessions)
+  const allSessions = Object.values(state.sessions)
     .sort((a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0));
 
-  if (sessions.length === 0) {
+  updateFilterCounts();
+
+  if (allSessions.length === 0) {
     if (!noSess) {
       list.innerHTML = '<div id="no-sessions">AWAITING SESSIONS...</div>';
     }
     return;
   }
-
-  // Remove "no sessions" placeholder
   if (noSess) noSess.remove();
 
-  // Build hierarchy
-  const parentSessions = sessions.filter(s => !s.isSubagent);
+  // Build hierarchy: group subagents under parents
+  const parentSessions = allSessions.filter(s => !s.isSubagent);
   const subagentsByParent = {};
-  sessions.filter(s => s.isSubagent).forEach(s => {
+  allSessions.filter(s => s.isSubagent).forEach(s => {
     const pid = s.parentId || '__orphan__';
     if (!subagentsByParent[pid]) subagentsByParent[pid] = [];
     subagentsByParent[pid].push(s);
   });
 
-  const orderedSessions = [];
+  // Apply filter and build visible list
+  const visibleItems = []; // {sess, isSubagent, childCount}
   parentSessions.forEach(p => {
-      orderedSessions.push(p);
-      (subagentsByParent[p.id] || []).forEach(c => orderedSessions.push(c));
-  });
-  // Orphan subagents at the end
-  (subagentsByParent['__orphan__'] || []).forEach(c => orderedSessions.push(c));
-
-  // Update or create cards
-  const existing = new Set([...list.querySelectorAll('.session-card')].map(el => el.dataset.sid));
-  const current  = new Set(orderedSessions.map(s => s.id));
-
-  // Remove stale
-  existing.forEach(sid => {
-    if (!current.has(sid)) {
-      const el = list.querySelector(`[data-sid="${sid}"]`);
-      if (el) el.remove();
+    const children = subagentsByParent[p.id] || [];
+    const parentMatches = matchesFilter(p);
+    const activeChildren = children.filter(matchesFilter);
+    // Show parent if it matches OR it has matching children
+    if (parentMatches || activeChildren.length > 0) {
+      visibleItems.push({ sess: p, isSubagent: false, childCount: children.length });
+      // Show children only if parent is expanded
+      if (state.expandedParents.has(p.id)) {
+        const shownChildren = state.sessionFilter === 'all' ? children : activeChildren;
+        shownChildren.forEach(c => {
+          visibleItems.push({ sess: c, isSubagent: true, childCount: 0 });
+        });
+      }
     }
   });
+  // Orphan subagents
+  (subagentsByParent['__orphan__'] || []).filter(matchesFilter).forEach(c => {
+    visibleItems.push({ sess: c, isSubagent: true, childCount: 0 });
+  });
 
-  orderedSessions.forEach((sess, idx) => {
-    let card = list.querySelector(`[data-sid="${sess.id}"]`);
+  // Clear list and rebuild (simpler than incremental DOM diffing for filtered views)
+  list.innerHTML = '';
+
+  if (visibleItems.length === 0) {
+    list.innerHTML = '<div id="no-sessions" style="color:var(--text-dim);padding:20px;text-align:center;font-size:11px;">No sessions match filter</div>';
+    return;
+  }
+
+  visibleItems.forEach(({ sess, isSubagent: isSub, childCount }) => {
     const active = isActive(sess);
     const selected = state.selectedSession === sess.id;
     const cacheHit = sess.cacheHitPct != null ? Math.round(sess.cacheHitPct) : null;
     const totalTok = (sess.inputTokens || 0) + (sess.outputTokens || 0);
+    const expanded = state.expandedParents.has(sess.id);
+
+    // Subagent toggle for parents with children
+    const toggleHtml = (!isSub && childCount > 0)
+      ? `<button class="subagent-toggle" onclick="event.stopPropagation(); toggleSubagents('${sess.id}')">${expanded ? '▾' : '▸'}</button><span class="subagent-count">${childCount}</span>`
+      : '';
 
     const html = `
       <div class="session-row1">
         <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
-        <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 22)}</span>
+        <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
+        ${toggleHtml}
         ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
       </div>
       <div class="session-stats">
@@ -1433,31 +1536,29 @@ function renderSessions() {
         ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
         <span class="sep">·</span>
         <span>${formatAge(sess.lastActive)}</span>
-        ${sess.gitBranch ? `<span class="sep">·</span><span class="branch">${escHtml(sess.gitBranch)}</span>` : ''}
       </div>
       <button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
     `;
 
-    if (!card) {
-      card = document.createElement('div');
-      card.className = 'session-card';
-      card.dataset.sid = sess.id;
-      card.addEventListener('click', () => toggleSession(sess.id));
-      // Insert at correct position
-      const cards = [...list.querySelectorAll('.session-card')];
-      if (cards[idx]) {
-        list.insertBefore(card, cards[idx]);
-      } else {
-        list.appendChild(card);
-      }
-    }
-
-    card.innerHTML = html;
+    const card = document.createElement('div');
     card.className = 'session-card' +
-      (active    ? ' active'   : '') +
-      (selected  ? ' selected' : '') +
-      (sess.isSubagent ? ' subagent' : '');
+      (active ? ' active' : '') +
+      (selected ? ' selected' : '') +
+      (isSub ? ' subagent' : '');
+    card.dataset.sid = sess.id;
+    card.innerHTML = html;
+    card.addEventListener('click', () => toggleSession(sess.id));
+    list.appendChild(card);
   });
+}
+
+function toggleSubagents(parentId) {
+  if (state.expandedParents.has(parentId)) {
+    state.expandedParents.delete(parentId);
+  } else {
+    state.expandedParents.add(parentId);
+  }
+  renderSessions();
 }
 
 function toggleSession(id) {
