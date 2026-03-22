@@ -164,13 +164,14 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		msg.ContentText = fmt.Sprintf("[hook: %s] %s", raw.Data.HookEvent, raw.Data.HookName)
 	}
 
-	// Prefer message.content, fall back to top-level content.
-	contentRaw := raw.Message.Content
-	if len(contentRaw) == 0 {
-		contentRaw = raw.Content
+	// Skip content extraction for hook messages (contentText already set above).
+	if msg.HookEvent == "" {
+		contentRaw := raw.Message.Content
+		if len(contentRaw) == 0 {
+			contentRaw = raw.Content
+		}
+		msg.ContentText, msg.ToolName, msg.FullContent, msg.ToolDetail = extractContent(contentRaw)
 	}
-
-	msg.ContentText, msg.ToolName, msg.FullContent, msg.ToolDetail = extractContent(contentRaw)
 
 	return msg, nil
 }
