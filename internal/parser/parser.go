@@ -81,6 +81,32 @@ func (m *ParsedMessage) IsConversationMessage() bool {
 	}
 }
 
+type modelPricing struct {
+	InputPerMTok       float64
+	OutputPerMTok      float64
+	CacheReadPerMTok   float64
+	CacheCreatePerMTok float64
+}
+
+var pricingTable = map[string]modelPricing{
+	"claude-opus-4-6":   {15.0, 75.0, 1.50, 18.75},
+	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
+	"claude-haiku-4-5":  {0.80, 4.0, 0.08, 1.0},
+}
+
+var defaultPricing = pricingTable["claude-sonnet-4-6"]
+
+func computeCost(model string, usage rawUsage) float64 {
+	p, ok := pricingTable[model]
+	if !ok {
+		p = defaultPricing
+	}
+	return float64(usage.InputTokens)*p.InputPerMTok/1e6 +
+		float64(usage.OutputTokens)*p.OutputPerMTok/1e6 +
+		float64(usage.CacheReadInputTokens)*p.CacheReadPerMTok/1e6 +
+		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
+}
+
 // ParseLine unmarshals a single JSONL line and returns a ParsedMessage.
 func ParseLine(line []byte) (*ParsedMessage, error) {
 	var raw rawMessage
@@ -92,10 +118,7 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	cacheReadTokens := usage.CacheReadInputTokens
 	cacheCreationTokens := usage.CacheCreationInputTokens
 
-	cost := float64(usage.InputTokens)*3.0/1e6 +
-		float64(usage.OutputTokens)*15.0/1e6 +
-		float64(cacheReadTokens)*0.30/1e6 +
-		float64(cacheCreationTokens)*3.75/1e6
+	cost := computeCost(raw.Message.Model, usage)
 
 	msg := &ParsedMessage{
 		Type:         raw.Type,
