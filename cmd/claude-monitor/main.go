@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -42,6 +43,19 @@ func (r *repeatable) String() string { return fmt.Sprintf("%v", *r) }
 func (r *repeatable) Set(v string) error {
 	*r = append(*r, v)
 	return nil
+}
+
+// parentSessionIDFromPath extracts the parent session ID from a subagent JSONL
+// file path. Subagent files live at:
+//   .../projects/<hash>/<parent-session-id>/subagents/agent-<id>.jsonl
+func parentSessionIDFromPath(filePath string) string {
+	dir := filepath.Dir(filePath)   // .../subagents/
+	dirName := filepath.Base(dir)
+	if dirName == "subagents" {
+		parentDir := filepath.Dir(dir) // .../<parent-session-id>/
+		return filepath.Base(parentDir)
+	}
+	return ""
 }
 
 func main() {
@@ -119,9 +133,21 @@ func main() {
 				if msg.Model != "" {
 					s.Model = msg.Model
 				}
-				if msg.ParentUUID != "" && s.ParentID == "" {
-					s.ParentID = msg.ParentUUID
-					s.IsSubagent = true
+				if msg.Type == "custom-title" && msg.ContentText != "" {
+					s.SessionName = msg.ContentText
+				} else if msg.Type == "agent-name" && msg.ContentText != "" && s.SessionName == "" {
+					s.SessionName = msg.ContentText
+				}
+				if s.SessionName != "" {
+					s.ProjectName = s.SessionName
+				}
+				if msg.IsSidechain || msg.ParentUUID != "" {
+					if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
+						if s.ParentID == "" {
+							s.ParentID = parentSID
+							s.IsSubagent = true
+						}
+					}
 				}
 				s.TotalCost += msg.CostUSD
 				s.InputTokens += msg.InputTokens
@@ -171,12 +197,15 @@ func main() {
 				eventType = "session_new"
 			}
 
-			// Skip broadcasting empty streaming chunks (no content, no tool)
-			// to reduce noise in the live feed. Still broadcast session_new
-			// and session updates for stats.
 			broadcastMsg := msg
-			if eventType == "message" && msg.ContentText == "" && msg.ToolName == "" && !msg.IsConversationMessage() {
-				broadcastMsg = nil
+			if eventType == "message" {
+				if msg.Role == "assistant" && msg.StopReason == "" && msg.ToolName == "" {
+					// Skip intermediate streaming chunks (no stop_reason, no tool)
+					broadcastMsg = nil
+				} else if !msg.IsConversationMessage() && msg.ContentText == "" {
+					// Skip empty non-conversation messages
+					broadcastMsg = nil
+				}
 			}
 
 			payload, err := json.Marshal(broadcastEvent{

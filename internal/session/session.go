@@ -14,6 +14,7 @@ type Session struct {
 	ID           string    `json:"id"`
 	ProjectDir   string    `json:"projectDir"`
 	ProjectName  string    `json:"projectName"`
+	SessionName  string    `json:"sessionName,omitempty"`
 	FilePath     string    `json:"filePath"`
 	TotalCost    float64   `json:"totalCostUSD"`
 	InputTokens  int64     `json:"inputTokens"`
