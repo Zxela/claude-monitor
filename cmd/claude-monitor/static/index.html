@@ -853,8 +853,8 @@
       <div id="sessions-panel">
         <div class="panel-header">SESSIONS</div>
         <div id="session-filter-bar">
-          <button class="filter-btn active" data-filter="active" onclick="setSessionFilter('active')">Active <span id="filter-count-active">0</span></button>
-          <button class="filter-btn" data-filter="recent" onclick="setSessionFilter('recent')">Recent <span id="filter-count-recent">0</span></button>
+          <button class="filter-btn" data-filter="active" onclick="setSessionFilter('active')">Active <span id="filter-count-active">0</span></button>
+          <button class="filter-btn active" data-filter="recent" onclick="setSessionFilter('recent')">Recent <span id="filter-count-recent">0</span></button>
           <button class="filter-btn" data-filter="all" onclick="setSessionFilter('all')">All <span id="filter-count-all">0</span></button>
         </div>
         <div id="sessions-list">
@@ -935,7 +935,7 @@ const state = {
   wsRetryDelay: 1000,
   ws: null,
   currentView: 'list', // 'list' | 'pixels'
-  sessionFilter: 'active', // 'active' | 'recent' | 'all'
+  sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
   // Replay state
   replay: {
@@ -1446,7 +1446,7 @@ function setStatVal(id, val) {
 // ── Session filtering ──────────────────────────────────────────
 function isRecent(session) {
   if (!session.lastActive) return false;
-  return (Date.now() - new Date(session.lastActive).getTime()) < 3600_000; // 1 hour
+  return (Date.now() - new Date(session.lastActive).getTime()) < 14400_000; // 4 hours
 }
 
 function matchesFilter(session) {
@@ -1509,10 +1509,9 @@ function renderSessions() {
     // Show parent if it matches OR it has matching children
     if (parentMatches || activeChildren.length > 0) {
       visibleItems.push({ sess: p, isSubagent: false, childCount: children.length });
-      // Show children only if parent is expanded
+      // Show children only if parent is expanded — show ALL children when expanded
       if (state.expandedParents.has(p.id)) {
-        const shownChildren = state.sessionFilter === 'all' ? children : activeChildren;
-        shownChildren.forEach(c => {
+        children.forEach(c => {
           visibleItems.push({ sess: c, isSubagent: true, childCount: 0 });
         });
       }
