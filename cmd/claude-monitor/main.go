@@ -77,6 +77,96 @@ func main() {
 		log.Fatalf("failed to create watcher: %v", err)
 	}
 
+	// processEvent parses a watcher event and updates the session store.
+	// Returns the parsed message, session, and whether it's a new session.
+	processEvent := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
+		msg, err := parser.ParseLine(ev.Line)
+		if err != nil {
+			return nil, nil, false
+		}
+		_, exists := store.Get(ev.SessionID)
+		isNew := !exists
+
+		sess := store.Upsert(ev.SessionID, func(s *session.Session) {
+			s.FilePath = ev.FilePath
+			s.ProjectDir = ev.ProjectDir
+			if ev.Label != "" {
+				s.ProjectName = ev.Label + " / " + ev.ProjectDir
+			} else if s.ProjectName == "" {
+				s.ProjectName = ev.ProjectDir
+			}
+			if msg.CWD != "" {
+				s.CWD = msg.CWD
+			}
+			if msg.GitBranch != "" {
+				s.GitBranch = msg.GitBranch
+			}
+			if msg.Model != "" {
+				s.Model = msg.Model
+			}
+			if msg.Type == "custom-title" && msg.ContentText != "" {
+				s.SessionName = msg.ContentText
+			} else if msg.Type == "agent-name" && msg.ContentText != "" && s.SessionName == "" {
+				s.SessionName = msg.ContentText
+			}
+			if s.SessionName != "" {
+				s.ProjectName = s.SessionName
+			}
+			if msg.IsSidechain || msg.ParentUUID != "" {
+				if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
+					if s.ParentID == "" {
+						s.ParentID = parentSID
+						s.IsSubagent = true
+					}
+				}
+			}
+			s.TotalCost += msg.CostUSD
+			s.InputTokens += msg.InputTokens
+			s.OutputTokens += msg.OutputTokens
+			s.CacheTokens += msg.CacheTokens
+			if msg.IsConversationMessage() {
+				if s.SeenMessageIDs == nil {
+					s.SeenMessageIDs = make(map[string]bool)
+				}
+				if msg.MessageID != "" {
+					if !s.SeenMessageIDs[msg.MessageID] {
+						s.SeenMessageIDs[msg.MessageID] = true
+						s.MessageCount++
+					}
+				} else {
+					s.MessageCount++
+				}
+			}
+			if !msg.Timestamp.IsZero() {
+				s.LastActive = msg.Timestamp
+			} else {
+				s.LastActive = time.Now()
+			}
+			if msg.StopReason == "end_turn" {
+				s.Status = "waiting"
+			} else if msg.StopReason == "tool_use" {
+				s.Status = "tool_use"
+			} else if msg.ToolName != "" {
+				s.Status = "tool_use"
+			} else if msg.Role == "assistant" {
+				s.Status = "thinking"
+			} else if msg.Role == "user" {
+				s.Status = "thinking"
+			}
+		})
+
+		if sess.IsSubagent && sess.ParentID != "" {
+			store.LinkChild(sess.ParentID, ev.SessionID)
+		}
+
+		return msg, sess, isNew
+	}
+
+	// Bootstrap callback: process historical lines for stats only (no broadcast).
+	w.SetBootstrapCallback(func(ev watcher.Event) {
+		processEvent(ev)
+	})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -107,89 +197,14 @@ func main() {
 	// Process watcher events: parse, update store, broadcast.
 	go func() {
 		for ev := range events {
-			msg, err := parser.ParseLine(ev.Line)
-			if err != nil {
-				log.Printf("parse error (%s): %v", ev.FilePath, err)
+			msg, sess, isNew := processEvent(ev)
+			if msg == nil {
 				continue
 			}
-			// Determine whether this is the first message for this session.
-			_, isNew := store.Get(ev.SessionID)
-			isNew = !isNew
 
-			sess := store.Upsert(ev.SessionID, func(s *session.Session) {
-				s.FilePath = ev.FilePath
-				s.ProjectDir = ev.ProjectDir
-				if ev.Label != "" {
-					s.ProjectName = ev.Label + " / " + ev.ProjectDir
-				} else {
-					s.ProjectName = ev.ProjectDir // use dir name as display name
-				}
-				if msg.CWD != "" {
-					s.CWD = msg.CWD
-				}
-				if msg.GitBranch != "" {
-					s.GitBranch = msg.GitBranch
-				}
-				if msg.Model != "" {
-					s.Model = msg.Model
-				}
-				if msg.Type == "custom-title" && msg.ContentText != "" {
-					s.SessionName = msg.ContentText
-				} else if msg.Type == "agent-name" && msg.ContentText != "" && s.SessionName == "" {
-					s.SessionName = msg.ContentText
-				}
-				if s.SessionName != "" {
-					s.ProjectName = s.SessionName
-				}
-				if msg.IsSidechain || msg.ParentUUID != "" {
-					if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
-						if s.ParentID == "" {
-							s.ParentID = parentSID
-							s.IsSubagent = true
-						}
-					}
-				}
-				s.TotalCost += msg.CostUSD
-				s.InputTokens += msg.InputTokens
-				s.OutputTokens += msg.OutputTokens
-				s.CacheTokens += msg.CacheTokens
-				// Only count real conversation messages (user/assistant), and
-				// deduplicate streaming chunks that share the same message ID.
-				if msg.IsConversationMessage() {
-					if s.SeenMessageIDs == nil {
-						s.SeenMessageIDs = make(map[string]bool)
-					}
-					if msg.MessageID != "" {
-						if !s.SeenMessageIDs[msg.MessageID] {
-							s.SeenMessageIDs[msg.MessageID] = true
-							s.MessageCount++
-						}
-					} else {
-						s.MessageCount++
-					}
-				}
-				if !msg.Timestamp.IsZero() {
-					s.LastActive = msg.Timestamp
-				} else {
-					s.LastActive = time.Now()
-				}
-				// Derive session status from message signals.
-				if msg.StopReason == "end_turn" {
-					s.Status = "waiting"
-				} else if msg.StopReason == "tool_use" {
-					s.Status = "tool_use"
-				} else if msg.ToolName != "" {
-					s.Status = "tool_use"
-				} else if msg.Role == "assistant" {
-					s.Status = "thinking"
-				} else if msg.Role == "user" {
-					s.Status = "thinking"
-				}
-			})
-
-			// Link parent-child if subagent
-			if sess.IsSubagent && sess.ParentID != "" {
-				store.LinkChild(sess.ParentID, ev.SessionID)
+			// Don't broadcast historical data — only used for bootstrapping stats.
+			if ev.Bootstrap {
+				continue
 			}
 
 			eventType := "message"
@@ -206,6 +221,11 @@ func main() {
 					// Skip empty non-conversation messages
 					broadcastMsg = nil
 				}
+			}
+
+			// Don't broadcast historical data — only used for bootstrapping stats.
+			if ev.Bootstrap {
+				continue
 			}
 
 			payload, err := json.Marshal(broadcastEvent{

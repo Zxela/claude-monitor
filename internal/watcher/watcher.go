@@ -33,6 +33,8 @@ type Event struct {
 	// Label is an optional prefix set when the path was added via Add (e.g. a
 	// Docker container name). Empty for default/extra paths.
 	Label string
+	// Bootstrap is true for events emitted from historical data read on startup.
+	Bootstrap bool
 }
 
 // fileState tracks our read position within a single JSONL file.
@@ -47,8 +49,10 @@ type Watcher struct {
 	mu        sync.Mutex
 	basePaths []string              // directories to scan
 	labels    map[string]string     // basePath -> label (container name)
-	states    map[string]*fileState
-	events    chan Event
+	states      map[string]*fileState
+	events      chan Event
+	bootstrapping bool              // true during initial scan
+	bootstrapCB   func(Event)       // called synchronously for bootstrap events
 }
 
 // New creates a Watcher that will scan basePaths plus any extraPaths provided.
@@ -69,6 +73,12 @@ func New(extraPaths []string) (*Watcher, error) {
 		states:    make(map[string]*fileState),
 		events:    make(chan Event, 512),
 	}, nil
+}
+
+// SetBootstrapCallback sets a function to call synchronously for each historical
+// line during the initial scan, bypassing the event channel.
+func (w *Watcher) SetBootstrapCallback(cb func(Event)) {
+	w.bootstrapCB = cb
 }
 
 // Add begins watching path at runtime, tagging sessions from that path with
@@ -146,9 +156,15 @@ func (w *Watcher) Start(ctx context.Context) <-chan Event {
 func (w *Watcher) run(ctx context.Context) {
 	defer close(w.events)
 
-	// Initial scan.
+	// Initial scan — read all existing data to bootstrap session stats.
 	w.mu.Lock()
+	w.bootstrapping = true
 	w.scanAll()
+	// After tracking files, read their existing content.
+	for _, state := range w.states {
+		w.readNewLines(state.path)
+	}
+	w.bootstrapping = false
 	w.mu.Unlock()
 
 	ticker := time.NewTicker(pollInterval)
@@ -249,19 +265,24 @@ func (w *Watcher) scanPathNoLock(base string) {
 }
 
 // ensureTracked registers a JSONL file for watching if not already tracked.
-// For new files we seek to the end so we only emit lines written after startup.
+// Files are read from the beginning so historical data bootstraps session stats.
 func (w *Watcher) ensureTracked(path string) {
 	if _, ok := w.states[path]; ok {
 		return
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		return
+	if w.bootstrapCB != nil {
+		// When a bootstrap callback is set, read from the beginning
+		// so historical data can be used to build initial session stats.
+		w.states[path] = &fileState{path: path, offset: 0}
+	} else {
+		// No bootstrap callback — start from EOF (only emit new lines).
+		info, err := os.Stat(path)
+		if err != nil {
+			return
+		}
+		w.states[path] = &fileState{path: path, offset: info.Size()}
 	}
-
-	// Start reading from the current end of file so we don't replay history.
-	w.states[path] = &fileState{path: path, offset: info.Size()}
 
 	// Watch the parent directory (fsnotify watches dirs, not individual files).
 	dir := filepath.Dir(path)
@@ -332,14 +353,22 @@ func (w *Watcher) emit(filePath string, line []byte) {
 	projectDir := projectDirFromPath(filePath)
 	label := w.labelForPath(filePath)
 
-	select {
-	case w.events <- Event{
+	ev := Event{
 		SessionID:  sessionID,
 		ProjectDir: projectDir,
 		FilePath:   filePath,
 		Line:       append([]byte(nil), line...), // copy
 		Label:      label,
-	}:
+		Bootstrap:  w.bootstrapping,
+	}
+
+	if w.bootstrapping && w.bootstrapCB != nil {
+		w.bootstrapCB(ev)
+		return
+	}
+
+	select {
+	case w.events <- ev:
 	default:
 		log.Printf("watcher event channel full, dropping line from %s", filePath)
 	}
