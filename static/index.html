@@ -457,11 +457,19 @@
 
   .fe-content {
     flex: 1;
+    min-width: 0;
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 12px;
+  }
+  .feed-entry.expanded .fe-content {
+    overflow: visible;
+    white-space: normal;
+  }
+  .feed-entry.expanded {
+    align-items: flex-start;
   }
   .fe-expand {
     display: inline-block;
@@ -1800,12 +1808,15 @@ function addFeedEntry(session, message) {
 function toggleExpand(id) {
   const el = document.getElementById(id);
   if (!el) return;
+  const entry = el.closest('.feed-entry');
   const btn = el.previousElementSibling;
   if (el.style.display === 'none') {
     el.style.display = 'block';
+    if (entry) entry.classList.add('expanded');
     if (btn) btn.textContent = '−';
   } else {
     el.style.display = 'none';
+    if (entry) entry.classList.remove('expanded');
     if (btn) btn.textContent = '+';
   }
 }
@@ -2107,9 +2118,28 @@ async function loadInitialSessions() {
 }
 
 // ── Age ticker ─────────────────────────────────────────────────
+// Periodic UI refresh + session data poll for status transitions.
 setInterval(() => {
   renderSessions();
-}, 15_000);
+  updateTopBar();
+}, 10_000);
+
+// Poll session data every 30s to catch status transitions.
+setInterval(async () => {
+  try {
+    const resp = await fetch('/api/sessions');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const sessions = Array.isArray(data) ? data : (data.sessions || []);
+    sessions.forEach(s => {
+      if (s && s.id) {
+        state.sessions[s.id] = { ...(state.sessions[s.id] || {}), ...s };
+      }
+    });
+    renderSessions();
+    updateTopBar();
+  } catch (e) { /* ignore */ }
+}, 30_000);
 
 // Scrubber seek — fires on mouseup/touchend (change event).
 document.getElementById('replay-scrubber').addEventListener('change', (e) => {
