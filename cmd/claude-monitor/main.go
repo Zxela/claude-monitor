@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -261,6 +262,63 @@ func main() {
 		if err := json.NewEncoder(w).Encode(sessions); err != nil {
 			log.Printf("api/sessions encode error: %v", err)
 		}
+	})
+
+	// Cross-session search — searches ContentText and ToolDetail across all sessions.
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]"))
+			return
+		}
+		limitStr := r.URL.Query().Get("limit")
+		limit := 50
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+
+		queryLower := strings.ToLower(query)
+
+		type searchResult struct {
+			SessionID   string `json:"sessionId"`
+			SessionName string `json:"sessionName"`
+			parser.ParsedMessage
+		}
+
+		var results []searchResult
+		for _, sess := range store.All() {
+			if sess.FilePath == "" {
+				continue
+			}
+			events, err := replay.ReadFile(sess.FilePath)
+			if err != nil && len(events) == 0 {
+				continue
+			}
+			displayName := sess.ProjectName
+			if sess.SessionName != "" {
+				displayName = sess.SessionName
+			}
+			for _, ev := range events {
+				if len(results) >= limit {
+					break
+				}
+				text := strings.ToLower(ev.ContentText + " " + ev.ToolDetail + " " + ev.ToolName)
+				if strings.Contains(text, queryLower) {
+					results = append(results, searchResult{
+						SessionID:     sess.ID,
+						SessionName:   displayName,
+						ParsedMessage: ev.ParsedMessage,
+					})
+				}
+			}
+			if len(results) >= limit {
+				break
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
 	})
 
 	// Recent messages for a session — returns last N parsed messages for feed population.

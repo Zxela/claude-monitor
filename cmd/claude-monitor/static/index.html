@@ -691,6 +691,35 @@
   }
 
   /* ── View Toggle ─────────────────────────────────────────────── */
+  .search-box {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    position: relative;
+  }
+  .search-box input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 11px;
+    padding: 4px 24px 4px 8px;
+    width: 180px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .search-box input:focus { border-color: var(--blue); }
+  .search-box input::placeholder { color: var(--text-dim); font-size: 10px; }
+  #search-clear {
+    position: absolute;
+    right: 14px;
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  #search-clear:hover { color: var(--text); }
+
   .view-toggle {
     display: flex;
     align-items: center;
@@ -912,6 +941,10 @@
     <div class="topbar-stat">
       <span>CACHE HIT</span>
       <span class="val" id="stat-cache" style="color:var(--purple)">—</span>
+    </div>
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="Search all sessions..." onkeyup="handleSearch(event)" />
+      <span id="search-clear" onclick="clearSearch()" style="display:none">&times;</span>
     </div>
     <div class="view-toggle">
       <button class="view-btn active" id="btn-list" onclick="setView('list')">LIST</button>
@@ -1885,6 +1918,96 @@ function addFeedEntry(session, message) {
   if (state.autoScroll) {
     feed.scrollTop = feed.scrollHeight;
   }
+}
+
+// ── Cross-session search ──────────────────────────────────────
+let _searchTimeout = null;
+let _searchActive = false;
+
+function handleSearch(event) {
+  const input = document.getElementById('search-input');
+  const query = input.value.trim();
+  const clearBtn = document.getElementById('search-clear');
+
+  if (event.key === 'Escape') {
+    clearSearch();
+    return;
+  }
+
+  clearBtn.style.display = query ? '' : 'none';
+
+  clearTimeout(_searchTimeout);
+  if (!query) {
+    if (_searchActive) clearSearch();
+    return;
+  }
+
+  _searchTimeout = setTimeout(() => executeSearch(query), 300);
+}
+
+async function executeSearch(query) {
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '<div style="color:var(--text-dim);padding:20px;text-align:center;font-size:11px;">Searching...</div>';
+  _searchActive = true;
+
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=100`);
+    if (!resp.ok) return;
+    const results = await resp.json();
+
+    feed.innerHTML = '';
+    if (!results || results.length === 0) {
+      feed.innerHTML = '<div style="color:var(--text-dim);padding:20px;text-align:center;font-size:11px;">No results</div>';
+      return;
+    }
+
+    // Show result count
+    const countEl = document.createElement('div');
+    countEl.style.cssText = 'color:var(--text-dim);padding:4px 12px;font-size:10px;border-bottom:1px solid var(--border);';
+    countEl.textContent = `${results.length} results for "${query}"`;
+    feed.appendChild(countEl);
+
+    state.lastToolEntry = null;
+    results.forEach(r => {
+      const sess = state.sessions[r.sessionId] || { id: r.sessionId };
+      // Build a feed entry with session badge
+      const el = document.createElement('div');
+      const type = r.role || r.type || 'system';
+      const toolName = r.toolName || '';
+      const isToolCall = toolName && type === 'assistant';
+      const displayType = isToolCall ? 'tool_use' : type;
+      const content = r.toolDetail ? `[${toolName}] ${truncate(r.toolDetail, 80)}` : truncate(r.contentText || '', 120);
+
+      el.className = `feed-entry type-${displayType}`;
+      el.innerHTML =
+        `<span class="fe-time">${formatTime(r.timestamp)}</span>` +
+        `<span class="fe-type ${displayType}">[${displayType}]</span>` +
+        `<span class="fe-content">${escHtml(content)}</span>` +
+        `<span class="fe-sid" style="color:var(--blue);cursor:pointer" onclick="selectSearchResult('${r.sessionId}')">${escHtml(r.sessionName || r.sessionId.slice(0, 8))}</span>`;
+      feed.appendChild(el);
+    });
+  } catch (e) {
+    feed.innerHTML = '<div style="color:var(--red);padding:20px;text-align:center;font-size:11px;">Search failed</div>';
+  }
+}
+
+function selectSearchResult(sessionId) {
+  clearSearch();
+  state.selectedSession = sessionId;
+  renderSessions();
+  updateFeedFilter();
+  loadRecentMessages(sessionId);
+}
+
+function clearSearch() {
+  const input = document.getElementById('search-input');
+  input.value = '';
+  document.getElementById('search-clear').style.display = 'none';
+  _searchActive = false;
+  // Restore live feed
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+  state.eventCount = 0;
 }
 
 function toggleFeedType(type) {
