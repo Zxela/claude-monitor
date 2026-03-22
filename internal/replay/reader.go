@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"time"
@@ -18,7 +19,7 @@ type Event struct {
 }
 
 // ReadFile reads all JSONL lines from path and returns them as Events in order.
-// Malformed lines are silently skipped (same behaviour as the watcher).
+// Malformed lines are logged with their byte offset and skipped.
 func ReadFile(path string) ([]Event, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -29,18 +30,24 @@ func ReadFile(path string) ([]Event, error) {
 	var events []Event
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
+	var byteOffset int64
 	i := 0
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
+		lineLen := int64(len(scanner.Bytes())) + 1 // +1 for newline
 		if len(line) == 0 {
+			byteOffset += lineLen
 			continue
 		}
 		msg, err := parser.ParseLine(line)
 		if err != nil {
+			log.Printf("replay: skipping unparseable line at byte offset %d in %s: %v", byteOffset, path, err)
+			byteOffset += lineLen
 			continue
 		}
 		events = append(events, Event{Index: i, ParsedMessage: *msg})
 		i++
+		byteOffset += lineLen
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "replay: scanner error reading %s: %v (some events may be missing)\n", path, err)
