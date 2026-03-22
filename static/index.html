@@ -1562,10 +1562,22 @@ function renderGraph() {
   const W = rect.width;
   const H = rect.height;
 
-  // Build nodes and edges from sessions
+  // Build nodes and edges from sessions — graph shows active + recently active (2 min)
   const sessions = Object.values(state.sessions);
-  const filtered = typeof matchesFilter === 'function' ? sessions.filter(matchesFilter) : sessions;
+  const graphCutoff = 120_000; // 2 minutes
+  const filtered = sessions.filter(s => {
+    if (isActive(s)) return true;
+    if (s.lastActive && (Date.now() - new Date(s.lastActive).getTime()) < graphCutoff) return true;
+    return false;
+  });
   const idSet = new Set(filtered.map(s => s.id));
+  // Also include parents of visible nodes even if idle (so edges render)
+  filtered.forEach(s => {
+    if (s.parentId && !idSet.has(s.parentId) && state.sessions[s.parentId]) {
+      filtered.push(state.sessions[s.parentId]);
+      idSet.add(s.parentId);
+    }
+  });
 
   // Only rebuild nodes if session set changed
   const currentIds = new Set(graphState.nodes.map(n => n.id));
