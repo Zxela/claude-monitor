@@ -817,16 +817,20 @@
       CLAUDE MONITOR
     </div>
     <div class="topbar-stat">
-      <span>SESSIONS</span>
+      <span>ACTIVE</span>
       <span class="val green" id="stat-sessions">0</span>
     </div>
     <div class="topbar-stat">
-      <span>TODAY</span>
+      <span>TOTAL SPEND</span>
       <span class="val yellow" id="stat-cost">$0.000</span>
     </div>
     <div class="topbar-stat">
+      <span>ACTIVE COST</span>
+      <span class="val cyan" id="stat-active-cost">$0.000</span>
+    </div>
+    <div class="topbar-stat">
       <span>CACHE HIT</span>
-      <span class="val cyan" id="stat-cache">—</span>
+      <span class="val" id="stat-cache" style="color:var(--purple)">—</span>
     </div>
     <div class="view-toggle">
       <button class="view-btn active" id="btn-list" onclick="setView('list')">LIST</button>
@@ -1344,9 +1348,12 @@ function renderPixelView() {
 
 // ── Formatting helpers ─────────────────────────────────────────
 function formatCost(n) {
-  if (!n || isNaN(n)) return '$0.000';
-  if (n < 0.001) return '$0.0000';
-  return '$' + n.toFixed(3);
+  if (!n || isNaN(n)) return '$0.00';
+  if (n >= 100) return '$' + Math.round(n);
+  if (n >= 10) return '$' + n.toFixed(1);
+  if (n >= 1) return '$' + n.toFixed(2);
+  if (n >= 0.01) return '$' + n.toFixed(3);
+  return '$' + n.toFixed(4);
 }
 
 function formatTokens(n) {
@@ -1387,14 +1394,17 @@ function isActive(session) {
 // ── Top bar ────────────────────────────────────────────────────
 function updateTopBar() {
   const sessions = Object.values(state.sessions);
-  const count = sessions.length;
+  const activeSessions = sessions.filter(isActive);
 
-  // Cost: sum of all totalCostUSD
-  const cost = sessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
+  // Total spend across all sessions
+  const totalCost = sessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
 
-  // Cache hit: weighted average using backend-computed cacheHitPct
+  // Active session cost
+  const activeCost = activeSessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
+
+  // Cache hit: weighted average across active sessions
   let totalToks = 0, weightedPct = 0;
-  sessions.forEach(s => {
+  activeSessions.forEach(s => {
     const tot = (s.inputTokens || 0) + (s.outputTokens || 0);
     totalToks += tot;
     if (tot > 0 && s.cacheHitPct != null) {
@@ -1403,8 +1413,9 @@ function updateTopBar() {
   });
   const cacheHit = totalToks > 0 ? Math.round(weightedPct / totalToks) : null;
 
-  setStatVal('stat-sessions', count);
-  setStatVal('stat-cost', formatCost(cost));
+  setStatVal('stat-sessions', activeSessions.length);
+  setStatVal('stat-cost', formatCost(totalCost));
+  setStatVal('stat-active-cost', formatCost(activeCost));
   setStatVal('stat-cache', cacheHit !== null ? cacheHit + '%' : '—');
 }
 
