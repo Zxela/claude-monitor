@@ -322,8 +322,68 @@ func TestParseLine_ToolResultBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if msg.ContentText != "[tool_result]" {
-		t.Errorf("ContentText: got %q, want %q", msg.ContentText, "[tool_result]")
+	if msg.ContentText != "some output" {
+		t.Errorf("ContentText: got %q, want %q", msg.ContentText, "some output")
+	}
+}
+
+func TestParseLine_ToolResultStringContent(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"file contents here","tool_use_id":"tu_1"}]},"sessionId":"sess-tr","uuid":"uuid-tr","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.ContentText != "file contents here" {
+		t.Errorf("ContentText: got %q, want %q", msg.ContentText, "file contents here")
+	}
+	if msg.ForToolUseID != "tu_1" {
+		t.Errorf("ForToolUseID: got %q, want %q", msg.ForToolUseID, "tu_1")
+	}
+}
+
+func TestParseLine_ToolResultArrayContent(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":[{"type":"text","text":"line one"},{"type":"text","text":"line two"}],"tool_use_id":"tu_2"}]},"sessionId":"sess-tra","uuid":"uuid-tra","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.ContentText != "line one line two" {
+		t.Errorf("ContentText: got %q, want %q", msg.ContentText, "line one line two")
+	}
+}
+
+func TestParseLine_ToolUseFullContent(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"echo hello world this is a long command that should be stored as full content for expansion in the UI dashboard when users click the expand button to see the full tool input parameters and details","description":"Run a long echo command for testing purposes"}}]},"sessionId":"sess-fc","uuid":"uuid-fc","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.FullContent == "" {
+		t.Error("FullContent should be set for tool_use with large input")
+	}
+	if msg.ToolName != "Bash" {
+		t.Errorf("ToolName: got %q, want %q", msg.ToolName, "Bash")
+	}
+}
+
+func TestParseLine_AgentIsAgent(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_agent1","name":"Agent","input":{"description":"Find files","subagent_type":"Explore","prompt":"search for config files"}}]},"sessionId":"sess-ag","uuid":"uuid-ag","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !msg.IsAgent {
+		t.Error("IsAgent should be true for Agent tool")
+	}
+	if msg.ToolName != "Agent" {
+		t.Errorf("ToolName: got %q, want %q", msg.ToolName, "Agent")
+	}
+	if msg.ToolUseID != "toolu_agent1" {
+		t.Errorf("ToolUseID: got %q, want %q", msg.ToolUseID, "toolu_agent1")
 	}
 }
 

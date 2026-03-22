@@ -4,6 +4,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -52,11 +53,13 @@ type rawUsage struct {
 
 // contentBlock represents one element inside a content array.
 type contentBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text,omitempty"`
-	Name    string          `json:"name,omitempty"`    // for tool_use blocks
-	Content string          `json:"content,omitempty"` // for tool_result blocks (string form)
-	Input   json.RawMessage `json:"input,omitempty"`   // for tool_use blocks (raw input params)
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Name      string          `json:"name,omitempty"`       // for tool_use blocks
+	ID        string          `json:"id,omitempty"`         // tool_use block ID
+	Content   json.RawMessage `json:"content,omitempty"`    // for tool_result blocks (string or array)
+	Input     json.RawMessage `json:"input,omitempty"`      // for tool_use blocks (raw input params)
+	ToolUseID string          `json:"tool_use_id,omitempty"` // for tool_result blocks: links to tool_use
 }
 
 // ParsedMessage is the normalised representation of one JSONL line.
@@ -84,6 +87,10 @@ type ParsedMessage struct {
 	HookEvent    string    `json:"hookEvent,omitempty"`
 	HookName     string    `json:"hookName,omitempty"`
 	ToolDetail   string    `json:"toolDetail,omitempty"` // extra context for Agent/Skill calls
+	IsAgent      bool      `json:"isAgent,omitempty"`      // true when toolName is "Agent"
+	ToolUseID    string    `json:"toolUseId,omitempty"`    // first tool_use block ID
+	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
+	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -177,55 +184,98 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		if len(contentRaw) == 0 {
 			contentRaw = raw.Content
 		}
-		msg.ContentText, msg.ToolName, msg.FullContent, msg.ToolDetail = extractContent(contentRaw)
+		ci := extractContent(contentRaw)
+		msg.ContentText = ci.text
+		msg.ToolName = ci.toolName
+		msg.FullContent = ci.fullText
+		msg.ToolDetail = ci.toolDetail
+		msg.ToolUseID = ci.toolUseID
+		msg.ForToolUseID = ci.forToolUseID
+		msg.IsAgent = msg.ToolName == "Agent"
+		// Populate ToolUseIDs for batched tool calls
+		if len(ci.toolUseAll) > 1 {
+			ids := make([]string, len(ci.toolUseAll))
+			for i, tu := range ci.toolUseAll {
+				ids[i] = tu.ID
+			}
+			msg.ToolUseIDs = ids
+		}
 	}
 
 	return msg, nil
 }
 
+// toolUseEntry records metadata for a single tool_use block in a content array.
+type toolUseEntry struct {
+	ID      string // tool_use block ID
+	Name    string // tool name (e.g. "Agent", "Bash")
+	IsAgent bool
+}
+
+// contentInfo bundles everything extracted from a content field.
+type contentInfo struct {
+	text         string // preview text (truncated)
+	toolName     string
+	fullText     string // untruncated content
+	toolDetail   string
+	toolUseID    string         // first tool_use block ID
+	toolUseAll   []toolUseEntry // all tool_use blocks (for batched calls)
+	forToolUseID string         // tool_use_id from tool_result block
+}
+
 // extractContent attempts to decode content as a string first, then as a
-// content-block array. Returns (textPreview, toolName, fullText, toolDetail).
-func extractContent(raw json.RawMessage) (string, string, string, string) {
+// content-block array.
+func extractContent(raw json.RawMessage) contentInfo {
 	if len(raw) == 0 {
-		return "", "", "", ""
+		return contentInfo{}
 	}
 
 	// Try plain string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		if len([]rune(s)) <= maxContentPreview {
-			return s, "", "", ""
+			return contentInfo{text: s}
 		}
-		return truncate(s, maxContentPreview), "", s, ""
+		return contentInfo{text: truncate(s, maxContentPreview), fullText: s}
 	}
 
 	// Try array of content blocks.
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", "", "", ""
+		return contentInfo{}
 	}
 
-	var firstText string
-	var fullText string
-	var toolName string
-	var toolDetail string
+	var info contentInfo
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if b.Text != "" && firstText == "" {
-				firstText = truncate(b.Text, maxContentPreview)
+			if b.Text != "" && info.text == "" {
+				info.text = truncate(b.Text, maxContentPreview)
 				if len([]rune(b.Text)) > maxContentPreview {
-					fullText = b.Text
+					info.fullText = b.Text
 				}
 			}
 		case "thinking":
-			if firstText == "" {
-				firstText = "[thinking...]"
+			if info.text == "" {
+				info.text = "[thinking...]"
 			}
 		case "tool_use":
-			toolName = b.Name
-			if firstText == "" {
-				firstText = fmt.Sprintf("[tool: %s]", b.Name)
+			info.toolName = b.Name
+			if info.toolUseID == "" {
+				info.toolUseID = b.ID // first tool_use ID
+			}
+			info.toolUseAll = append(info.toolUseAll, toolUseEntry{
+				ID: b.ID, Name: b.Name, IsAgent: b.Name == "Agent",
+			})
+			if info.text == "" {
+				info.text = fmt.Sprintf("[tool: %s]", b.Name)
+			}
+			// Store full input JSON as expandable content (only if text block didn't set it).
+			if info.fullText == "" && len(b.Input) > 0 {
+				prettyInput, err := json.MarshalIndent(json.RawMessage(b.Input), "", "  ")
+				if err == nil && len(prettyInput) > maxContentPreview {
+					info.fullText = string(prettyInput)
+				}
 			}
 			// Extract tool input detail.
 			if len(b.Input) > 0 {
@@ -241,72 +291,92 @@ func extractContent(raw json.RawMessage) (string, string, string, string) {
 						if name != "" { parts = append(parts, name) }
 						if desc != "" { parts = append(parts, desc) }
 						if len(parts) > 0 {
-							toolDetail = joinParts(parts)
-							firstText = fmt.Sprintf("[agent: %s]", toolDetail)
+							info.toolDetail = strings.Join(parts, " / ")
+							info.text = fmt.Sprintf("[agent: %s]", info.toolDetail)
 						}
 					case "Skill":
 						skill, _ := inp["skill"].(string)
 						if skill != "" {
-							toolDetail = skill
-							firstText = fmt.Sprintf("[skill: %s]", skill)
+							info.toolDetail = skill
+							info.text = fmt.Sprintf("[skill: %s]", skill)
 						}
 					case "Bash":
 						cmd, _ := inp["command"].(string)
 						desc, _ := inp["description"].(string)
-						if desc != "" { toolDetail = desc } else { toolDetail = truncate(cmd, 120) }
+						if desc != "" { info.toolDetail = desc } else { info.toolDetail = truncate(cmd, 120) }
 					case "Read":
 						fp, _ := inp["file_path"].(string)
-						toolDetail = fp
+						info.toolDetail = fp
 					case "Write":
 						fp, _ := inp["file_path"].(string)
-						toolDetail = fp
+						info.toolDetail = fp
 					case "Edit":
 						fp, _ := inp["file_path"].(string)
-						toolDetail = fp
+						info.toolDetail = fp
 					case "Grep":
 						pat, _ := inp["pattern"].(string)
-						toolDetail = pat
+						info.toolDetail = pat
 					case "Glob":
 						pat, _ := inp["pattern"].(string)
-						toolDetail = pat
+						info.toolDetail = pat
 					default:
 						// Generic: stringify first key-value pair
 						summary := truncate(string(b.Input), 100)
-						toolDetail = summary
+						info.toolDetail = summary
 					}
 				}
 			}
 		case "tool_result":
-			if firstText == "" {
-				if b.Content != "" {
-					firstText = truncate(b.Content, maxContentPreview)
-					if len([]rune(b.Content)) > maxContentPreview {
-						fullText = b.Content
+			info.forToolUseID = b.ToolUseID
+			if info.text == "" {
+				resultText := extractToolResultContent(b.Content)
+				// Fallback to Text field if Content didn't produce anything.
+				if resultText == "" && b.Text != "" {
+					resultText = b.Text
+				}
+				if resultText != "" {
+					info.text = truncate(resultText, maxContentPreview)
+					if len([]rune(resultText)) > maxContentPreview {
+						info.fullText = resultText
 					}
 				} else {
-					firstText = "[tool_result]"
+					info.text = "[tool_result]"
 				}
 			}
 		}
 	}
-	if toolName != "" {
-		if firstText == "" {
-			firstText = fmt.Sprintf("[tool: %s]", toolName)
-		}
-		return firstText, toolName, fullText, toolDetail
+	if info.toolName != "" && info.text == "" {
+		info.text = fmt.Sprintf("[tool: %s]", info.toolName)
 	}
-	return firstText, "", fullText, toolDetail
+	return info
 }
 
-func joinParts(parts []string) string {
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += " / "
-		}
-		result += p
+// extractToolResultContent handles tool_result content that can be either a
+// plain string or an array of content blocks like [{"type":"text","text":"..."}].
+func extractToolResultContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
 	}
-	return result
+	// Try plain string first.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Try array of content blocks.
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
 }
 
 // truncate returns at most n runes from s (valid UTF-8 boundary aware).

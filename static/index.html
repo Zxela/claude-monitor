@@ -21,6 +21,7 @@
     --cyan:      #00ccff;
     --red:       #ff4444;
     --purple:    #cc88ff;
+    --orange:    #ff8844;
     --font:      'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   }
 
@@ -448,6 +449,7 @@
   .fe-type.user        { color: var(--blue); }
   .fe-type.assistant   { color: var(--green); }
   .fe-type.tool_use    { color: var(--yellow); }
+  .fe-type.agent       { color: var(--orange); }
   .fe-type.tool_result { color: var(--cyan); }
   .fe-type.error       { color: var(--red); }
   .fe-type.system      { color: var(--text-dim); }
@@ -473,6 +475,7 @@
   .feed-filter-btn.active[data-feedtype="user"]        { color: var(--blue); border-color: rgba(68,136,255,0.4); background: rgba(68,136,255,0.08); }
   .feed-filter-btn.active[data-feedtype="assistant"]   { color: var(--green); border-color: rgba(0,255,136,0.4); background: rgba(0,255,136,0.08); }
   .feed-filter-btn.active[data-feedtype="tool_use"]    { color: var(--yellow); border-color: rgba(255,204,0,0.4); background: rgba(255,204,0,0.08); }
+  .feed-filter-btn.active[data-feedtype="agent"]       { color: var(--orange); border-color: rgba(255,136,68,0.4); background: rgba(255,136,68,0.08); }
   .feed-filter-btn.active[data-feedtype="tool_result"] { color: var(--cyan); border-color: rgba(0,204,255,0.4); background: rgba(0,204,255,0.08); }
   .feed-filter-btn.active[data-feedtype="hook"]        { color: var(--purple); border-color: rgba(204,136,255,0.4); background: rgba(204,136,255,0.08); }
 
@@ -483,6 +486,7 @@
   .feed-entry.type-user        { border-left-color: rgba(68,136,255,0.3); }
   .feed-entry.type-assistant   { border-left-color: rgba(0,255,136,0.25); }
   .feed-entry.type-tool_use    { border-left-color: rgba(255,204,0,0.3); }
+  .feed-entry.type-agent       { border-left-color: rgba(255,136,68,0.35); }
   .feed-entry.type-tool_result { border-left-color: rgba(0,204,255,0.25); }
   .feed-entry.type-error       { border-left-color: rgba(255,68,68,0.4); }
 
@@ -735,6 +739,7 @@
   .tl-segment.type-user        { background: rgba(68,136,255,0.5); }
   .tl-segment.type-assistant   { background: rgba(0,255,136,0.3); }
   .tl-segment.type-tool_use    { background: rgba(255,204,0,0.5); }
+  .tl-segment.type-agent       { background: rgba(255,136,68,0.5); }
   .tl-segment.type-tool_result { background: rgba(0,204,255,0.4); }
   .tl-segment.type-hook        { background: rgba(204,136,255,0.3); }
   .tl-segment.type-system      { background: rgba(102,102,128,0.3); }
@@ -1176,6 +1181,7 @@
           <button class="feed-filter-btn active" data-feedtype="user" onclick="toggleFeedType('user')">user</button>
           <button class="feed-filter-btn active" data-feedtype="assistant" onclick="toggleFeedType('assistant')">assistant</button>
           <button class="feed-filter-btn active" data-feedtype="tool_use" onclick="toggleFeedType('tool_use')">tools</button>
+          <button class="feed-filter-btn active" data-feedtype="agent" onclick="toggleFeedType('agent')">agents</button>
           <button class="feed-filter-btn active" data-feedtype="tool_result" onclick="toggleFeedType('tool_result')">results</button>
           <button class="feed-filter-btn active" data-feedtype="hook" onclick="toggleFeedType('hook')">hooks</button>
         </div>
@@ -1243,12 +1249,14 @@ const state = {
   eventCount: 0,
   autoScroll: true,
   lastToolEntry: null,
+  lastToolType: null,
+  toolUseMap: {},  // maps tool_use_id → {displayType, toolName} for pairing results with calls
   wsRetryDelay: 1000,
   ws: null,
   currentView: 'list', // 'list' | 'graph'
   sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
-  feedTypeFilters: { user: true, assistant: true, tool_use: true, tool_result: true, hook: true },
+  feedTypeFilters: { user: true, assistant: true, tool_use: true, agent: true, tool_result: true, hook: true },
   // Replay state
   replay: {
     sessionId: null,
@@ -2126,7 +2134,16 @@ function renderSessions() {
       card.addEventListener('click', (e) => {
         // Let replay/timeline buttons handle their own click
         if (e.target.closest('.replay-btn') || e.target.closest('.timeline-btn')) return;
-        toggleSubagents(sess.id);
+        // Chevron click toggles expand/collapse only
+        if (e.target.closest('.subagent-chevron')) {
+          toggleSubagents(sess.id);
+          return;
+        }
+        // Clicking the card body selects the session AND expands if collapsed
+        if (!state.expandedParents.has(sess.id)) {
+          state.expandedParents.add(sess.id);
+        }
+        toggleSession(sess.id);
       });
     } else {
       card.addEventListener('click', () => toggleSession(sess.id));
@@ -2141,10 +2158,19 @@ function toggleSubagents(parentId) {
   } else {
     state.expandedParents.add(parentId);
   }
-  // Also select the parent to show its feed
-  state.selectedSession = parentId;
-  updateFeedFilter();
-  loadRecentMessages(parentId);
+  // Select the parent if nothing is selected yet
+  if (!state.selectedSession) {
+    state.selectedSession = parentId;
+    updateFeedFilter();
+    const feed = document.getElementById('feed');
+    feed.innerHTML = '';
+    state.eventCount = 0;
+    state.lastToolEntry = null;
+    state.lastToolType = null;
+    state.toolUseMap = {};
+    document.getElementById('event-count').textContent = '0';
+    loadRecentMessages(parentId);
+  }
   renderSessions();
 }
 
@@ -2154,8 +2180,15 @@ function toggleSession(id) {
   renderSessions();
   updateFeedFilter();
 
-  // Load recent messages when selecting a session
+  // Clear feed immediately when changing sessions, then load new messages
   if (!wasSelected && id) {
+    const feed = document.getElementById('feed');
+    feed.innerHTML = '';
+    state.eventCount = 0;
+    state.lastToolEntry = null;
+    state.lastToolType = null;
+    state.toolUseMap = {};
+    document.getElementById('event-count').textContent = '0';
     loadRecentMessages(id);
   }
 }
@@ -2163,18 +2196,23 @@ function toggleSession(id) {
 async function loadRecentMessages(sessionId) {
   try {
     const resp = await fetch(`/api/sessions/${sessionId}/recent`);
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      console.warn(`loadRecentMessages: ${resp.status} for session ${sessionId}`);
+      return;
+    }
     const messages = await resp.json();
     if (!messages || !Array.isArray(messages)) return;
+
+    const sess = state.sessions[sessionId];
+    if (!sess) return;
 
     // Clear feed and populate with recent messages
     const feed = document.getElementById('feed');
     feed.innerHTML = '';
     state.eventCount = 0;
     state.lastToolEntry = null;
-
-    const sess = state.sessions[sessionId];
-    if (!sess) return;
+    state.lastToolType = null;
+    state.toolUseMap = {};
 
     messages.forEach(msg => {
       addFeedEntry(sess, msg);
@@ -2256,17 +2294,24 @@ function addFeedEntry(session, message) {
 
   // Detect tool calls: backend sends toolName on assistant messages
   const toolName = message.toolName || getToolName(message);
-  const isToolCall = !isHook && toolName && (type === 'assistant' || type === 'tool_use');
-  const isToolResult = !isHook && (type === 'tool_result' || (type === 'user' && state.lastToolEntry));
+  const isAgent = !isHook && (message.isAgent || toolName === 'Agent');
+  const isToolCall = !isHook && !isAgent && toolName && (type === 'assistant' || type === 'tool_use');
+  const isToolResult = !isHook && !isToolCall && !isAgent && (type === 'tool_result' || (type === 'user' && state.lastToolEntry));
+
+  // Look up the originating tool call for this result via tool_use_id
+  const forToolUseId = message.forToolUseId || '';
+  const originCall = forToolUseId ? state.toolUseMap[forToolUseId] : null;
 
   if (isHook) {
     content = getMessageText(message);
     contentClass = 'hook';
+  } else if (isAgent) {
+    const detail = message.toolDetail || '';
+    content = detail ? `[agent: ${detail}]` : `[agent] ${truncate(getMessageText(message), 80)}`;
+    contentClass = 'tool';
   } else if (isToolCall) {
     const detail = message.toolDetail || '';
-    if (toolName === 'Agent' && detail) {
-      content = `[agent: ${detail}]`;
-    } else if (toolName === 'Skill' && detail) {
+    if (toolName === 'Skill' && detail) {
       content = `[skill: ${detail}]`;
     } else if (detail) {
       content = `[${toolName}] ${truncate(detail, 80)}`;
@@ -2288,7 +2333,24 @@ function addFeedEntry(session, message) {
     contentClass = 'dim';
   }
 
-  const displayType = isHook ? 'hook' : isToolCall ? 'tool_use' : isToolResult ? 'tool_result' : type;
+  // Determine display type — tool_results inherit the type of their originating call
+  let displayType;
+  if (isHook) {
+    displayType = 'hook';
+  } else if (isAgent) {
+    displayType = 'agent';
+  } else if (isToolCall) {
+    displayType = 'tool_use';
+  } else if (isToolResult && originCall) {
+    displayType = originCall.displayType;  // inherit from originating call (e.g. agent result stays 'agent')
+  } else if (isToolResult && state.lastToolType) {
+    displayType = state.lastToolType;  // fallback: positional tracking
+  } else if (isToolResult) {
+    displayType = 'tool_result';
+  } else {
+    displayType = type;
+  }
+
   const hasFullContent = message.fullContent && message.fullContent.length > content.length;
 
   const el = document.createElement('div');
@@ -2302,20 +2364,32 @@ function addFeedEntry(session, message) {
       `<pre class="fe-full-content" id="${fullId}" style="display:none">${escHtml(message.fullContent)}</pre>`;
   }
 
+  // Show result label for inherited types (e.g. "agent" result instead of "tool_result")
+  const typeLabel = isToolResult ? displayType + '_result' : displayType;
   el.innerHTML =
     `<span class="fe-time">${formatTime(ts)}</span>` +
-    `<span class="fe-type ${displayType}">[${displayType}]</span>` +
+    `<span class="fe-type ${displayType}">[${typeLabel}]</span>` +
     `<span class="fe-content ${contentClass}">${escHtml(content)}${expandHtml}</span>` +
     `<span class="fe-sid">${escHtml(sid)}</span>`;
 
-  if (isToolCall) {
+  if (isToolCall || isAgent) {
     el.classList.add('tool-group-start');
     state.lastToolEntry = el;
-  } else if (isToolResult && state.lastToolEntry) {
+    state.lastToolType = displayType;
+    // Register in map so results can look up their originating call.
+    // For batched calls, register all tool_use IDs.
+    const allIds = message.toolUseIds || (message.toolUseId ? [message.toolUseId] : []);
+    allIds.forEach(tuId => {
+      state.toolUseMap[tuId] = { displayType, toolName: toolName || 'Agent' };
+    });
+  } else if (isToolResult && (state.lastToolEntry || originCall)) {
     el.classList.add('tool-group-end');
     state.lastToolEntry = null;
+    state.lastToolType = null;
+    if (forToolUseId) delete state.toolUseMap[forToolUseId];
   } else {
     state.lastToolEntry = null;
+    state.lastToolType = null;
   }
 
   // Hide if this type is filtered out
@@ -2570,8 +2644,9 @@ async function openTimeline(sessionId) {
 
       const type = ev.role || ev.type || 'system';
       const toolName = ev.toolName || '';
-      const isToolCall = toolName && type === 'assistant';
-      const displayType = isToolCall ? 'tool_use' : type;
+      const isAgent = ev.isAgent || toolName === 'Agent';
+      const isToolCall = !isAgent && toolName && type === 'assistant';
+      const displayType = isAgent ? 'agent' : isToolCall ? 'tool_use' : type;
 
       segments.push({ ...ev, duration, displayType, toolName });
     }

@@ -189,7 +189,7 @@ func main() {
 
 	if *dockerEnabled {
 		dc := docker.NewClient(*dockerSocket)
-		dockerCh, err := docker.Watch(ctx, dc, 30*time.Second)
+		dockerCh, err := docker.Watch(ctx, dc, 5*time.Second)
 		if err != nil {
 			log.Printf("docker discovery: %v (continuing without Docker)", err)
 		} else {
