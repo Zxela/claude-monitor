@@ -896,16 +896,12 @@
     background: rgba(255,255,255,0.05);
   }
 
-  /* ── Pixel View ──────────────────────────────────────────────── */
-  #pixel-view {
+  /* ── Graph View ──────────────────────────────────────────────── */
+  #graph-view {
     flex: 1 1 auto;
-    overflow-y: auto;
-    padding: 16px;
+    overflow: hidden;
+    position: relative;
   }
-
-  #pixel-view::-webkit-scrollbar { width: 4px; }
-  #pixel-view::-webkit-scrollbar-track { background: transparent; }
-  #pixel-view::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 
   .pixel-grid {
     display: grid;
@@ -1090,7 +1086,7 @@
     </div>
     <div class="view-toggle">
       <button class="view-btn active" id="btn-list" onclick="setView('list')">LIST</button>
-      <button class="view-btn" id="btn-pixels" onclick="setView('pixels')">PIXELS</button>
+      <button class="view-btn" id="btn-graph" onclick="setView('graph')">GRAPH</button>
     </div>
   </div>
 
@@ -1099,9 +1095,9 @@
   <!-- Main -->
   <div id="main">
 
-    <!-- Pixel View (hidden by default) -->
-    <div id="pixel-view" style="display:none;">
-      <div class="pixel-grid" id="pixel-grid"></div>
+    <!-- Graph View (hidden by default) -->
+    <div id="graph-view" style="display:none;">
+      <canvas id="graph-canvas" style="width:100%;height:100%;"></canvas>
     </div>
 
     <!-- List View wrapper (sessions + feed + replay) -->
@@ -1208,7 +1204,7 @@ const state = {
   lastToolEntry: null,
   wsRetryDelay: 1000,
   ws: null,
-  currentView: 'list', // 'list' | 'pixels'
+  currentView: 'list', // 'list' | 'graph'
   sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
   feedTypeFilters: { user: true, assistant: true, tool_use: true, tool_result: true, hook: true },
@@ -1517,107 +1513,316 @@ function renderSprite(spriteState, el) {
 
 // ── View switching ─────────────────────────────────────────────
 function setView(view) {
+  // Stop graph animation when leaving graph view
+  if (state.currentView === 'graph' && view !== 'graph') {
+    stopGraphAnimation();
+  }
   state.currentView = view;
   const listView   = document.getElementById('list-view');
-  const pixelView  = document.getElementById('pixel-view');
+  const graphView  = document.getElementById('graph-view');
   const btnList    = document.getElementById('btn-list');
-  const btnPixels  = document.getElementById('btn-pixels');
+  const btnGraph   = document.getElementById('btn-graph');
 
-  if (view === 'pixels') {
+  if (view === 'graph') {
     listView.style.display  = 'none';
-    pixelView.style.display = 'flex';
+    graphView.style.display = 'flex';
     btnList.classList.remove('active');
-    btnPixels.classList.add('active');
-    renderPixelView();
+    btnGraph.classList.add('active');
+    startGraphAnimation();
   } else {
     listView.style.display  = 'flex';
-    pixelView.style.display = 'none';
+    graphView.style.display = 'none';
     btnList.classList.add('active');
-    btnPixels.classList.remove('active');
+    btnGraph.classList.remove('active');
   }
 }
 
-// ── Pixel view rendering ───────────────────────────────────────
-const STATE_LABELS = {
-  idle: '● IDLE',
-  thinking: '● THINKING',
-  tool: '● TOOL',
-  typing: '● TYPING',
+// ── Graph view rendering ───────────────────────────────────────
+const graphState = {
+  nodes: [],    // {id, x, y, vx, vy, radius, color, label, session}
+  edges: [],    // {source, target}
+  dragging: null,
+  hovering: null,
+  animating: false,
 };
 
-function costClass(cost) {
-  if (!cost || cost < 0.10) return 'cost-green';
-  if (cost < 1.00)          return 'cost-amber';
-  return 'cost-red';
+function renderGraph() {
+  const canvas = document.getElementById('graph-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  // Size canvas to container
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  const W = rect.width;
+  const H = rect.height;
+
+  // Build nodes and edges from sessions
+  const sessions = Object.values(state.sessions);
+  const filtered = typeof matchesFilter === 'function' ? sessions.filter(matchesFilter) : sessions;
+  const idSet = new Set(filtered.map(s => s.id));
+
+  // Only rebuild nodes if session set changed
+  const currentIds = new Set(graphState.nodes.map(n => n.id));
+  const needsRebuild = filtered.length !== graphState.nodes.length ||
+    filtered.some(s => !currentIds.has(s.id));
+
+  if (needsRebuild) {
+    graphState.nodes = filtered.map((s, i) => {
+      const existing = graphState.nodes.find(n => n.id === s.id);
+      const cost = s.totalCostUSD || 0;
+      const radius = Math.max(8, Math.min(30, Math.log(cost + 1) * 5 + 8));
+
+      const statusColors = {
+        thinking: '#ffcc00',
+        tool_use: '#4488ff',
+        waiting: '#00ff88',
+        idle: '#44445a',
+      };
+      const color = s.isActive ? (statusColors[s.status] || '#00ff88') : '#44445a';
+      const label = s.sessionName || s.projectName || s.id.slice(0, 8);
+
+      return {
+        id: s.id,
+        x: existing ? existing.x : W/2 + (Math.random() - 0.5) * W * 0.6,
+        y: existing ? existing.y : H/2 + (Math.random() - 0.5) * H * 0.6,
+        vx: existing ? existing.vx : 0,
+        vy: existing ? existing.vy : 0,
+        radius,
+        color,
+        label: label.length > 16 ? label.slice(0, 15) + '\u2026' : label,
+        session: s,
+      };
+    });
+
+    graphState.edges = [];
+    filtered.forEach(s => {
+      if (s.parentId && idSet.has(s.parentId)) {
+        graphState.edges.push({ source: s.parentId, target: s.id });
+      }
+    });
+  } else {
+    // Update colors/labels without changing positions
+    graphState.nodes.forEach(n => {
+      const s = state.sessions[n.id];
+      if (!s) return;
+      const statusColors = { thinking: '#ffcc00', tool_use: '#4488ff', waiting: '#00ff88', idle: '#44445a' };
+      n.color = s.isActive ? (statusColors[s.status] || '#00ff88') : '#44445a';
+      n.radius = Math.max(8, Math.min(30, Math.log((s.totalCostUSD || 0) + 1) * 5 + 8));
+    });
+  }
+
+  // Force simulation step
+  const nodes = graphState.nodes;
+  const edges = graphState.edges;
+  const nodeMap = {};
+  nodes.forEach(n => nodeMap[n.id] = n);
+
+  // Repulsion
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      const force = 2000 / (dist * dist);
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      a.vx -= fx; a.vy -= fy;
+      b.vx += fx; b.vy += fy;
+    }
+  }
+
+  // Attraction along edges
+  edges.forEach(e => {
+    const a = nodeMap[e.source], b = nodeMap[e.target];
+    if (!a || !b) return;
+    let dx = b.x - a.x, dy = b.y - a.y;
+    let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    const force = (dist - 100) * 0.01;
+    const fx = (dx / dist) * force;
+    const fy = (dy / dist) * force;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  });
+
+  // Gravity toward center
+  nodes.forEach(n => {
+    n.vx += (W/2 - n.x) * 0.001;
+    n.vy += (H/2 - n.y) * 0.001;
+  });
+
+  // Apply velocity with damping
+  nodes.forEach(n => {
+    if (graphState.dragging === n) return;
+    n.vx *= 0.9;
+    n.vy *= 0.9;
+    n.x += n.vx;
+    n.y += n.vy;
+    // Bounds
+    n.x = Math.max(n.radius, Math.min(W - n.radius, n.x));
+    n.y = Math.max(n.radius, Math.min(H - n.radius, n.y));
+  });
+
+  // Draw
+  ctx.clearRect(0, 0, W, H);
+
+  // Edges
+  ctx.strokeStyle = 'rgba(100,100,140,0.3)';
+  ctx.lineWidth = 1;
+  edges.forEach(e => {
+    const a = nodeMap[e.source], b = nodeMap[e.target];
+    if (!a || !b) return;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  });
+
+  // Nodes
+  nodes.forEach(n => {
+    const isHover = graphState.hovering === n;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius + (isHover ? 2 : 0), 0, Math.PI * 2);
+    ctx.fillStyle = n.color;
+    ctx.globalAlpha = isHover ? 1.0 : 0.7;
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+
+    if (isHover) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Label
+    ctx.fillStyle = '#ccc';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(n.label, n.x, n.y + n.radius + 12);
+
+    // Cost label
+    if (n.session.totalCostUSD > 0.01) {
+      ctx.fillStyle = '#888';
+      ctx.font = '8px monospace';
+      ctx.fillText('$' + n.session.totalCostUSD.toFixed(2), n.x, n.y + n.radius + 22);
+    }
+  });
+
+  // Tooltip for hovered node
+  if (graphState.hovering) {
+    const n = graphState.hovering;
+    const s = n.session;
+    const lines = [
+      n.label,
+      'Cost: $' + (s.totalCostUSD || 0).toFixed(2),
+      'Messages: ' + (s.messageCount || 0),
+      'Status: ' + (s.status || 'idle'),
+      s.model ? ('Model: ' + s.model) : '',
+    ].filter(Boolean);
+
+    const tx = Math.min(n.x + n.radius + 10, W - 170);
+    const ty = Math.max(n.y - 20, 4);
+    const tw = 160;
+    const th = lines.length * 14 + 8;
+
+    ctx.fillStyle = 'rgba(10,10,15,0.9)';
+    ctx.strokeStyle = 'rgba(100,100,140,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(tx, ty, tw, th, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#e0e0e0';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, tx + 6, ty + 14 + i * 14);
+    });
+  }
 }
 
-function renderPixelView() {
-  const grid = document.getElementById('pixel-grid');
-  if (!grid) return;
+// Canvas interaction
+function setupGraphInteraction() {
+  const canvas = document.getElementById('graph-canvas');
+  if (!canvas) return;
 
-  const sessions = Object.values(state.sessions)
-    .filter(matchesFilter)
-    .sort((a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0));
+  function getNodeAt(x, y) {
+    for (let i = graphState.nodes.length - 1; i >= 0; i--) {
+      const n = graphState.nodes[i];
+      const dx = x - n.x, dy = y - n.y;
+      if (dx*dx + dy*dy < n.radius * n.radius) return n;
+    }
+    return null;
+  }
 
-  // Track which IDs we rendered
-  const currentIds = new Set(sessions.map(s => s.id));
+  function canvasCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
 
-  // Remove stale cards
-  [...grid.querySelectorAll('.agent-card')].forEach(card => {
-    if (!currentIds.has(card.dataset.id)) {
-      delete sessionState[card.dataset.id];
-      card.remove();
+  canvas.addEventListener('mousedown', (e) => {
+    const { x, y } = canvasCoords(e);
+    const node = getNodeAt(x, y);
+    if (node) {
+      graphState.dragging = node;
+      canvas.style.cursor = 'grabbing';
     }
   });
 
-  sessions.forEach(sess => {
-    const id  = sess.id;
-    const ss  = sessionState[id] || { state: 'idle', toolName: null };
-    const spriteState = ss.state || 'idle';
-    const cost = sess.totalCostUSD || 0;
-    const sessActive = sess.isActive !== false;
-    const projectName = truncate(sess.projectName || sess.name || id.slice(0, 8), 14);
-    const toolDisplay = spriteState === 'tool' && ss.toolName
-      ? truncate(ss.toolName, 12)
-      : '';
-
-    let card = grid.querySelector(`.agent-card[data-id="${id}"]`);
-    if (!card) {
-      card = document.createElement('div');
-      card.className = 'agent-card';
-      card.dataset.id = id;
-      card.innerHTML = `
-        <div class="sprite-container">
-          <span class="sprite"></span>
-        </div>
-        <div class="agent-name"></div>
-        <div class="agent-cost"></div>
-        <div class="agent-status"></div>
-        <div class="agent-tool"></div>
-      `;
-      grid.appendChild(card);
+  canvas.addEventListener('mousemove', (e) => {
+    const { x, y } = canvasCoords(e);
+    if (graphState.dragging) {
+      graphState.dragging.x = x;
+      graphState.dragging.y = y;
+      graphState.dragging.vx = 0;
+      graphState.dragging.vy = 0;
+    } else {
+      const node = getNodeAt(x, y);
+      graphState.hovering = node;
+      canvas.style.cursor = node ? 'pointer' : 'default';
     }
-
-    // Update state
-    card.dataset.state = spriteState;
-    card.className = 'agent-card' + (!sessActive ? ' dead' : '');
-
-    card.querySelector('.agent-name').textContent = projectName;
-
-    const costEl = card.querySelector('.agent-cost');
-    costEl.textContent = '$' + cost.toFixed(4);
-    costEl.className = 'agent-cost ' + costClass(cost);
-
-    const statusEl = card.querySelector('.agent-status');
-    statusEl.textContent = STATE_LABELS[spriteState] || '● IDLE';
-    statusEl.className = 'agent-status state-' + spriteState;
-
-    card.querySelector('.agent-tool').textContent = toolDisplay;
-
-    // Render sprite
-    const spriteEl = card.querySelector('.sprite');
-    renderSprite(spriteState, spriteEl);
   });
+
+  canvas.addEventListener('mouseup', () => {
+    graphState.dragging = null;
+    canvas.style.cursor = 'default';
+  });
+
+  canvas.addEventListener('click', (e) => {
+    const { x, y } = canvasCoords(e);
+    const node = getNodeAt(x, y);
+    if (node && !graphState.dragging) {
+      setView('list');
+      state.selectedSession = node.id;
+      renderSessions();
+      updateFeedFilter();
+      loadRecentMessages(node.id);
+    }
+  });
+}
+
+let _graphAnimId = null;
+function startGraphAnimation() {
+  if (_graphAnimId) return;
+  setupGraphInteraction();
+  function tick() {
+    renderGraph();
+    _graphAnimId = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function stopGraphAnimation() {
+  if (_graphAnimId) {
+    cancelAnimationFrame(_graphAnimId);
+    _graphAnimId = null;
+  }
 }
 
 // ── Formatting helpers ─────────────────────────────────────────
@@ -1744,7 +1949,7 @@ function setSessionFilter(filter) {
     btn.classList.toggle('active', btn.dataset.filter === filter);
   });
   renderSessions();
-  if (state.currentView === 'pixels') renderPixelView();
+  // graph view updates via animation loop
 }
 
 function updateFilterCounts() {
@@ -2575,7 +2780,7 @@ function handleWsMessage(data) {
       updateSessionState(session.id, session, null);
       renderSessions();
       updateTopBar();
-      if (state.currentView === 'pixels') renderPixelView();
+      // graph view updates via animation loop
     }
   }
 
@@ -2585,7 +2790,7 @@ function handleWsMessage(data) {
     renderSessions();
     updateTopBar();
     addFeedEntry(session, message);
-    if (state.currentView === 'pixels') renderPixelView();
+    // graph view updates via animation loop
   }
 }
 
@@ -2627,7 +2832,7 @@ async function loadInitialSessions() {
     });
     renderSessions();
     updateTopBar();
-    if (state.currentView === 'pixels') renderPixelView();
+    // graph view updates via animation loop
   } catch (e) {
     // Server might not be up yet; WS will drive state
   }
