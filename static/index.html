@@ -825,6 +825,47 @@
     font-family: var(--font); margin-left: 8px;
   }
 
+  #help-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .help-content {
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 20px 28px;
+    font-family: var(--font);
+    color: var(--text);
+    min-width: 280px;
+  }
+  .help-content h3 {
+    font-size: 13px;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+    color: var(--green);
+  }
+  .help-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 12px;
+  }
+  .help-row kbd {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+    color: var(--yellow);
+    min-width: 24px;
+    text-align: center;
+  }
+
   .search-box {
     display: flex;
     align-items: center;
@@ -2896,6 +2937,65 @@ document.getElementById('replay-scrubber').addEventListener('change', (e) => {
   document.getElementById('replay-feed').innerHTML = '';
   startReplayStream(idx);
 });
+
+// ── Keyboard shortcuts ────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  // Don't intercept when typing in inputs
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  switch(e.key) {
+    case '/':  // Focus search
+      e.preventDefault();
+      document.getElementById('search-input').focus();
+      break;
+    case 'Escape':
+      if (_searchActive) { clearSearch(); break; }
+      if (state.selectedSession) {
+        state.selectedSession = null;
+        renderSessions();
+        updateFeedFilter();
+        break;
+      }
+      break;
+    case '1': // Active filter
+      setSessionFilter('active');
+      break;
+    case '2': // Recent filter
+      setSessionFilter('recent');
+      break;
+    case '3': // All filter
+      setSessionFilter('all');
+      break;
+    case 'g': // Graph view
+      setView(state.currentView === 'graph' ? 'list' : 'graph');
+      break;
+    case '?': // Help
+      toggleHelp();
+      break;
+  }
+});
+
+function toggleHelp() {
+  let help = document.getElementById('help-overlay');
+  if (help) { help.remove(); return; }
+  help = document.createElement('div');
+  help.id = 'help-overlay';
+  help.innerHTML = `
+    <div class="help-content">
+      <h3>Keyboard Shortcuts</h3>
+      <div class="help-row"><kbd>/</kbd> Focus search</div>
+      <div class="help-row"><kbd>Esc</kbd> Clear search / deselect session</div>
+      <div class="help-row"><kbd>1</kbd> Active sessions filter</div>
+      <div class="help-row"><kbd>2</kbd> Recent sessions filter</div>
+      <div class="help-row"><kbd>3</kbd> All sessions filter</div>
+      <div class="help-row"><kbd>g</kbd> Toggle graph view</div>
+      <div class="help-row"><kbd>?</kbd> This help</div>
+      <p style="margin-top:12px;color:var(--text-dim);font-size:10px;">Click anywhere to close</p>
+    </div>
+  `;
+  help.addEventListener('click', () => help.remove());
+  document.body.appendChild(help);
+}
 
 // ── Boot ───────────────────────────────────────────────────────
 loadInitialSessions();
