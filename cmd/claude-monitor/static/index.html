@@ -486,7 +486,6 @@
     flex: 0 0 72px;
     color: #44445a;
     font-size: 11px;
-    user-select: none;
   }
 
   .fe-type {
@@ -494,7 +493,6 @@
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.5px;
-    user-select: none;
     padding-right: 8px;
   }
 
@@ -1192,6 +1190,99 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* ── Focus states & accessibility ──────────────────────────── */
+  .filter-btn:focus-visible, .feed-filter-btn:focus-visible, .view-btn:focus-visible,
+  .session-card:focus-visible, button:focus-visible {
+    outline: 1px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  /* ── Hamburger toggle button (hidden on wide screens) ────── */
+  #sessions-toggle-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    border-right: 1px solid var(--border2);
+    color: var(--text-dim);
+    font-size: 18px;
+    padding: 0 12px;
+    height: 100%;
+    cursor: pointer;
+    font-family: var(--font);
+  }
+  #sessions-toggle-btn:hover { color: var(--text); }
+
+  /* ── Sessions panel overlay backdrop ───────────────────────── */
+  #sessions-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    top: 36px;
+    background: rgba(0,0,0,0.5);
+    z-index: 99;
+  }
+
+  /* ── Responsive: max-width 1024px ─────────────────────────── */
+  @media (max-width: 1024px) {
+    #sessions-toggle-btn {
+      display: flex;
+    }
+    #sessions-panel {
+      display: none;
+      position: fixed;
+      left: 0;
+      top: 36px;
+      bottom: 0;
+      z-index: 100;
+      width: 300px;
+      max-width: 300px;
+      min-width: 0;
+      border-right: 1px solid var(--border2);
+      background: var(--bg2);
+    }
+    #sessions-panel.overlay-open {
+      display: flex;
+    }
+    #feed-panel {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+  }
+
+  /* ── Responsive: max-width 768px ──────────────────────────── */
+  @media (max-width: 768px) {
+    #topbar {
+      flex-wrap: wrap;
+      height: auto;
+      min-height: 36px;
+    }
+    .topbar-stat {
+      font-size: 10px;
+      padding: 0 10px;
+    }
+    .search-box {
+      flex: 1 1 100%;
+      order: 99;
+      padding: 4px 8px;
+      border-top: 1px solid var(--border);
+    }
+    .search-box input {
+      width: 100%;
+    }
+    #sessions-panel.overlay-open .session-card {
+      padding: 6px 8px 6px 4px;
+      margin-bottom: 2px;
+    }
+    #sessions-panel.overlay-open .session-stats {
+      font-size: 10px;
+    }
+    #sessions-panel.overlay-open .session-meta {
+      font-size: 9px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -1199,6 +1290,7 @@
 
   <!-- Top Bar -->
   <div id="topbar">
+    <button id="sessions-toggle-btn" onclick="toggleSessionsPanel()" aria-label="Toggle sessions panel">☰</button>
     <div class="topbar-brand">
       <span class="brand-diamond">◆</span>
       CLAUDE MONITOR
@@ -1231,6 +1323,10 @@
       <span title="Total errors across all sessions">ERRORS</span>
       <span class="val" id="stat-errors" style="color:var(--red)">0</span>
     </div>
+    <div class="topbar-stat">
+      <span title="Aggregate cost velocity across active sessions">$/MIN</span>
+      <span class="val yellow" id="stat-costrate">—</span>
+    </div>
     <div class="topbar-stat" id="stat-stuck-wrap" style="display:none;">
       <span title="Sessions detected as stuck">STUCK</span>
       <span class="val" id="stat-stuck" style="color:var(--red)">0</span>
@@ -1257,6 +1353,9 @@
 
     <!-- List View wrapper (sessions + feed + replay) -->
     <div id="list-view" style="display:flex; flex:1; overflow:hidden;">
+
+      <!-- Sessions Panel Backdrop (for mobile overlay) -->
+      <div id="sessions-backdrop" onclick="toggleSessionsPanel()"></div>
 
       <!-- Sessions Panel -->
       <div id="sessions-panel">
@@ -1375,6 +1474,7 @@ const state = {
   feedTypeFilters: { user: true, assistant: true, tool_use: true, agent: true, tool_result: true, hook: true },
   feedFilterBackup: null, // for solo mode restore
   feedFilterSoloType: null, // currently soloed type
+  sessionsPanelOpen: false, // responsive: sessions panel overlay open
   // Search state
   searchResults: null, // cached search results for back-to-results
   searchQuery: '', // last search query
@@ -1682,6 +1782,20 @@ function renderSprite(spriteState, el) {
 }
 
 // ── View switching ─────────────────────────────────────────────
+// ── Responsive sessions panel toggle ─────────────────────────────
+function toggleSessionsPanel() {
+  state.sessionsPanelOpen = !state.sessionsPanelOpen;
+  const panel = document.getElementById('sessions-panel');
+  const backdrop = document.getElementById('sessions-backdrop');
+  if (state.sessionsPanelOpen) {
+    panel.classList.add('overlay-open');
+    backdrop.style.display = 'block';
+  } else {
+    panel.classList.remove('overlay-open');
+    backdrop.style.display = 'none';
+  }
+}
+
 function setView(view) {
   // Stop graph animation when leaving graph view
   if (state.currentView === 'graph' && view !== 'graph') {
@@ -2038,6 +2152,10 @@ function formatAge(ts) {
 }
 
 function formatCostRate(sess) {
+  // Prefer backend-computed costRate if available
+  if (sess.costRate && sess.costRate > 0) {
+    return `${formatCost(sess.costRate)}/min`;
+  }
   if (!sess.totalCostUSD || !sess.startedAt || !sess.lastActive) return '';
   const mins = (new Date(sess.lastActive) - new Date(sess.startedAt)) / 60000;
   if (mins < 1) return '';
@@ -2128,11 +2246,23 @@ function _updateTopBarNow() {
   // Stuck count
   const stuckCount = sessions.filter(s => s.isStuck).length;
 
+  // Aggregate cost velocity: sum costRate across active sessions (or compute from cost/duration)
+  let aggCostRate = 0;
+  activeSessions.forEach(s => {
+    if (s.costRate && s.costRate > 0) {
+      aggCostRate += s.costRate;
+    } else if (s.totalCostUSD && s.startedAt) {
+      const mins = (Date.now() - new Date(s.startedAt).getTime()) / 60000;
+      if (mins >= 1) aggCostRate += s.totalCostUSD / mins;
+    }
+  });
+
   setStatVal('stat-sessions', activeSessions.length);
   setStatVal('stat-cost', formatCost(totalCost));
   setStatVal('stat-working', workingCount);
   setStatVal('stat-cache', cacheHit !== null ? cacheHit + '%' : '—');
   setStatVal('stat-errors', totalErrors);
+  setStatVal('stat-costrate', aggCostRate > 0 ? formatCost(aggCostRate) + '/m' : '—');
   setStatVal('stat-stuck', stuckCount);
   const stuckWrap = document.getElementById('stat-stuck-wrap');
   if (stuckWrap) stuckWrap.style.display = stuckCount > 0 ? '' : 'none';
@@ -2298,6 +2428,8 @@ function _renderSessionsNow() {
       (isSub ? ' subagent' : '') +
       (sess.isStuck ? ' stuck' : '');
     card.dataset.sid = sess.id;
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
     card.innerHTML = html;
     if (hasChildren) {
       card.style.cursor = 'pointer';

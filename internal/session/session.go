@@ -42,6 +42,7 @@ type Session struct {
 	CWD            string           `json:"cwd,omitempty"`
 	GitBranch      string           `json:"gitBranch,omitempty"`
 	Model          string           `json:"model,omitempty"`
+	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
 	ErrorCount     int              `json:"errorCount"`
 	IsSubagent     bool             `json:"isSubagent,omitempty"`
 	StatusSince    time.Time        `json:"statusSince"`
@@ -123,6 +124,15 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold
 	if !sess.IsActive {
 		sess.Status = "idle"
+		sess.CostRate = 0
+	}
+
+	// Cost velocity: dollars per minute for active sessions.
+	if sess.IsActive && sess.TotalCost > 0 && !sess.StartedAt.IsZero() {
+		mins := time.Since(sess.StartedAt).Minutes()
+		if mins >= 1 {
+			sess.CostRate = sess.TotalCost / mins
+		}
 	}
 
 	// Cache hit % = cache reads / total input tokens (including cache creation).
