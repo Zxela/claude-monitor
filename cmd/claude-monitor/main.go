@@ -222,18 +222,18 @@ func main() {
 				s.TaskDescription = desc
 
 				// For subagents named "subagents" with no session name,
-				// derive a display name from the task description.
+				// use the agent ID as a short label — the task description
+				// is shown separately on the card as a subtitle.
 				if s.IsSubagent && s.SessionName == "" && s.ProjectName == "subagents" {
-					name := desc
-					// Take first sentence or line, truncated
-					if idx := strings.IndexAny(name, ".\n"); idx > 0 && idx < 60 {
-						name = name[:idx]
+					// Agent IDs look like "agent-a5039f5c4e2f25f78" — show a short form
+					aid := s.ID
+					if strings.HasPrefix(aid, "agent-") {
+						aid = aid[6:] // strip "agent-" prefix
 					}
-					rn := []rune(name)
-					if len(rn) > 40 {
-						name = string(rn[:40]) + "…"
+					if len(aid) > 8 {
+						aid = aid[:8]
 					}
-					s.ProjectName = name
+					s.ProjectName = "agent " + aid
 				}
 			}
 		})
