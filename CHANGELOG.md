@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/Zxela/claude-monitor/compare/v1.4.0...v1.5.0) (2026-03-23)
+
+
+### Features
+
+* batch 4 — keyboard navigation, replay controls, search highlighting, filter solo mode ([78c0973](https://github.com/Zxela/claude-monitor/commit/78c09739d5df99bb1942f0e1a587d2eb216b63f0))
+
 ## [1.4.0](https://github.com/Zxela/claude-monitor/compare/v1.3.0...v1.4.0) (2026-03-23)
 
 
