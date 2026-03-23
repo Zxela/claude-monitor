@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/Zxela/claude-monitor/compare/v1.7.2...v1.7.3) (2026-03-23)
+
+
+### Bug Fixes
+
+* derive subagent names from task description instead of "subagents" ([c7e73ca](https://github.com/Zxela/claude-monitor/commit/c7e73ca60f82c055518414a4b51d59365aa78763))
+
 ## [1.7.2](https://github.com/Zxela/claude-monitor/compare/v1.7.1...v1.7.2) (2026-03-23)
 
 
