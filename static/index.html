@@ -1107,7 +1107,7 @@
       <span class="val green" id="stat-sessions">0</span>
     </div>
     <div class="topbar-stat">
-      <span>TOTAL SPEND <span class="budget-gear" onclick="event.stopPropagation(); toggleBudgetPopover()" title="Set budget alert">⚙</span></span>
+      <span title="Lifetime cost across all discovered sessions">TOTAL SPEND <span class="budget-gear" onclick="event.stopPropagation(); toggleBudgetPopover()" title="Set budget alert">⚙</span></span>
       <span class="val yellow" id="stat-cost">$0.000</span>
       <div id="budget-popover" style="display:none;">
         <label>Alert when total exceeds:</label>
@@ -1119,11 +1119,11 @@
       </div>
     </div>
     <div class="topbar-stat">
-      <span>ACTIVE COST</span>
+      <span title="Cost from sessions active in the last 30s">ACTIVE COST</span>
       <span class="val cyan" id="stat-active-cost">$0.000</span>
     </div>
     <div class="topbar-stat">
-      <span>CACHE HIT</span>
+      <span title="Weighted average cache hit % across active sessions">CACHE HIT</span>
       <span class="val" id="stat-cache" style="color:var(--purple)">—</span>
     </div>
     <div class="search-box">
