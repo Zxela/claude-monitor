@@ -335,6 +335,43 @@
     border: 1px solid rgba(0,255,136,0.3);
     background: rgba(0,255,136,0.05);
   }
+  .stuck-badge {
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: #fff;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: var(--red);
+    animation: stuckPulse 1s ease-in-out infinite;
+  }
+  @keyframes stuckPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--red); }
+    50%      { opacity: 0.6; box-shadow: none; }
+  }
+
+  .session-card.stuck {
+    border-color: rgba(221, 68, 85, 0.5);
+    box-shadow: 0 0 8px rgba(221, 68, 85, 0.15);
+  }
+  .session-card.stuck::before { background: var(--red); }
+
+  .stop-btn {
+    background: rgba(221, 68, 85, 0.1);
+    border: 1px solid rgba(221, 68, 85, 0.4);
+    color: var(--red);
+    font-family: var(--font);
+    font-size: 10px;
+    padding: 2px 6px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    border-radius: 2px;
+    margin-top: 4px;
+  }
+  .stop-btn:hover {
+    background: rgba(221, 68, 85, 0.25);
+    border-color: var(--red);
+  }
+
   .session-dot.thinking { background: var(--yellow); }
   .session-dot.tool { background: var(--blue); }
 
@@ -1145,6 +1182,10 @@
       <span title="Total errors across all sessions">ERRORS</span>
       <span class="val" id="stat-errors" style="color:var(--red)">0</span>
     </div>
+    <div class="topbar-stat" id="stat-stuck-wrap" style="display:none;">
+      <span title="Sessions detected as stuck">STUCK</span>
+      <span class="val" id="stat-stuck" style="color:var(--red)">0</span>
+    </div>
     <div class="search-box">
       <input type="text" id="search-input" placeholder="Search all sessions..." onkeyup="handleSearch(event)" />
       <span id="search-clear" onclick="clearSearch()" style="display:none">&times;</span>
@@ -1198,6 +1239,7 @@
           <span id="feed-session-actions" style="display:none; margin-left:auto; gap:4px; display:none; align-items:center;">
             <button class="timeline-btn" id="feed-timeline-btn" onclick="openTimeline(state.selectedSession)" title="Timeline">◑ TIMELINE</button>
             <button class="replay-btn" id="feed-replay-btn" onclick="openReplay(state.selectedSession)" title="Replay session">⏵ REPLAY</button>
+            <button class="stop-btn" id="feed-stop-btn" onclick="stopSession(state.selectedSession)" title="Stop this agent" style="display:none;">■ STOP</button>
           </span>
         </div>
         <div id="feed-type-filters">
@@ -2027,11 +2069,17 @@ function _updateTopBarNow() {
   });
   const cacheHit = totalToks > 0 ? Math.round(weightedPct / totalToks) : null;
 
+  // Stuck count
+  const stuckCount = sessions.filter(s => s.isStuck).length;
+
   setStatVal('stat-sessions', activeSessions.length);
   setStatVal('stat-cost', formatCost(totalCost));
   setStatVal('stat-working', workingCount);
   setStatVal('stat-cache', cacheHit !== null ? cacheHit + '%' : '—');
   setStatVal('stat-errors', totalErrors);
+  setStatVal('stat-stuck', stuckCount);
+  const stuckWrap = document.getElementById('stat-stuck-wrap');
+  if (stuckWrap) stuckWrap.style.display = stuckCount > 0 ? '' : 'none';
   checkBudget(totalCost);
 }
 
@@ -2085,7 +2133,12 @@ function _renderSessionsNow() {
   const list = document.getElementById('sessions-list');
   const noSess = document.getElementById('no-sessions');
   const allSessions = Object.values(state.sessions)
-    .sort((a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0));
+    .sort((a, b) => {
+      // Stuck sessions first
+      if (a.isStuck && !b.isStuck) return -1;
+      if (!a.isStuck && b.isStuck) return 1;
+      return new Date(b.lastActive || 0) - new Date(a.lastActive || 0);
+    });
 
   updateFilterCounts();
 
@@ -2155,6 +2208,7 @@ function _renderSessionsNow() {
           <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
           <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
           ${chevron}
+          ${sess.isStuck ? '<span class="stuck-badge">STUCK</span>' : ''}
           ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
         </div>
         <div class="session-stats">
@@ -2180,7 +2234,8 @@ function _renderSessionsNow() {
     card.className = 'session-card' +
       (active ? ' active' : '') +
       (selected ? ' selected' : '') +
-      (isSub ? ' subagent' : '');
+      (isSub ? ' subagent' : '') +
+      (sess.isStuck ? ' stuck' : '');
     card.dataset.sid = sess.id;
     card.innerHTML = html;
     if (hasChildren) {
@@ -2283,14 +2338,46 @@ async function loadRecentMessages(sessionId) {
 function updateFeedFilter() {
   const lbl = document.getElementById('feed-filter-label');
   const actions = document.getElementById('feed-session-actions');
+  const stopBtn = document.getElementById('feed-stop-btn');
   if (state.selectedSession) {
     const sess = state.sessions[state.selectedSession];
     const name = sess ? (sess.name || state.selectedSession.slice(0, 8)) : state.selectedSession.slice(0, 8);
     lbl.textContent = '▸ ' + name;
     if (actions) actions.style.display = 'flex';
+    // Show stop button only for active sessions with Docker container names
+    if (stopBtn && sess) {
+      const hasContainer = sess.projectName && sess.projectName.includes(' / ');
+      stopBtn.style.display = (isActive(sess) && hasContainer) ? '' : 'none';
+    }
   } else {
     lbl.textContent = '▸ All Sessions';
     if (actions) actions.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = 'none';
+  }
+}
+
+async function stopSession(sessionId) {
+  if (!sessionId) return;
+  const sess = state.sessions[sessionId];
+  const name = sess ? (sess.projectName || sessionId.slice(0, 8)) : sessionId.slice(0, 8);
+  if (!confirm('Stop this agent?\n\n' + name)) return;
+  try {
+    const resp = await fetch('/api/sessions/' + sessionId + '/stop', { method: 'POST' });
+    if (resp.ok) {
+      // Update local state to reflect stopped
+      if (sess) {
+        sess.isActive = false;
+        sess.status = 'idle';
+      }
+      renderSessions();
+      updateTopBar();
+      updateFeedFilter();
+    } else {
+      const text = await resp.text();
+      alert('Failed to stop agent: ' + text);
+    }
+  } catch (e) {
+    alert('Failed to stop agent: ' + e.message);
   }
 }
 

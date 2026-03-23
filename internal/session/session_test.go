@@ -205,6 +205,79 @@ func TestErrorCount_Tracking(t *testing.T) {
 	}
 }
 
+func TestCheckHealth_StuckByStatusTimeout(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+	// Create an active session with status unchanged for >3 minutes
+	s.Upsert("stuck-session", func(sess *Session) {
+		sess.LastActive = time.Now() // active
+		sess.Status = "thinking"
+		sess.StatusSince = time.Now().Add(-4 * time.Minute) // status unchanged for 4 min
+	})
+	changed := s.CheckHealth()
+	if len(changed) != 1 || changed[0] != "stuck-session" {
+		t.Errorf("expected stuck-session to be changed, got %v", changed)
+	}
+	sess, _ := s.Get("stuck-session")
+	if !sess.IsStuck {
+		t.Error("expected session to be marked stuck")
+	}
+}
+
+func TestCheckHealth_StuckByToolLoop(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+	// Create an active session with 10 identical tool calls
+	s.Upsert("loop-session", func(sess *Session) {
+		sess.LastActive = time.Now()
+		sess.Status = "tool_use"
+		sess.StatusSince = time.Now() // recent status change, so not stuck by timeout
+		sess.RecentTools = []string{"Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Bash"}
+	})
+	changed := s.CheckHealth()
+	if len(changed) != 1 || changed[0] != "loop-session" {
+		t.Errorf("expected loop-session to be changed, got %v", changed)
+	}
+	sess, _ := s.Get("loop-session")
+	if !sess.IsStuck {
+		t.Error("expected session to be marked stuck due to tool loop")
+	}
+}
+
+func TestCheckHealth_NotStuckWhenInactive(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+	// Inactive session with old status — should NOT be stuck
+	s.Upsert("inactive-stuck", func(sess *Session) {
+		sess.LastActive = time.Now().Add(-60 * time.Second)
+		sess.Status = "thinking"
+		sess.StatusSince = time.Now().Add(-10 * time.Minute)
+	})
+	changed := s.CheckHealth()
+	if len(changed) != 0 {
+		t.Errorf("expected no changes for inactive session, got %v", changed)
+	}
+	sess, _ := s.Get("inactive-stuck")
+	if sess.IsStuck {
+		t.Error("inactive session should not be marked stuck")
+	}
+}
+
+func TestCheckHealth_NotStuckWithVariedTools(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+	s.Upsert("varied-tools", func(sess *Session) {
+		sess.LastActive = time.Now()
+		sess.Status = "tool_use"
+		sess.StatusSince = time.Now()
+		sess.RecentTools = []string{"Bash", "Read", "Bash", "Read", "Bash", "Read", "Bash", "Read", "Bash", "Read"}
+	})
+	changed := s.CheckHealth()
+	if len(changed) != 0 {
+		t.Errorf("expected no changes for varied tools, got %v", changed)
+	}
+}
+
 func TestCacheHitPct_ZeroWhenNoTokens(t *testing.T) {
 	t.Parallel()
 	s := NewStore()

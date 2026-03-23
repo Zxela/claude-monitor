@@ -44,6 +44,23 @@ type container struct {
 	} `json:"Mounts"`
 }
 
+// StopContainer sends a stop request to the Docker daemon for the named container.
+func (c *Client) StopContainer(ctx context.Context, containerName string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://docker/containers/"+containerName+"/stop", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("docker stop: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	return fmt.Errorf("docker stop returned status %d", resp.StatusCode)
+}
+
 // FindClaudePaths returns all host-side .claude/projects paths from running containers.
 func (c *Client) FindClaudePaths(ctx context.Context) ([]MountedPath, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json?filters=%7B%22status%22%3A%5B%22running%22%5D%7D", nil)

@@ -174,6 +174,9 @@ func main() {
 			} else if !ev.Bootstrap {
 				s.LastActive = time.Now()
 			}
+
+			// Determine new status
+			oldStatus := s.Status
 			if msg.StopReason == "end_turn" {
 				s.Status = "waiting"
 			} else if msg.StopReason == "tool_use" {
@@ -184,6 +187,19 @@ func main() {
 				s.Status = "thinking"
 			} else if msg.Role == "user" {
 				s.Status = "thinking"
+			}
+
+			// Track StatusSince: update when status changes
+			if s.Status != oldStatus || s.StatusSince.IsZero() {
+				s.StatusSince = time.Now()
+			}
+
+			// Track RecentTools for loop detection
+			if msg.ToolName != "" {
+				s.RecentTools = append(s.RecentTools, msg.ToolName)
+				if len(s.RecentTools) > 10 {
+					s.RecentTools = s.RecentTools[len(s.RecentTools)-10:]
+				}
 			}
 		})
 
@@ -206,8 +222,9 @@ func main() {
 	go h.Run()
 	events := w.Start(ctx)
 
+	var dc *docker.Client
 	if *dockerEnabled {
-		dc := docker.NewClient(*dockerSocket)
+		dc = docker.NewClient(*dockerSocket)
 		dockerCh, err := docker.Watch(ctx, dc, 5*time.Second)
 		if err != nil {
 			log.Printf("docker discovery: %v (continuing without Docker)", err)
@@ -225,6 +242,35 @@ func main() {
 			}()
 		}
 	}
+
+	// Health check goroutine: detect stuck agents every 30 seconds.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				changedIDs := store.CheckHealth()
+				for _, id := range changedIDs {
+					sess, ok := store.Get(id)
+					if !ok {
+						continue
+					}
+					payload, err := json.Marshal(broadcastEvent{
+						Event:   "session_update",
+						Session: sess,
+					})
+					if err != nil {
+						log.Printf("health check marshal error: %v", err)
+						continue
+					}
+					h.Broadcast(payload)
+				}
+			}
+		}
+	}()
 
 	// Process watcher events: parse, update store, broadcast.
 	go func() {
@@ -460,6 +506,35 @@ func main() {
 			store.SetReplayJSON(id, data)
 		}
 		w.Write(data)
+	})
+
+	// Stop session (Docker container).
+	mux.HandleFunc("POST /api/sessions/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, ok := store.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		// Extract container name from projectName (format: "container / project")
+		containerName := ""
+		if parts := strings.SplitN(sess.ProjectName, " / ", 2); len(parts) == 2 {
+			containerName = parts[0]
+		}
+		if containerName == "" || dc == nil {
+			http.Error(w, "not a Docker session or Docker not available", http.StatusBadRequest)
+			return
+		}
+		stopCtx, stopCancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer stopCancel()
+		if err := dc.StopContainer(stopCtx, containerName); err != nil {
+			log.Printf("stop container %s: %v", containerName, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("stopped container %s for session %s", containerName, id)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
 	})
 
 	// Health check.
