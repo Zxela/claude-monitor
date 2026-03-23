@@ -24,6 +24,7 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/parser"
 	"github.com/zxela-claude/claude-monitor/internal/replay"
 	"github.com/zxela-claude/claude-monitor/internal/session"
+	"github.com/zxela-claude/claude-monitor/internal/store"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
 )
 
@@ -94,8 +95,26 @@ func main() {
 		}
 	}
 
-	store := session.NewStore()
+	sessionStore := session.NewStore()
 	h := hub.NewHub()
+
+	// Open SQLite history database.
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("cannot determine home directory: %v", err)
+	}
+	dbDir := filepath.Join(homeDir, ".claude-monitor")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		log.Fatalf("cannot create data directory: %v", err)
+	}
+	historyDB, err := store.Open(filepath.Join(dbDir, "history.db"))
+	if err != nil {
+		log.Fatalf("cannot open history database: %v", err)
+	}
+	defer historyDB.Close()
+
+	// Track which sessions were previously active for inactivity transition detection.
+	prevActive := make(map[string]bool)
 
 	w, err := watcher.New([]string(extraPaths))
 	if err != nil {
@@ -109,10 +128,10 @@ func main() {
 		if err != nil {
 			return nil, nil, false
 		}
-		_, exists := store.Get(ev.SessionID)
+		_, exists := sessionStore.Get(ev.SessionID)
 		isNew := !exists
 
-		sess := store.Upsert(ev.SessionID, func(s *session.Session) {
+		sess := sessionStore.Upsert(ev.SessionID, func(s *session.Session) {
 			s.FilePath = ev.FilePath
 			s.ProjectDir = ev.ProjectDir
 			if ev.Label != "" {
@@ -201,10 +220,20 @@ func main() {
 					s.RecentTools = s.RecentTools[len(s.RecentTools)-10:]
 				}
 			}
+
+			// Capture task description from first user message.
+			if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" {
+				desc := msg.ContentText
+				if len([]rune(desc)) > 200 {
+					runes := []rune(desc)
+					desc = string(runes[:200])
+				}
+				s.TaskDescription = desc
+			}
 		})
 
 		if sess.IsSubagent && sess.ParentID != "" {
-			store.LinkChild(sess.ParentID, ev.SessionID)
+			sessionStore.LinkChild(sess.ParentID, ev.SessionID)
 		}
 
 		return msg, sess, isNew
@@ -243,7 +272,7 @@ func main() {
 		}
 	}
 
-	// Health check goroutine: detect stuck agents every 30 seconds.
+	// Health check goroutine: detect stuck agents, compute outcomes, persist history.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -252,9 +281,9 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				changedIDs := store.CheckHealth()
+				changedIDs := sessionStore.CheckHealth()
 				for _, id := range changedIDs {
-					sess, ok := store.Get(id)
+					sess, ok := sessionStore.Get(id)
 					if !ok {
 						continue
 					}
@@ -267,6 +296,40 @@ func main() {
 						continue
 					}
 					h.Broadcast(payload)
+				}
+
+				// Outcome tracking & history persistence on inactivity transitions.
+				for _, sess := range sessionStore.All() {
+					nowActive := sess.IsActive
+					wasActive := prevActive[sess.ID]
+
+					// Compute outcome for all sessions.
+					sessionStore.Upsert(sess.ID, func(s *session.Session) {
+						if s.IsActive {
+							s.Outcome = "running"
+						} else if s.Status == "waiting" && s.ErrorCount == 0 {
+							s.Outcome = "success"
+						} else if s.Status == "waiting" && s.ErrorCount > 0 {
+							s.Outcome = "completed"
+						} else if s.ErrorCount > 0 {
+							s.Outcome = "error"
+						} else if !s.LastActive.IsZero() && time.Since(s.LastActive) > 5*time.Minute {
+							s.Outcome = "abandoned"
+						} else if !s.IsActive {
+							s.Outcome = "completed"
+						}
+					})
+
+					// Save to history when transitioning from active to inactive.
+					if wasActive && !nowActive {
+						updated, ok := sessionStore.Get(sess.ID)
+						if ok {
+							if err := historyDB.SaveSession(updated); err != nil {
+								log.Printf("history save error for %s: %v", sess.ID, err)
+							}
+						}
+					}
+					prevActive[sess.ID] = nowActive
 				}
 			}
 		}
@@ -329,9 +392,33 @@ func main() {
 		hub.ServeWs(h, w, r)
 	})
 
+	// History REST API.
+	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
+		limitStr := r.URL.Query().Get("limit")
+		limit := 50
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+		offsetStr := r.URL.Query().Get("offset")
+		offset := 0
+		if n, err := strconv.Atoi(offsetStr); err == nil && n >= 0 {
+			offset = n
+		}
+		rows, err := historyDB.ListHistory(limit, offset)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if rows == nil {
+			rows = []store.HistoryRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rows)
+	})
+
 	// Sessions REST API.
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
-		sessions := store.All()
+		sessions := sessionStore.All()
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(sessions); err != nil {
 			log.Printf("api/sessions encode error: %v", err)
@@ -361,7 +448,7 @@ func main() {
 		}
 
 		var results []searchResult
-		for _, sess := range store.All() {
+		for _, sess := range sessionStore.All() {
 			if sess.FilePath == "" {
 				continue
 			}
@@ -397,7 +484,7 @@ func main() {
 
 	// Recent messages for a session — returns last N parsed messages for feed population.
 	mux.HandleFunc("/api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireSession(store, w, r)
+		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
 			return
 		}
@@ -436,7 +523,7 @@ func main() {
 
 	// Replay SSE stream route — registered BEFORE the manifest route.
 	mux.HandleFunc("/api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireSession(store, w, r)
+		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
 			return
 		}
@@ -452,7 +539,7 @@ func main() {
 
 	// Replay manifest — returns all events with timestamps for the scrubber.
 	mux.HandleFunc("/api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireSession(store, w, r)
+		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
 			return
 		}
@@ -461,7 +548,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Return cached JSON if available (invalidated on each new message).
-		if cached, hit := store.GetReplayJSON(id); hit {
+		if cached, hit := sessionStore.GetReplayJSON(id); hit {
 			w.Write(cached)
 			return
 		}
@@ -503,7 +590,7 @@ func main() {
 		}
 		// Only cache if the file was fully read (no scanner errors).
 		if scanErr == nil {
-			store.SetReplayJSON(id, data)
+			sessionStore.SetReplayJSON(id, data)
 		}
 		w.Write(data)
 	})
@@ -511,7 +598,7 @@ func main() {
 	// Stop session (Docker container).
 	mux.HandleFunc("POST /api/sessions/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := sessionStore.Get(id)
 		if !ok {
 			http.NotFound(w, r)
 			return

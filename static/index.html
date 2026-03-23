@@ -1022,9 +1022,10 @@
 
   .view-btn:first-child {
     border-radius: 2px 0 0 2px;
-    border-right: none;
   }
-
+  .view-btn + .view-btn {
+    border-left: none;
+  }
   .view-btn:last-child {
     border-radius: 0 2px 2px 0;
   }
@@ -1191,6 +1192,116 @@
     white-space: nowrap;
   }
 
+  /* ── Outcome badge ─────────────────────────────────────────── */
+  .outcome-badge {
+    font-size: 9px;
+    padding: 0 4px;
+    border-radius: 2px;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .outcome-success   { color: var(--green); }
+  .outcome-completed { color: var(--cyan); }
+  .outcome-error     { color: var(--red); }
+  .outcome-abandoned { color: var(--text-dim); }
+  .outcome-running   { color: var(--yellow); }
+
+  .session-task-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.6;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+    margin-bottom: 2px;
+  }
+
+  /* ── History Panel ───────────────────────────────────────────── */
+  #history-panel {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #history-table-wrap {
+    flex: 1;
+    overflow: auto;
+  }
+  .history-table, .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-family: var(--font);
+  }
+  .history-table th, .comparison-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border2);
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .history-table th:hover, .comparison-table th:hover {
+    color: var(--text);
+  }
+  .history-table th .sort-arrow, .comparison-table th .sort-arrow {
+    margin-left: 2px;
+    font-size: 8px;
+  }
+  .history-table td, .comparison-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+  .history-table tr:hover, .comparison-table tr:hover {
+    background: rgba(255,255,255,0.03);
+    cursor: pointer;
+  }
+  .history-table tr.selected-row, .comparison-table tr.selected-row {
+    background: rgba(68, 136, 255, 0.08);
+  }
+
+  /* ── Table (comparison) Panel ─────────────────────────────────── */
+  #table-panel {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #table-panel-wrap {
+    flex: 1;
+    overflow: auto;
+  }
+
+  /* ── Notification settings ────────────────────────────────────── */
+  .notif-settings {
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+  }
+  .notif-settings label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 2px;
+    cursor: pointer;
+  }
+  .notif-settings input[type="checkbox"] {
+    accent-color: var(--green);
+  }
+
   /* ── Focus states & accessibility ──────────────────────────── */
   .filter-btn:focus-visible, .feed-filter-btn:focus-visible, .view-btn:focus-visible,
   .session-card:focus-visible, button:focus-visible {
@@ -1309,6 +1420,11 @@
           <button onclick="saveBudget()">Set</button>
           <button onclick="clearBudget()">Clear</button>
         </div>
+        <div class="notif-settings">
+          <label><input type="checkbox" id="notif-budget" checked onchange="updateNotifSettings()"> Budget exceeded</label>
+          <label><input type="checkbox" id="notif-stuck" checked onchange="updateNotifSettings()"> Agent stuck >3min</label>
+          <label><input type="checkbox" id="notif-error" checked onchange="updateNotifSettings()"> Agent errored</label>
+        </div>
       </div>
     </div>
     <div class="topbar-stat">
@@ -1338,6 +1454,8 @@
     <div class="view-toggle">
       <button class="view-btn active" id="btn-list" onclick="setView('list')">LIST</button>
       <button class="view-btn" id="btn-graph" onclick="setView('graph')">GRAPH</button>
+      <button class="view-btn" id="btn-history" onclick="setView('history')">HISTORY</button>
+      <button class="view-btn" id="btn-table" onclick="setView('table')">TABLE</button>
     </div>
   </div>
 
@@ -1349,6 +1467,53 @@
     <!-- Graph View (hidden by default) -->
     <div id="graph-view" style="display:none;">
       <canvas id="graph-canvas" style="width:100%;height:100%;"></canvas>
+    </div>
+
+    <!-- History View (hidden by default) -->
+    <div id="history-panel" style="display:none;">
+      <div class="panel-header">SESSION HISTORY</div>
+      <div id="history-table-wrap">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th data-col="endedAt" onclick="sortHistory('endedAt')">DATE <span class="sort-arrow"></span></th>
+              <th data-col="projectName" onclick="sortHistory('projectName')">NAME <span class="sort-arrow"></span></th>
+              <th data-col="totalCost" onclick="sortHistory('totalCost')">COST <span class="sort-arrow"></span></th>
+              <th data-col="durationSeconds" onclick="sortHistory('durationSeconds')">DURATION <span class="sort-arrow"></span></th>
+              <th data-col="inputTokens" onclick="sortHistory('inputTokens')">TOKENS <span class="sort-arrow"></span></th>
+              <th data-col="messageCount" onclick="sortHistory('messageCount')">MSGS <span class="sort-arrow"></span></th>
+              <th data-col="errorCount" onclick="sortHistory('errorCount')">ERRORS <span class="sort-arrow"></span></th>
+              <th data-col="outcome" onclick="sortHistory('outcome')">OUTCOME <span class="sort-arrow"></span></th>
+              <th data-col="model" onclick="sortHistory('model')">MODEL <span class="sort-arrow"></span></th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Table (Comparison) View (hidden by default) -->
+    <div id="table-panel" style="display:none;">
+      <div class="panel-header">SESSION COMPARISON</div>
+      <div id="table-panel-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th data-col="projectName" onclick="sortTable('projectName')">NAME <span class="sort-arrow"></span></th>
+              <th data-col="status" onclick="sortTable('status')">STATUS <span class="sort-arrow"></span></th>
+              <th data-col="totalCostUSD" onclick="sortTable('totalCostUSD')">COST <span class="sort-arrow"></span></th>
+              <th data-col="costRate" onclick="sortTable('costRate')">$/MIN <span class="sort-arrow"></span></th>
+              <th data-col="duration" onclick="sortTable('duration')">DURATION <span class="sort-arrow"></span></th>
+              <th data-col="tokens" onclick="sortTable('tokens')">TOKENS <span class="sort-arrow"></span></th>
+              <th data-col="cacheHitPct" onclick="sortTable('cacheHitPct')">CACHE% <span class="sort-arrow"></span></th>
+              <th data-col="messageCount" onclick="sortTable('messageCount')">MSGS <span class="sort-arrow"></span></th>
+              <th data-col="errorCount" onclick="sortTable('errorCount')">ERRORS <span class="sort-arrow"></span></th>
+              <th data-col="model" onclick="sortTable('model')">MODEL <span class="sort-arrow"></span></th>
+            </tr>
+          </thead>
+          <tbody id="table-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- List View wrapper (sessions + feed + replay) -->
@@ -1468,7 +1633,7 @@ const state = {
   toolUseMap: {},  // maps tool_use_id → {displayType, toolName} for pairing results with calls
   wsRetryDelay: 1000,
   ws: null,
-  currentView: 'list', // 'list' | 'graph'
+  currentView: 'list', // 'list' | 'graph' | 'history' | 'table'
   sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
   feedTypeFilters: { user: true, assistant: true, tool_use: true, agent: true, tool_result: true, hook: true },
@@ -1486,6 +1651,22 @@ const state = {
     es: null,        // EventSource for active stream
     playing: false,
   },
+  // History state
+  historyData: [],
+  historySortCol: 'endedAt',
+  historySortAsc: false,
+  // Table (comparison) state
+  tableSortCol: 'totalCostUSD',
+  tableSortAsc: false,
+  // Notification state
+  notifications: {
+    budget: true,
+    stuck: true,
+    error: true,
+  },
+  _notifiedStuck: new Set(),
+  _notifiedErrors: new Set(),
+  _notifiedBudget: false,
 };
 
 // ── Session state for pixel view ───────────────────────────────
@@ -1802,22 +1983,37 @@ function setView(view) {
     stopGraphAnimation();
   }
   state.currentView = view;
-  const listView   = document.getElementById('list-view');
-  const graphView  = document.getElementById('graph-view');
-  const btnList    = document.getElementById('btn-list');
-  const btnGraph   = document.getElementById('btn-graph');
+  const listView    = document.getElementById('list-view');
+  const graphView   = document.getElementById('graph-view');
+  const historyPanel = document.getElementById('history-panel');
+  const tablePanel  = document.getElementById('table-panel');
+
+  // Hide all
+  listView.style.display    = 'none';
+  graphView.style.display   = 'none';
+  historyPanel.style.display = 'none';
+  tablePanel.style.display  = 'none';
+
+  // Deactivate all buttons
+  ['btn-list', 'btn-graph', 'btn-history', 'btn-table'].forEach(id => {
+    document.getElementById(id).classList.remove('active');
+  });
 
   if (view === 'graph') {
-    listView.style.display  = 'none';
     graphView.style.display = 'flex';
-    btnList.classList.remove('active');
-    btnGraph.classList.add('active');
+    document.getElementById('btn-graph').classList.add('active');
     startGraphAnimation();
+  } else if (view === 'history') {
+    historyPanel.style.display = 'flex';
+    document.getElementById('btn-history').classList.add('active');
+    loadHistory();
+  } else if (view === 'table') {
+    tablePanel.style.display = 'flex';
+    document.getElementById('btn-table').classList.add('active');
+    renderComparisonTable();
   } else {
-    listView.style.display  = 'flex';
-    graphView.style.display = 'none';
-    btnList.classList.add('active');
-    btnGraph.classList.remove('active');
+    listView.style.display = 'flex';
+    document.getElementById('btn-list').classList.add('active');
   }
   updateHash();
 }
@@ -2392,22 +2588,27 @@ function _renderSessionsNow() {
     const ss = sessionState[sess.id] || {};
     const currentTool = ss.toolName ? (ss.toolDetail ? `${ss.toolName}: ${ss.toolDetail}` : ss.toolName) : '';
 
+    const outcomeBadge = (!active && sess.outcome) ? outcomeHtml(sess.outcome) : '';
+    const taskDesc = sess.taskDescription ? `<div class="session-task-desc">${escHtml(truncate(sess.taskDescription, 60))}</div>` : '';
+
     const html = `
       <div class="session-card-content">
         <div class="session-row1">
           <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
           <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
           ${chevron}
+          ${outcomeBadge}
           ${sess.isStuck ? '<span class="stuck-badge">STUCK</span>' : ''}
           ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
         </div>
+        ${taskDesc}
         <div class="session-stats">
           <span class="cost">${formatCost(sess.totalCostUSD)}</span>
           ${sess.startedAt && sess.lastActive ? `<span class="cost-rate">${formatCostRate(sess)}</span>` : ''}
           <span class="sep">·</span>
           <span class="tok">${formatTokens(totalTok)} tok</span>
           ${cacheHit !== null ? `<span class="sep">·</span><span class="cache">${cacheHit}% cache</span>` : ''}
-          ${sess.errorCount > 0 ? `<span class="sep">·</span><span style="color:var(--red);font-weight:600">✕${sess.errorCount}</span>` : ''}
+          ${sess.errorCount > 0 ? `<span class="sep">·</span><span style="color:var(--red);font-weight:600">\u2715${sess.errorCount}</span>` : ''}
         </div>
         ${currentTool ? `<div class="session-current-tool">${escHtml(currentTool)}</div>` : ''}
         <div class="session-meta">
@@ -3372,7 +3573,8 @@ function handleWsMessage(data) {
       updateSessionState(session.id, session, null);
       renderSessions();
       updateTopBar();
-      // graph view updates via animation loop
+      checkNotifications();
+      if (state.currentView === 'table') renderComparisonTable();
     }
   }
 
@@ -3382,7 +3584,8 @@ function handleWsMessage(data) {
     renderSessions();
     updateTopBar();
     addFeedEntry(session, message);
-    // graph view updates via animation loop
+    checkNotifications();
+    if (state.currentView === 'table') renderComparisonTable();
   }
 }
 
@@ -3435,6 +3638,7 @@ async function loadInitialSessions() {
 setInterval(() => {
   renderSessions();
   updateTopBar();
+  if (state.currentView === 'table') renderComparisonTable();
 }, 10_000);
 
 // Poll session data every 30s to catch status transitions.
@@ -3587,6 +3791,12 @@ document.addEventListener('keydown', (e) => {
     case 'g': // Graph view
       setView(state.currentView === 'graph' ? 'list' : 'graph');
       break;
+    case 'h': // History view
+      setView(state.currentView === 'history' ? 'list' : 'history');
+      break;
+    case 't': // Table view
+      setView(state.currentView === 'table' ? 'list' : 'table');
+      break;
     case '?': // Help
       toggleHelp();
       break;
@@ -3610,6 +3820,8 @@ function toggleHelp() {
       <div class="help-row"><kbd>2</kbd> Recent sessions filter</div>
       <div class="help-row"><kbd>3</kbd> All sessions filter</div>
       <div class="help-row"><kbd>g</kbd> Toggle graph view</div>
+      <div class="help-row"><kbd>h</kbd> Toggle history view</div>
+      <div class="help-row"><kbd>t</kbd> Toggle table view</div>
       <div class="help-row"><kbd>?</kbd> This help</div>
       <h3 style="margin-top:12px;">Replay Controls</h3>
       <div class="help-row"><kbd>Space</kbd> Play / pause</div>
@@ -3645,7 +3857,7 @@ function restoreFromHash() {
   if (params.filter && ['active', 'recent', 'all'].includes(params.filter)) {
     setSessionFilter(params.filter);
   }
-  if (params.view && ['list', 'graph'].includes(params.view)) {
+  if (params.view && ['list', 'graph', 'history', 'table'].includes(params.view)) {
     setView(params.view);
   }
   if (params.session && state.sessions[params.session]) {
@@ -3656,7 +3868,253 @@ function restoreFromHash() {
   }
 }
 
+// ── History View ─────────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    const resp = await fetch('/api/history?limit=200&offset=0');
+    if (!resp.ok) return;
+    state.historyData = await resp.json();
+    renderHistoryTable();
+  } catch (e) {
+    console.error('loadHistory failed:', e);
+  }
+}
+
+function sortHistory(col) {
+  if (state.historySortCol === col) {
+    state.historySortAsc = !state.historySortAsc;
+  } else {
+    state.historySortCol = col;
+    state.historySortAsc = false;
+  }
+  renderHistoryTable();
+}
+
+function renderHistoryTable() {
+  const tbody = document.getElementById('history-tbody');
+  if (!tbody) return;
+
+  const data = [...state.historyData];
+  const col = state.historySortCol;
+  const asc = state.historySortAsc;
+  data.sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va < vb) return asc ? -1 : 1;
+    if (va > vb) return asc ? 1 : -1;
+    return 0;
+  });
+
+  // Update sort arrows
+  document.querySelectorAll('.history-table th').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = th.dataset.col === col ? (asc ? '\u25B2' : '\u25BC') : '';
+  });
+
+  tbody.innerHTML = '';
+  data.forEach(r => {
+    const tr = document.createElement('tr');
+    if (state.selectedSession === r.id) tr.classList.add('selected-row');
+    tr.addEventListener('click', () => {
+      state.selectedSession = r.id;
+      setView('list');
+      renderSessions();
+      updateFeedFilter();
+      loadRecentMessages(r.id);
+    });
+
+    const dur = r.durationSeconds > 0 ? formatDurationSec(r.durationSeconds) : '';
+    const tokens = formatTokens((r.inputTokens || 0) + (r.outputTokens || 0));
+    const date = r.endedAt ? new Date(r.endedAt).toLocaleString() : '';
+    const outcomeBadge = outcomeHtml(r.outcome);
+
+    tr.innerHTML =
+      `<td>${escHtml(date)}</td>` +
+      `<td title="${escHtml(r.taskDescription || '')}">${escHtml(r.projectName || r.sessionName || r.id.slice(0, 8))}</td>` +
+      `<td style="color:var(--yellow)">${formatCost(r.totalCost)}</td>` +
+      `<td>${dur}</td>` +
+      `<td style="color:var(--cyan)">${tokens}</td>` +
+      `<td>${r.messageCount || 0}</td>` +
+      `<td style="color:${r.errorCount > 0 ? 'var(--red)' : 'inherit'}">${r.errorCount || 0}</td>` +
+      `<td>${outcomeBadge}</td>` +
+      `<td style="color:var(--text-dim)">${escHtml((r.model || '').replace('claude-', ''))}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function formatDurationSec(sec) {
+  if (sec < 60) return Math.round(sec) + 's';
+  const m = Math.floor(sec / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return h + 'h' + (rm ? rm + 'm' : '');
+}
+
+function outcomeHtml(outcome) {
+  const map = {
+    success: '<span class="outcome-badge outcome-success">\u2713 success</span>',
+    completed: '<span class="outcome-badge outcome-completed">\u2713 completed</span>',
+    error: '<span class="outcome-badge outcome-error">\u2717 error</span>',
+    abandoned: '<span class="outcome-badge outcome-abandoned">? abandoned</span>',
+    running: '<span class="outcome-badge outcome-running">\u25CF running</span>',
+  };
+  return map[outcome] || '<span class="outcome-badge" style="color:var(--text-dim)">' + escHtml(outcome || '') + '</span>';
+}
+
+// ── Comparison Table View ──────────────────────────────────────
+function sortTable(col) {
+  if (state.tableSortCol === col) {
+    state.tableSortAsc = !state.tableSortAsc;
+  } else {
+    state.tableSortCol = col;
+    state.tableSortAsc = false;
+  }
+  renderComparisonTable();
+}
+
+function renderComparisonTable() {
+  const tbody = document.getElementById('table-tbody');
+  if (!tbody) return;
+
+  const sessions = Object.values(state.sessions);
+  const col = state.tableSortCol;
+  const asc = state.tableSortAsc;
+
+  // Compute derived values for sorting
+  const rows = sessions.map(s => ({
+    ...s,
+    tokens: (s.inputTokens || 0) + (s.outputTokens || 0),
+    duration: s.startedAt ? (new Date(s.lastActive || Date.now()).getTime() - new Date(s.startedAt).getTime()) / 1000 : 0,
+    projectName: s.projectName || s.sessionName || s.id,
+  }));
+
+  rows.sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    if (va < vb) return asc ? -1 : 1;
+    if (va > vb) return asc ? 1 : -1;
+    return 0;
+  });
+
+  // Update sort arrows
+  document.querySelectorAll('.comparison-table th').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = th.dataset.col === col ? (asc ? '\u25B2' : '\u25BC') : '';
+  });
+
+  tbody.innerHTML = '';
+  rows.forEach(s => {
+    const tr = document.createElement('tr');
+    if (state.selectedSession === s.id) tr.classList.add('selected-row');
+    tr.addEventListener('click', () => {
+      state.selectedSession = s.id;
+      setView('list');
+      renderSessions();
+      updateFeedFilter();
+      loadRecentMessages(s.id);
+    });
+
+    const active = isActive(s);
+    const statusText = active ? (s.status || 'active') : 'idle';
+    const statusColor = active ? (s.status === 'thinking' ? 'var(--yellow)' : s.status === 'tool_use' ? 'var(--blue)' : 'var(--green)') : 'var(--text-dim)';
+    const dur = s.duration > 0 ? formatDurationSec(s.duration) : '';
+    const cachePct = s.cacheHitPct != null ? Math.round(s.cacheHitPct) + '%' : '';
+    const costRate = s.costRate && s.costRate > 0 ? formatCost(s.costRate) : '';
+
+    tr.innerHTML =
+      `<td>${escHtml(truncate(s.projectName, 25))}</td>` +
+      `<td style="color:${statusColor}">${statusText}</td>` +
+      `<td style="color:var(--yellow)">${formatCost(s.totalCostUSD)}</td>` +
+      `<td>${costRate}</td>` +
+      `<td>${dur}</td>` +
+      `<td style="color:var(--cyan)">${formatTokens(s.tokens)}</td>` +
+      `<td style="color:var(--purple)">${cachePct}</td>` +
+      `<td>${s.messageCount || 0}</td>` +
+      `<td style="color:${s.errorCount > 0 ? 'var(--red)' : 'inherit'}">${s.errorCount || 0}</td>` +
+      `<td style="color:var(--text-dim)">${escHtml((s.model || '').replace('claude-', ''))}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Browser Notifications ──────────────────────────────────────
+function initNotifications() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  // Restore settings from localStorage
+  try {
+    const saved = JSON.parse(localStorage.getItem('notif-settings'));
+    if (saved) {
+      Object.assign(state.notifications, saved);
+      document.getElementById('notif-budget').checked = state.notifications.budget;
+      document.getElementById('notif-stuck').checked = state.notifications.stuck;
+      document.getElementById('notif-error').checked = state.notifications.error;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function updateNotifSettings() {
+  state.notifications.budget = document.getElementById('notif-budget').checked;
+  state.notifications.stuck = document.getElementById('notif-stuck').checked;
+  state.notifications.error = document.getElementById('notif-error').checked;
+  localStorage.setItem('notif-settings', JSON.stringify(state.notifications));
+}
+
+function sendNotification(title, body) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  if (document.hasFocus()) return; // don't notify when tab is focused
+  try {
+    new Notification(title, { body, icon: '', tag: title });
+  } catch (e) { /* ignore */ }
+}
+
+function checkNotifications() {
+  const sessions = Object.values(state.sessions);
+
+  // Budget notification
+  if (state.notifications.budget && state.budgetThreshold) {
+    const totalCost = sessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
+    if (totalCost >= state.budgetThreshold && !state._notifiedBudget) {
+      sendNotification('Budget Exceeded', 'Total spend $' + totalCost.toFixed(2) + ' exceeds budget $' + state.budgetThreshold);
+      state._notifiedBudget = true;
+    }
+  }
+
+  // Stuck notification
+  if (state.notifications.stuck) {
+    sessions.forEach(s => {
+      if (s.isStuck && !state._notifiedStuck.has(s.id)) {
+        sendNotification('Agent Stuck', (s.projectName || s.id.slice(0, 8)) + ' appears stuck');
+        state._notifiedStuck.add(s.id);
+      }
+      if (!s.isStuck) state._notifiedStuck.delete(s.id);
+    });
+  }
+
+  // Error notification
+  if (state.notifications.error) {
+    sessions.forEach(s => {
+      const prevErrors = state._notifiedErrors.get(s.id) || 0;
+      if ((s.errorCount || 0) > prevErrors) {
+        sendNotification('Agent Error', (s.projectName || s.id.slice(0, 8)) + ' encountered an error');
+        state._notifiedErrors.set(s.id, s.errorCount || 0);
+      }
+    });
+  }
+}
+
 // ── Boot ───────────────────────────────────────────────────────
+initNotifications();
+// Use Map for _notifiedErrors to track per-session error counts
+state._notifiedErrors = new Map();
+
 loadInitialSessions().then(() => {
   restoreFromHash();
 });

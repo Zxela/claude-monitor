@@ -48,6 +48,8 @@ type Session struct {
 	StatusSince    time.Time        `json:"statusSince"`
 	IsStuck        bool             `json:"isStuck"`
 	RecentTools    []string         `json:"-"` // tracks last 10 tool names
+	Outcome         string          `json:"outcome"`
+	TaskDescription string          `json:"taskDescription"`
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
