@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/Zxela/claude-monitor/compare/v1.3.0...v1.4.0) (2026-03-23)
+
+
+### Features
+
+* batch 3 — stuck agent detection, stop button, health monitoring ([fe1f33b](https://github.com/Zxela/claude-monitor/commit/fe1f33b225142365c0f570d58c2538e08e479582))
+
 ## [1.3.0](https://github.com/Zxela/claude-monitor/compare/v1.2.1...v1.3.0) (2026-03-23)
 
 
