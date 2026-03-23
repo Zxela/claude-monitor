@@ -115,9 +115,8 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		sess.Status = "idle"
 	}
 
-	// Cache hit % = cache reads / (non-cached input + cache reads).
-	// Excludes cache creation tokens since those are writes, not hits.
-	totalInput := sess.InputTokens + sess.CacheReadTokens
+	// Cache hit % = cache reads / total input tokens (including cache creation).
+	totalInput := sess.InputTokens + sess.CacheReadTokens + sess.CacheCreationTokens
 	if totalInput > 0 {
 		sess.CacheHitPct = float64(sess.CacheReadTokens) / float64(totalInput) * 100
 	}
