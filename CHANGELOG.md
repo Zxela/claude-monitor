@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/Zxela/claude-monitor/compare/v1.5.0...v1.6.0) (2026-03-23)
+
+
+### Features
+
+* batch 5 — responsive layout, accessibility, cost velocity metric ([1011580](https://github.com/Zxela/claude-monitor/commit/1011580582a35bbd9fc7dd3f19e0446706b3ad6c))
+
 ## [1.5.0](https://github.com/Zxela/claude-monitor/compare/v1.4.0...v1.5.0) (2026-03-23)
 
 
