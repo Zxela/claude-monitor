@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/Zxela/claude-monitor/compare/v1.2.0...v1.2.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* add tooltips to top bar stats clarifying what they measure ([3f1a291](https://github.com/Zxela/claude-monitor/commit/3f1a291da2a8749a7ea4feb37a847f272243236a))
+
 ## [1.2.0](https://github.com/Zxela/claude-monitor/compare/v1.1.0...v1.2.0) (2026-03-23)
 
 
