@@ -36,6 +36,7 @@ type Session struct {
 	CWD            string           `json:"cwd,omitempty"`
 	GitBranch      string           `json:"gitBranch,omitempty"`
 	Model          string           `json:"model,omitempty"`
+	ErrorCount     int              `json:"errorCount"`
 	IsSubagent     bool             `json:"isSubagent,omitempty"`
 }
 

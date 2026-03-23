@@ -1134,12 +1134,16 @@
       </div>
     </div>
     <div class="topbar-stat">
-      <span title="Cost from sessions active in the last 30s">ACTIVE COST</span>
-      <span class="val cyan" id="stat-active-cost">$0.000</span>
+      <span title="Sessions currently thinking or using tools">WORKING</span>
+      <span class="val cyan" id="stat-working">0</span>
     </div>
     <div class="topbar-stat">
       <span title="Weighted average cache hit % across active sessions">CACHE HIT</span>
       <span class="val" id="stat-cache" style="color:var(--purple)">—</span>
+    </div>
+    <div class="topbar-stat">
+      <span title="Total errors across all sessions">ERRORS</span>
+      <span class="val" id="stat-errors" style="color:var(--red)">0</span>
     </div>
     <div class="search-box">
       <input type="text" id="search-input" placeholder="Search all sessions..." onkeyup="handleSearch(event)" />
@@ -1191,6 +1195,10 @@
         <div class="feed-header">
           <span>LIVE FEED</span>
           <span id="feed-filter-label"></span>
+          <span id="feed-session-actions" style="display:none; margin-left:auto; gap:4px; display:none; align-items:center;">
+            <button class="timeline-btn" id="feed-timeline-btn" onclick="openTimeline(state.selectedSession)" title="Timeline">◑ TIMELINE</button>
+            <button class="replay-btn" id="feed-replay-btn" onclick="openReplay(state.selectedSession)" title="Replay session">⏵ REPLAY</button>
+          </span>
         </div>
         <div id="feed-type-filters">
           <button class="feed-filter-btn active" data-feedtype="user" onclick="toggleFeedType('user')">user</button>
@@ -2002,8 +2010,11 @@ function _updateTopBarNow() {
   // Total spend across all sessions
   const totalCost = sessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
 
-  // Active session cost
-  const activeCost = activeSessions.reduce((a, s) => a + (s.totalCostUSD || 0), 0);
+  // Working count: sessions with status "thinking" or "tool_use"
+  const workingCount = activeSessions.filter(s => s.status === 'thinking' || s.status === 'tool_use').length;
+
+  // Total error count across all sessions
+  const totalErrors = sessions.reduce((a, s) => a + (s.errorCount || 0), 0);
 
   // Cache hit: weighted average across active sessions
   let totalToks = 0, weightedPct = 0;
@@ -2018,8 +2029,9 @@ function _updateTopBarNow() {
 
   setStatVal('stat-sessions', activeSessions.length);
   setStatVal('stat-cost', formatCost(totalCost));
-  setStatVal('stat-active-cost', formatCost(activeCost));
+  setStatVal('stat-working', workingCount);
   setStatVal('stat-cache', cacheHit !== null ? cacheHit + '%' : '—');
+  setStatVal('stat-errors', totalErrors);
   checkBudget(totalCost);
 }
 
@@ -2151,6 +2163,7 @@ function _renderSessionsNow() {
           <span class="sep">·</span>
           <span class="tok">${formatTokens(totalTok)} tok</span>
           ${cacheHit !== null ? `<span class="sep">·</span><span class="cache">${cacheHit}% cache</span>` : ''}
+          ${sess.errorCount > 0 ? `<span class="sep">·</span><span style="color:var(--red);font-weight:600">✕${sess.errorCount}</span>` : ''}
         </div>
         ${currentTool ? `<div class="session-current-tool">${escHtml(currentTool)}</div>` : ''}
         <div class="session-meta">
@@ -2160,7 +2173,6 @@ function _renderSessionsNow() {
           <span>${formatAge(sess.lastActive)}</span>
           ${sess.startedAt ? `<span class="sep">·</span><span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
         </div>
-        <button class="timeline-btn" onclick="event.stopPropagation(); openTimeline('${escHtml(sess.id)}')" title="Timeline">◑ TIMELINE</button><button class="replay-btn" onclick="event.stopPropagation(); openReplay('${escHtml(sess.id)}')" title="Replay session">⏵ REPLAY</button>
       </div>
     `;
 
@@ -2174,8 +2186,6 @@ function _renderSessionsNow() {
     if (hasChildren) {
       card.style.cursor = 'pointer';
       card.addEventListener('click', (e) => {
-        // Let replay/timeline buttons handle their own click
-        if (e.target.closest('.replay-btn') || e.target.closest('.timeline-btn')) return;
         // Chevron click toggles expand/collapse only
         if (e.target.closest('.subagent-chevron')) {
           toggleSubagents(sess.id);
@@ -2272,12 +2282,15 @@ async function loadRecentMessages(sessionId) {
 
 function updateFeedFilter() {
   const lbl = document.getElementById('feed-filter-label');
+  const actions = document.getElementById('feed-session-actions');
   if (state.selectedSession) {
     const sess = state.sessions[state.selectedSession];
     const name = sess ? (sess.name || state.selectedSession.slice(0, 8)) : state.selectedSession.slice(0, 8);
     lbl.textContent = '▸ ' + name;
+    if (actions) actions.style.display = 'flex';
   } else {
     lbl.textContent = '▸ All Sessions';
+    if (actions) actions.style.display = 'none';
   }
 }
 

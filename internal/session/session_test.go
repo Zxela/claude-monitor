@@ -181,6 +181,30 @@ func TestCacheHitPct_CalculatedCorrectly(t *testing.T) {
 	}
 }
 
+func TestErrorCount_Tracking(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+	sess := s.Upsert("error-session", func(sess *Session) {
+		sess.ErrorCount++
+	})
+	if sess.ErrorCount != 1 {
+		t.Errorf("ErrorCount: got %d, want 1", sess.ErrorCount)
+	}
+	sess = s.Upsert("error-session", func(sess *Session) {
+		sess.ErrorCount++
+	})
+	if sess.ErrorCount != 2 {
+		t.Errorf("ErrorCount after second error: got %d, want 2", sess.ErrorCount)
+	}
+	// Non-error upsert should not change error count
+	sess = s.Upsert("error-session", func(sess *Session) {
+		sess.MessageCount++
+	})
+	if sess.ErrorCount != 2 {
+		t.Errorf("ErrorCount after non-error upsert: got %d, want 2", sess.ErrorCount)
+	}
+}
+
 func TestCacheHitPct_ZeroWhenNoTokens(t *testing.T) {
 	t.Parallel()
 	s := NewStore()

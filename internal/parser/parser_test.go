@@ -535,6 +535,45 @@ func TestParseLine_OpusPricing(t *testing.T) {
 	}
 }
 
+func TestParseLine_ToolResultIsError(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","is_error":true,"content":"Error: command not found","tool_use_id":"tu_err"}]},"sessionId":"sess-err","uuid":"uuid-err","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !msg.IsError {
+		t.Error("IsError should be true for tool_result with is_error:true")
+	}
+	if msg.ForToolUseID != "tu_err" {
+		t.Errorf("ForToolUseID: got %q, want %q", msg.ForToolUseID, "tu_err")
+	}
+}
+
+func TestParseLine_ToolResultErrorContent(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"Error: file not found","tool_use_id":"tu_err2"}]},"sessionId":"sess-err2","uuid":"uuid-err2","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !msg.IsError {
+		t.Error("IsError should be true for tool_result with error content prefix")
+	}
+}
+
+func TestParseLine_ToolResultNotError(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"file contents here","tool_use_id":"tu_ok"}]},"sessionId":"sess-ok","uuid":"uuid-ok","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.IsError {
+		t.Error("IsError should be false for normal tool_result")
+	}
+}
+
 func TestParseLine_TopLevelContentFallback(t *testing.T) {
 	t.Parallel()
 	line := []byte(`{"type":"tool_result","content":"tool output here","sessionId":"sess-9","uuid":"uuid-9","timestamp":"2024-01-01T00:00:00Z"}`)

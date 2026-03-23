@@ -60,6 +60,7 @@ type contentBlock struct {
 	Content   json.RawMessage `json:"content,omitempty"`    // for tool_result blocks (string or array)
 	Input     json.RawMessage `json:"input,omitempty"`      // for tool_use blocks (raw input params)
 	ToolUseID string          `json:"tool_use_id,omitempty"` // for tool_result blocks: links to tool_use
+	IsError   bool            `json:"is_error,omitempty"`    // for tool_result blocks: true when tool errored
 }
 
 // ParsedMessage is the normalised representation of one JSONL line.
@@ -91,6 +92,7 @@ type ParsedMessage struct {
 	ToolUseID    string    `json:"toolUseId,omitempty"`    // first tool_use block ID
 	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
 	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
+	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -192,6 +194,15 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		msg.ToolUseID = ci.toolUseID
 		msg.ForToolUseID = ci.forToolUseID
 		msg.IsAgent = msg.ToolName == "Agent"
+		msg.IsError = ci.isError
+		// Also detect error indicators in content text when not already flagged.
+		if !msg.IsError && msg.ForToolUseID != "" {
+			lower := strings.ToLower(ci.text)
+			if strings.HasPrefix(lower, "error:") || strings.HasPrefix(lower, "error ") ||
+				strings.Contains(lower, "command failed") || strings.Contains(lower, "exited with error") {
+				msg.IsError = true
+			}
+		}
 		// Populate ToolUseIDs for batched tool calls
 		if len(ci.toolUseAll) > 1 {
 			ids := make([]string, len(ci.toolUseAll))
@@ -221,6 +232,7 @@ type contentInfo struct {
 	toolUseID    string         // first tool_use block ID
 	toolUseAll   []toolUseEntry // all tool_use blocks (for batched calls)
 	forToolUseID string         // tool_use_id from tool_result block
+	isError      bool           // true if tool_result has is_error or error content
 }
 
 // extractContent attempts to decode content as a string first, then as a
@@ -319,6 +331,9 @@ func extractContent(raw json.RawMessage) contentInfo {
 			}
 		case "tool_result":
 			info.forToolUseID = b.ToolUseID
+			if b.IsError {
+				info.isError = true
+			}
 			if info.text == "" {
 				resultText := extractToolResultContent(b.Content)
 				// Fallback to Text field if Content didn't produce anything.

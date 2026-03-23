@@ -145,6 +145,9 @@ func main() {
 					}
 				}
 			}
+			if msg.IsError {
+				s.ErrorCount++
+			}
 			s.TotalCost += msg.CostUSD
 			s.InputTokens += msg.InputTokens
 			s.OutputTokens += msg.OutputTokens
