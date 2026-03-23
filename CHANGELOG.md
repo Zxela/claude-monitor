@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/Zxela/claude-monitor/compare/v1.7.1...v1.7.2) (2026-03-23)
+
+
+### Bug Fixes
+
+* remove speculative stuck/outcome detection, add error feed filtering ([55fae30](https://github.com/Zxela/claude-monitor/commit/55fae30b1820e02ec66c29dbf1a1815324d414ae))
+
 ## [1.7.1](https://github.com/Zxela/claude-monitor/compare/v1.7.0...v1.7.1) (2026-03-23)
 
 
