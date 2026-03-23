@@ -304,19 +304,10 @@ func extractContent(raw json.RawMessage) contentInfo {
 						cmd, _ := inp["command"].(string)
 						desc, _ := inp["description"].(string)
 						if desc != "" { info.toolDetail = desc } else { info.toolDetail = truncate(cmd, 120) }
-					case "Read":
+					case "Read", "Write", "Edit":
 						fp, _ := inp["file_path"].(string)
 						info.toolDetail = fp
-					case "Write":
-						fp, _ := inp["file_path"].(string)
-						info.toolDetail = fp
-					case "Edit":
-						fp, _ := inp["file_path"].(string)
-						info.toolDetail = fp
-					case "Grep":
-						pat, _ := inp["pattern"].(string)
-						info.toolDetail = pat
-					case "Glob":
+					case "Grep", "Glob":
 						pat, _ := inp["pattern"].(string)
 						info.toolDetail = pat
 					default:

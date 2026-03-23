@@ -9,6 +9,9 @@ import (
 // activeThreshold is how recent lastActive must be for a session to be considered active.
 const activeThreshold = 30 * time.Second
 
+// maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
+const maxSeenMessageIDs = 10000
+
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
 	ID           string    `json:"id"`
@@ -93,10 +96,18 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		s.sessions[sessionID] = sess
 	}
 
+	prevMsgCount := sess.MessageCount
 	update(sess)
 
-	// Invalidate replay cache since new data was written.
-	delete(s.replayCache, sessionID)
+	// Only invalidate replay cache when message count actually changed.
+	if sess.MessageCount != prevMsgCount {
+		delete(s.replayCache, sessionID)
+	}
+
+	// Prevent unbounded growth of the deduplication map.
+	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
+		sess.SeenMessageIDs = make(map[string]bool)
+	}
 
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold

@@ -59,6 +59,22 @@ func parentSessionIDFromPath(filePath string) string {
 	return ""
 }
 
+// requireSession looks up a session by path parameter "id", validates it has a
+// file path, and writes an HTTP error if not. Returns the session and true on success.
+func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
+	id := r.PathValue("id")
+	sess, ok := store.Get(id)
+	if !ok {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	if sess.FilePath == "" {
+		http.Error(w, "session file not available", http.StatusBadRequest)
+		return nil, false
+	}
+	return sess, true
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(os.Stderr)
@@ -332,14 +348,8 @@ func main() {
 
 	// Recent messages for a session — returns last N parsed messages for feed population.
 	mux.HandleFunc("/api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := requireSession(store, w, r)
 		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		if sess.FilePath == "" {
-			http.Error(w, "session file not available", http.StatusBadRequest)
 			return
 		}
 		events, err := replay.ReadFile(sess.FilePath)
@@ -377,14 +387,8 @@ func main() {
 
 	// Replay SSE stream route — registered BEFORE the manifest route.
 	mux.HandleFunc("/api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := requireSession(store, w, r)
 		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		if sess.FilePath == "" {
-			http.Error(w, "session file not available", http.StatusBadRequest)
 			return
 		}
 		events, err := replay.ReadFile(sess.FilePath)
@@ -399,16 +403,11 @@ func main() {
 
 	// Replay manifest — returns all events with timestamps for the scrubber.
 	mux.HandleFunc("/api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := requireSession(store, w, r)
 		if !ok {
-			http.NotFound(w, r)
 			return
 		}
-		if sess.FilePath == "" {
-			http.Error(w, "session file not available", http.StatusBadRequest)
-			return
-		}
+		id := r.PathValue("id")
 
 		w.Header().Set("Content-Type", "application/json")
 

@@ -1955,25 +1955,27 @@ function isActive(session) {
 
 // ── Debounced rendering ─────────────────────────────────────────
 // Coalesce rapid-fire WS messages into one render per animation frame.
-let _renderRAF = 0;
-let _topBarRAF = 0;
+// Both renderSessions and updateTopBar schedule the same RAF so
+// back-to-back calls collapse into a single paint.
+let _uiRAF = 0;
+let _uiDirty = { sessions: false, topBar: false };
+
+function _flushUI() {
+  _uiRAF = 0;
+  if (_uiDirty.sessions) _renderSessionsNow();
+  if (_uiDirty.topBar) _updateTopBarNow();
+  _uiDirty.sessions = false;
+  _uiDirty.topBar = false;
+}
 
 function renderSessions() {
-  if (!_renderRAF) {
-    _renderRAF = requestAnimationFrame(() => {
-      _renderRAF = 0;
-      _renderSessionsNow();
-    });
-  }
+  _uiDirty.sessions = true;
+  if (!_uiRAF) _uiRAF = requestAnimationFrame(_flushUI);
 }
 
 function updateTopBar() {
-  if (!_topBarRAF) {
-    _topBarRAF = requestAnimationFrame(() => {
-      _topBarRAF = 0;
-      _updateTopBarNow();
-    });
-  }
+  _uiDirty.topBar = true;
+  if (!_uiRAF) _uiRAF = requestAnimationFrame(_flushUI);
 }
 
 // ── Top bar ────────────────────────────────────────────────────
@@ -2038,8 +2040,11 @@ function setSessionFilter(filter) {
 
 function updateFilterCounts() {
   const all = Object.values(state.sessions);
-  const active = all.filter(isActive).length;
-  const recent = all.filter(isRecent).length;
+  let active = 0, recent = 0;
+  for (const s of all) {
+    if (isActive(s)) active++;
+    if (isRecent(s)) recent++;
+  }
   const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
   el('filter-count-active', active);
   el('filter-count-recent', recent);
