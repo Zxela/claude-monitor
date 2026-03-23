@@ -337,26 +337,6 @@
     border: 1px solid rgba(0,255,136,0.3);
     background: rgba(0,255,136,0.05);
   }
-  .stuck-badge {
-    font-size: 9px;
-    letter-spacing: 1px;
-    color: #fff;
-    padding: 1px 5px;
-    border-radius: 2px;
-    background: var(--red);
-    animation: stuckPulse 1s ease-in-out infinite;
-  }
-  @keyframes stuckPulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--red); }
-    50%      { opacity: 0.6; box-shadow: none; }
-  }
-
-  .session-card.stuck {
-    border-color: rgba(221, 68, 85, 0.5);
-    box-shadow: 0 0 8px rgba(221, 68, 85, 0.15);
-  }
-  .session-card.stuck::before { background: var(--red); }
-
   .stop-btn {
     background: rgba(221, 68, 85, 0.1);
     border: 1px solid rgba(221, 68, 85, 0.4);
@@ -391,6 +371,13 @@
     color: var(--red);
     font-weight: 600;
     font-size: 10px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .session-error-count:hover {
+    color: #ff6677;
   }
 
   .session-stats .cost  { color: var(--yellow); }
@@ -583,6 +570,7 @@
   .feed-filter-btn.active[data-feedtype="agent"]       { color: var(--orange); border-color: rgba(255,136,68,0.4); background: rgba(255,136,68,0.08); }
   .feed-filter-btn.active[data-feedtype="tool_result"] { color: var(--cyan); border-color: rgba(0,204,255,0.4); background: rgba(0,204,255,0.08); }
   .feed-filter-btn.active[data-feedtype="hook"]        { color: var(--purple); border-color: rgba(204,136,255,0.4); background: rgba(204,136,255,0.08); }
+  .feed-filter-btn.active[data-feedtype="errors"]      { color: var(--red); border-color: rgba(221,68,85,0.4); background: rgba(221,68,85,0.08); }
 
   .fe-type.hook        { color: var(--purple); }
   .feed-entry.type-hook { border-left-color: rgba(204,136,255,0.3); }
@@ -1203,20 +1191,6 @@
     white-space: nowrap;
   }
 
-  /* ── Outcome badge ─────────────────────────────────────────── */
-  .outcome-badge {
-    font-size: 9px;
-    padding: 0 4px;
-    border-radius: 2px;
-    letter-spacing: 0.5px;
-    font-weight: 600;
-  }
-  .outcome-success   { color: var(--green); }
-  .outcome-completed { color: var(--cyan); }
-  .outcome-error     { color: var(--red); }
-  .outcome-abandoned { color: var(--text-dim); }
-  .outcome-running   { color: var(--yellow); }
-
   .session-task-desc {
     font-size: 10px;
     color: var(--text-dim);
@@ -1433,7 +1407,6 @@
         </div>
         <div class="notif-settings">
           <label><input type="checkbox" id="notif-budget" checked onchange="updateNotifSettings()"> Budget exceeded</label>
-          <label><input type="checkbox" id="notif-stuck" checked onchange="updateNotifSettings()"> Agent stuck >3min</label>
           <label><input type="checkbox" id="notif-error" checked onchange="updateNotifSettings()"> Agent errored</label>
         </div>
       </div>
@@ -1447,16 +1420,8 @@
       <span class="val" id="stat-cache" style="color:var(--purple)">—</span>
     </div>
     <div class="topbar-stat">
-      <span title="Total errors across all sessions">ERRORS</span>
-      <span class="val" id="stat-errors" style="color:var(--red)">0</span>
-    </div>
-    <div class="topbar-stat">
       <span title="Aggregate cost velocity across active sessions">$/MIN</span>
       <span class="val yellow" id="stat-costrate">—</span>
-    </div>
-    <div class="topbar-stat" id="stat-stuck-wrap" style="display:none;">
-      <span title="Sessions detected as stuck">STUCK</span>
-      <span class="val" id="stat-stuck" style="color:var(--red)">0</span>
     </div>
     <div class="search-box">
       <input type="text" id="search-input" placeholder="Search all sessions..." onkeyup="handleSearch(event)" />
@@ -1494,7 +1459,6 @@
               <th data-col="inputTokens" onclick="sortHistory('inputTokens')">TOKENS <span class="sort-arrow"></span></th>
               <th data-col="messageCount" onclick="sortHistory('messageCount')">MSGS <span class="sort-arrow"></span></th>
               <th data-col="errorCount" onclick="sortHistory('errorCount')">ERRORS <span class="sort-arrow"></span></th>
-              <th data-col="outcome" onclick="sortHistory('outcome')">OUTCOME <span class="sort-arrow"></span></th>
               <th data-col="model" onclick="sortHistory('model')">MODEL <span class="sort-arrow"></span></th>
             </tr>
           </thead>
@@ -1574,6 +1538,7 @@
           <button class="feed-filter-btn active" data-feedtype="agent" onclick="handleFeedFilterClick(event, 'agent')">agents</button>
           <button class="feed-filter-btn active" data-feedtype="tool_result" onclick="handleFeedFilterClick(event, 'tool_result')">results</button>
           <button class="feed-filter-btn active" data-feedtype="hook" onclick="handleFeedFilterClick(event, 'hook')">hooks</button>
+          <button class="feed-filter-btn active" data-feedtype="errors" onclick="handleFeedFilterClick(event, 'errors')">errors</button>
         </div>
         <div id="feed">
           <div id="feed-empty">
@@ -1647,7 +1612,7 @@ const state = {
   currentView: 'list', // 'list' | 'graph' | 'history' | 'table'
   sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
-  feedTypeFilters: { user: true, assistant: true, tool_use: true, agent: true, tool_result: true, hook: true },
+  feedTypeFilters: { user: true, assistant: true, tool_use: true, agent: true, tool_result: true, hook: true, errors: true },
   feedFilterBackup: null, // for solo mode restore
   feedFilterSoloType: null, // currently soloed type
   sessionsPanelOpen: false, // responsive: sessions panel overlay open
@@ -1672,10 +1637,8 @@ const state = {
   // Notification state
   notifications: {
     budget: true,
-    stuck: true,
     error: true,
   },
-  _notifiedStuck: new Set(),
   _notifiedErrors: new Set(),
   _notifiedBudget: false,
 };
@@ -2436,9 +2399,6 @@ function _updateTopBarNow() {
   // Working count: sessions with status "thinking" or "tool_use"
   const workingCount = activeSessions.filter(s => s.status === 'thinking' || s.status === 'tool_use').length;
 
-  // Total error count across all sessions
-  const totalErrors = sessions.reduce((a, s) => a + (s.errorCount || 0), 0);
-
   // Cache hit: weighted average across active sessions
   let totalToks = 0, weightedPct = 0;
   activeSessions.forEach(s => {
@@ -2449,9 +2409,6 @@ function _updateTopBarNow() {
     }
   });
   const cacheHit = totalToks > 0 ? Math.round(weightedPct / totalToks) : null;
-
-  // Stuck count
-  const stuckCount = sessions.filter(s => s.isStuck).length;
 
   // Aggregate cost velocity: sum costRate across active sessions (or compute from cost/duration)
   let aggCostRate = 0;
@@ -2468,11 +2425,7 @@ function _updateTopBarNow() {
   setStatVal('stat-cost', formatCost(totalCost));
   setStatVal('stat-working', workingCount);
   setStatVal('stat-cache', cacheHit !== null ? cacheHit + '%' : '—');
-  setStatVal('stat-errors', totalErrors);
   setStatVal('stat-costrate', aggCostRate > 0 ? formatCost(aggCostRate) + '/m' : '—');
-  setStatVal('stat-stuck', stuckCount);
-  const stuckWrap = document.getElementById('stat-stuck-wrap');
-  if (stuckWrap) stuckWrap.style.display = stuckCount > 0 ? '' : 'none';
   checkBudget(totalCost);
 }
 
@@ -2527,9 +2480,6 @@ function _renderSessionsNow() {
   const noSess = document.getElementById('no-sessions');
   const allSessions = Object.values(state.sessions)
     .sort((a, b) => {
-      // Stuck sessions first
-      if (a.isStuck && !b.isStuck) return -1;
-      if (!a.isStuck && b.isStuck) return 1;
       return new Date(b.lastActive || 0) - new Date(a.lastActive || 0);
     });
 
@@ -2599,7 +2549,6 @@ function _renderSessionsNow() {
     const ss = sessionState[sess.id] || {};
     const currentTool = ss.toolName ? (ss.toolDetail ? `${ss.toolName}: ${ss.toolDetail}` : ss.toolName) : '';
 
-    const outcomeBadge = (!active && sess.outcome) ? outcomeHtml(sess.outcome) : '';
     const taskDesc = sess.taskDescription ? `<div class="session-task-desc">${escHtml(truncate(sess.taskDescription, 80))}</div>` : '';
 
     // Better display name: prefer sessionName, then clean up projectName
@@ -2609,9 +2558,7 @@ function _renderSessionsNow() {
       displayName = displayName.replace(/^-[^-]+-/, '');
     }
 
-    const statusBadge = sess.isStuck
-      ? '<span class="stuck-badge">STUCK</span>'
-      : sess.status && sess.status !== 'idle'
+    const statusBadge = sess.status && sess.status !== 'idle'
         ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'IDLE' : 'LIVE'}</span>`
         : (active ? '<span class="session-active-badge">LIVE</span>' : '');
 
@@ -2621,7 +2568,6 @@ function _renderSessionsNow() {
           <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
           <span class="session-name">${escHtml(truncate(displayName, 28))}</span>
           ${chevron}
-          ${outcomeBadge}
           ${statusBadge}
         </div>
         ${taskDesc}
@@ -2630,7 +2576,7 @@ function _renderSessionsNow() {
           ${sess.startedAt && sess.lastActive ? `<span class="cost-rate">${formatCostRate(sess)}</span>` : ''}
           <span class="tok">${formatTokens(totalTok)} tok</span>
           ${cacheHit !== null ? `<span class="cache">${cacheHit}%</span>` : ''}
-          ${sess.errorCount > 0 ? `<span class="session-error-count">${sess.errorCount} err</span>` : ''}
+          ${sess.errorCount > 0 ? `<span class="session-error-count" data-sid="${sess.id}" onclick="event.stopPropagation(); showSessionErrors('${sess.id}')">${sess.errorCount} err</span>` : ''}
         </div>
         ${currentTool ? `<div class="session-current-tool">${escHtml(currentTool)}</div>` : ''}
         <div class="session-meta">
@@ -2646,8 +2592,7 @@ function _renderSessionsNow() {
       (active ? ' active' : '') +
       (selected ? ' selected' : '') +
       (focused ? ' focused' : '') +
-      (isSub ? ' subagent' : '') +
-      (sess.isStuck ? ' stuck' : '');
+      (isSub ? ' subagent' : '');
     card.dataset.sid = sess.id;
     card.setAttribute('tabindex', '0');
     card.setAttribute('role', 'button');
@@ -2977,6 +2922,10 @@ function addFeedEntry(session, message) {
   if (!state.feedTypeFilters[displayType]) {
     el.style.display = 'none';
   }
+  // Hide error entries when errors filter is off
+  if (isErrorEntry && !state.feedTypeFilters.errors) {
+    el.style.display = 'none';
+  }
 
   feed.appendChild(el);
   state.eventCount++;
@@ -3188,14 +3137,34 @@ function toggleFeedType(type) {
 }
 
 function applyFeedFilterUI() {
-  const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook'];
+  const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook', 'errors'];
+  const errorsOnly = state.feedFilterSoloType === 'errors';
   types.forEach(t => {
     const btn = document.querySelector(`.feed-filter-btn[data-feedtype="${t}"]`);
     if (btn) btn.classList.toggle('active', state.feedTypeFilters[t]);
-    document.querySelectorAll(`.feed-entry.type-${t}`).forEach(el => {
-      el.style.display = state.feedTypeFilters[t] ? '' : 'none';
-    });
   });
+
+  // Apply visibility to all feed entries
+  document.querySelectorAll('.feed-entry').forEach(el => {
+    const isErr = el.classList.contains('is-error');
+    // Determine the entry's display type from its class list
+    const typeMatch = el.className.match(/type-(\S+)/);
+    const entryType = typeMatch ? typeMatch[1] : null;
+
+    if (errorsOnly) {
+      // When errors are soloed, show only error entries
+      el.style.display = isErr ? '' : 'none';
+    } else if (isErr && !state.feedTypeFilters.errors) {
+      // Errors filter is off: hide error entries
+      el.style.display = 'none';
+    } else if (entryType && !state.feedTypeFilters[entryType]) {
+      // Type filter is off: hide non-error entries of this type
+      el.style.display = 'none';
+    } else {
+      el.style.display = '';
+    }
+  });
+
   // Update ALL button
   const allBtn = document.querySelector('.feed-filter-btn.all-btn');
   if (allBtn) {
@@ -3215,7 +3184,7 @@ function soloFeedType(type) {
   } else {
     // Solo: save current state, enable only clicked type
     state.feedFilterBackup = { ...state.feedTypeFilters };
-    const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook'];
+    const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook', 'errors'];
     types.forEach(t => { state.feedTypeFilters[t] = (t === type); });
     state.feedFilterSoloType = type;
   }
@@ -3223,12 +3192,29 @@ function soloFeedType(type) {
 }
 
 function toggleAllFeedTypes() {
-  const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook'];
+  const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook', 'errors'];
   const allOn = types.every(t => state.feedTypeFilters[t]);
   types.forEach(t => { state.feedTypeFilters[t] = !allOn; });
   state.feedFilterSoloType = null;
   state.feedFilterBackup = null;
   applyFeedFilterUI();
+}
+
+function showSessionErrors(sessionId) {
+  // Select the session
+  if (state.selectedSession !== sessionId) {
+    toggleSession(sessionId);
+  }
+  // Solo the errors filter
+  soloFeedType('errors');
+  // Scroll feed to the first error entry
+  requestAnimationFrame(() => {
+    const feed = document.getElementById('feed');
+    const firstError = feed && feed.querySelector('.feed-entry.is-error');
+    if (firstError) {
+      firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
 }
 
 function toggleExpand(id) {
@@ -3948,8 +3934,6 @@ function renderHistoryTable() {
     const dur = r.durationSeconds > 0 ? formatDurationSec(r.durationSeconds) : '';
     const tokens = formatTokens((r.inputTokens || 0) + (r.outputTokens || 0));
     const date = r.endedAt ? new Date(r.endedAt).toLocaleString() : '';
-    const outcomeBadge = outcomeHtml(r.outcome);
-
     tr.innerHTML =
       `<td>${escHtml(date)}</td>` +
       `<td title="${escHtml(r.taskDescription || '')}">${escHtml(r.projectName || r.sessionName || r.id.slice(0, 8))}</td>` +
@@ -3958,7 +3942,6 @@ function renderHistoryTable() {
       `<td style="color:var(--cyan)">${tokens}</td>` +
       `<td>${r.messageCount || 0}</td>` +
       `<td style="color:${r.errorCount > 0 ? 'var(--red)' : 'inherit'}">${r.errorCount || 0}</td>` +
-      `<td>${outcomeBadge}</td>` +
       `<td style="color:var(--text-dim)">${escHtml((r.model || '').replace('claude-', ''))}</td>`;
     tbody.appendChild(tr);
   });
@@ -3971,17 +3954,6 @@ function formatDurationSec(sec) {
   const h = Math.floor(m / 60);
   const rm = m % 60;
   return h + 'h' + (rm ? rm + 'm' : '');
-}
-
-function outcomeHtml(outcome) {
-  const map = {
-    success: '<span class="outcome-badge outcome-success">\u2713 success</span>',
-    completed: '<span class="outcome-badge outcome-completed">\u2713 completed</span>',
-    error: '<span class="outcome-badge outcome-error">\u2717 error</span>',
-    abandoned: '<span class="outcome-badge outcome-abandoned">? abandoned</span>',
-    running: '<span class="outcome-badge outcome-running">\u25CF running</span>',
-  };
-  return map[outcome] || '<span class="outcome-badge" style="color:var(--text-dim)">' + escHtml(outcome || '') + '</span>';
 }
 
 // ── Comparison Table View ──────────────────────────────────────
@@ -4074,7 +4046,6 @@ function initNotifications() {
     if (saved) {
       Object.assign(state.notifications, saved);
       document.getElementById('notif-budget').checked = state.notifications.budget;
-      document.getElementById('notif-stuck').checked = state.notifications.stuck;
       document.getElementById('notif-error').checked = state.notifications.error;
     }
   } catch (e) { /* ignore */ }
@@ -4082,7 +4053,6 @@ function initNotifications() {
 
 function updateNotifSettings() {
   state.notifications.budget = document.getElementById('notif-budget').checked;
-  state.notifications.stuck = document.getElementById('notif-stuck').checked;
   state.notifications.error = document.getElementById('notif-error').checked;
   localStorage.setItem('notif-settings', JSON.stringify(state.notifications));
 }
@@ -4106,17 +4076,6 @@ function checkNotifications() {
       sendNotification('Budget Exceeded', 'Total spend $' + totalCost.toFixed(2) + ' exceeds budget $' + state.budgetThreshold);
       state._notifiedBudget = true;
     }
-  }
-
-  // Stuck notification
-  if (state.notifications.stuck) {
-    sessions.forEach(s => {
-      if (s.isStuck && !state._notifiedStuck.has(s.id)) {
-        sendNotification('Agent Stuck', (s.projectName || s.id.slice(0, 8)) + ' appears stuck');
-        state._notifiedStuck.add(s.id);
-      }
-      if (!s.isStuck) state._notifiedStuck.delete(s.id);
-    });
   }
 
   // Error notification

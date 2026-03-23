@@ -200,7 +200,6 @@ func main() {
 			}
 
 			// Determine new status
-			oldStatus := s.Status
 			if msg.StopReason == "end_turn" {
 				s.Status = "waiting"
 			} else if msg.StopReason == "tool_use" {
@@ -211,19 +210,6 @@ func main() {
 				s.Status = "thinking"
 			} else if msg.Role == "user" {
 				s.Status = "thinking"
-			}
-
-			// Track StatusSince: update when status changes
-			if s.Status != oldStatus || s.StatusSince.IsZero() {
-				s.StatusSince = time.Now()
-			}
-
-			// Track RecentTools for loop detection
-			if msg.ToolName != "" {
-				s.RecentTools = append(s.RecentTools, msg.ToolName)
-				if len(s.RecentTools) > 10 {
-					s.RecentTools = s.RecentTools[len(s.RecentTools)-10:]
-				}
 			}
 
 			// Capture task description from first user message.
@@ -277,7 +263,7 @@ func main() {
 		}
 	}
 
-	// Health check goroutine: detect stuck agents, compute outcomes, persist history.
+	// Periodic goroutine: persist history on inactivity transitions.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -286,52 +272,14 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				changedIDs := sessionStore.CheckHealth()
-				for _, id := range changedIDs {
-					sess, ok := sessionStore.Get(id)
-					if !ok {
-						continue
-					}
-					payload, err := json.Marshal(broadcastEvent{
-						Event:   "session_update",
-						Session: sess,
-					})
-					if err != nil {
-						log.Printf("health check marshal error: %v", err)
-						continue
-					}
-					h.Broadcast(payload)
-				}
-
-				// Outcome tracking & history persistence on inactivity transitions.
 				for _, sess := range sessionStore.All() {
 					nowActive := sess.IsActive
 					wasActive := prevActive[sess.ID]
 
-					// Compute outcome for all sessions.
-					sessionStore.Upsert(sess.ID, func(s *session.Session) {
-						if s.IsActive {
-							s.Outcome = "running"
-						} else if s.Status == "waiting" && s.ErrorCount == 0 {
-							s.Outcome = "success"
-						} else if s.Status == "waiting" && s.ErrorCount > 0 {
-							s.Outcome = "completed"
-						} else if s.ErrorCount > 0 {
-							s.Outcome = "error"
-						} else if !s.LastActive.IsZero() && time.Since(s.LastActive) > 5*time.Minute {
-							s.Outcome = "abandoned"
-						} else if !s.IsActive {
-							s.Outcome = "completed"
-						}
-					})
-
 					// Save to history when transitioning from active to inactive.
 					if wasActive && !nowActive {
-						updated, ok := sessionStore.Get(sess.ID)
-						if ok {
-							if err := historyDB.SaveSession(updated); err != nil {
-								log.Printf("history save error for %s: %v", sess.ID, err)
-							}
+						if err := historyDB.SaveSession(sess); err != nil {
+							log.Printf("history save error for %s: %v", sess.ID, err)
 						}
 					}
 					prevActive[sess.ID] = nowActive

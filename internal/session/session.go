@@ -9,12 +9,6 @@ import (
 // activeThreshold is how recent lastActive must be for a session to be considered active.
 const activeThreshold = 30 * time.Second
 
-// stuckTimeout is how long a status must remain unchanged before the session is considered stuck.
-const stuckTimeout = 3 * time.Minute
-
-// maxRecentTools is the number of recent tool names tracked for loop detection.
-const maxRecentTools = 10
-
 // maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
 const maxSeenMessageIDs = 10000
 
@@ -45,10 +39,6 @@ type Session struct {
 	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
 	ErrorCount     int              `json:"errorCount"`
 	IsSubagent     bool             `json:"isSubagent,omitempty"`
-	StatusSince    time.Time        `json:"statusSince"`
-	IsStuck        bool             `json:"isStuck"`
-	RecentTools    []string         `json:"-"` // tracks last 10 tool names
-	Outcome         string          `json:"outcome"`
 	TaskDescription string          `json:"taskDescription"`
 }
 
@@ -187,56 +177,3 @@ func (s *Store) Get(id string) (*Session, bool) {
 	return &cp, true
 }
 
-// CheckHealth iterates all sessions and marks them stuck if:
-// a) Session is active AND status unchanged for >3 minutes
-// b) OR RecentTools has 10 entries and all are identical (looping detection)
-// Returns a list of session IDs whose IsStuck value changed.
-func (s *Store) CheckHealth() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now()
-	var changed []string
-
-	for id, sess := range s.sessions {
-		wasStuck := sess.IsStuck
-		active := time.Since(sess.LastActive) < activeThreshold
-
-		if !active {
-			if wasStuck {
-				sess.IsStuck = false
-				changed = append(changed, id)
-			}
-			continue
-		}
-
-		stuck := false
-
-		// (a) Status unchanged for >3 minutes while active
-		if !sess.StatusSince.IsZero() && now.Sub(sess.StatusSince) > stuckTimeout {
-			stuck = true
-		}
-
-		// (b) Last 10 tool calls are all the same tool (looping)
-		if len(sess.RecentTools) >= maxRecentTools {
-			allSame := true
-			first := sess.RecentTools[0]
-			for _, t := range sess.RecentTools[1:] {
-				if t != first {
-					allSame = false
-					break
-				}
-			}
-			if allSame {
-				stuck = true
-			}
-		}
-
-		sess.IsStuck = stuck
-		if wasStuck != stuck {
-			changed = append(changed, id)
-		}
-	}
-
-	return changed
-}

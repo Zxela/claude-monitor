@@ -24,7 +24,6 @@ type HistoryRow struct {
 	StartedAt       string  `json:"startedAt"`
 	EndedAt         string  `json:"endedAt"`
 	DurationSeconds float64 `json:"durationSeconds"`
-	Outcome         string  `json:"outcome"`
 	Model           string  `json:"model"`
 	CWD             string  `json:"cwd"`
 	GitBranch       string  `json:"gitBranch"`
@@ -120,7 +119,7 @@ func (d *DB) SaveSession(s *session.Session) error {
 		s.InputTokens, s.OutputTokens, s.CacheReadTokens,
 		s.MessageCount, s.ErrorCount,
 		startedAt, endedAt, duration,
-		s.Outcome, s.Model, s.CWD, s.GitBranch, s.TaskDescription,
+		"", s.Model, s.CWD, s.GitBranch, s.TaskDescription,
 	)
 	return err
 }
@@ -148,12 +147,13 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 	var result []HistoryRow
 	for rows.Next() {
 		var r HistoryRow
+		var outcome string // column still in DB but no longer used
 		if err := rows.Scan(
 			&r.ID, &r.ProjectName, &r.SessionName, &r.TotalCost,
 			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
 			&r.MessageCount, &r.ErrorCount,
 			&r.StartedAt, &r.EndedAt,
-			&r.DurationSeconds, &r.Outcome, &r.Model, &r.CWD, &r.GitBranch,
+			&r.DurationSeconds, &outcome, &r.Model, &r.CWD, &r.GitBranch,
 			&r.TaskDescription,
 		); err != nil {
 			return result, err

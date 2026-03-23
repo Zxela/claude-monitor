@@ -50,7 +50,6 @@ func TestSaveSession_InsertsAndUpdates(t *testing.T) {
 		ErrorCount:      1,
 		StartedAt:       now.Add(-10 * time.Minute),
 		LastActive:      now,
-		Outcome:         "success",
 		Model:           "claude-sonnet-4-6",
 		CWD:             "/tmp/test",
 		GitBranch:       "main",
@@ -78,16 +77,12 @@ func TestSaveSession_InsertsAndUpdates(t *testing.T) {
 	if r.TotalCost != 1.23 {
 		t.Errorf("TotalCost: got %f, want 1.23", r.TotalCost)
 	}
-	if r.Outcome != "success" {
-		t.Errorf("Outcome: got %q, want success", r.Outcome)
-	}
 	if r.TaskDescription != "Fix the bug" {
 		t.Errorf("TaskDescription: got %q, want 'Fix the bug'", r.TaskDescription)
 	}
 
 	// Update the session
 	sess.TotalCost = 2.50
-	sess.Outcome = "completed"
 	if err := db.SaveSession(sess); err != nil {
 		t.Fatalf("SaveSession update failed: %v", err)
 	}
@@ -101,9 +96,6 @@ func TestSaveSession_InsertsAndUpdates(t *testing.T) {
 	}
 	if rows[0].TotalCost != 2.50 {
 		t.Errorf("TotalCost after update: got %f, want 2.50", rows[0].TotalCost)
-	}
-	if rows[0].Outcome != "completed" {
-		t.Errorf("Outcome after update: got %q, want completed", rows[0].Outcome)
 	}
 }
 
