@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.6](https://github.com/Zxela/claude-monitor/compare/v1.7.5...v1.7.6) (2026-03-23)
+
+
+### Bug Fixes
+
+* address code review findings — XSS, race condition, polling, index ([8c26b71](https://github.com/Zxela/claude-monitor/commit/8c26b71894b3604bfbba2dbdcbac5e2300c62ede))
+
 ## [1.7.5](https://github.com/Zxela/claude-monitor/compare/v1.7.4...v1.7.5) (2026-03-23)
 
 
