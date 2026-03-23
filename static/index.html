@@ -263,6 +263,8 @@
 
   .session-card.selected::before { background: var(--blue); }
 
+  .session-card.focused { outline: 1px dashed var(--text-dim); outline-offset: -1px; }
+
   .session-card.active::before { background: var(--green); }
   .session-card.selected.active::before { background: var(--green); }
 
@@ -522,6 +524,53 @@
     transition: all 0.15s;
   }
   .feed-filter-btn:hover { border-color: var(--border2); }
+  .feed-filter-btn.all-btn { color: var(--text-dim); font-weight: 700; }
+  .feed-filter-btn.all-btn.active { color: var(--text); border-color: var(--border2); background: rgba(255,255,255,0.06); }
+
+  mark { background: rgba(255,220,0,0.35); color: #fff; padding: 0 1px; border-radius: 1px; }
+
+  .back-to-results {
+    display: inline-block;
+    padding: 3px 10px;
+    margin: 6px 12px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--blue);
+    border: 1px solid rgba(68,136,255,0.3);
+    border-radius: 2px;
+    background: rgba(68,136,255,0.06);
+    cursor: pointer;
+    font-family: var(--font);
+  }
+  .back-to-results:hover { background: rgba(68,136,255,0.15); border-color: var(--blue); }
+
+  .feed-loading {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 40px 20px;
+    letter-spacing: 1px;
+  }
+  .feed-error {
+    text-align: center;
+    color: var(--red);
+    font-size: 11px;
+    padding: 40px 20px;
+    letter-spacing: 1px;
+  }
+  .feed-error .retry-btn {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 3px 10px;
+    font-size: 10px;
+    color: var(--text);
+    border: 1px solid var(--border2);
+    border-radius: 2px;
+    background: var(--bg2);
+    cursor: pointer;
+    font-family: var(--font);
+  }
+  .feed-error .retry-btn:hover { border-color: var(--text-dim); }
   .feed-filter-btn.active[data-feedtype="user"]        { color: var(--blue); border-color: rgba(68,136,255,0.4); background: rgba(68,136,255,0.08); }
   .feed-filter-btn.active[data-feedtype="assistant"]   { color: var(--green); border-color: rgba(0,255,136,0.4); background: rgba(0,255,136,0.08); }
   .feed-filter-btn.active[data-feedtype="tool_use"]    { color: var(--yellow); border-color: rgba(255,204,0,0.4); background: rgba(255,204,0,0.08); }
@@ -1243,12 +1292,13 @@
           </span>
         </div>
         <div id="feed-type-filters">
-          <button class="feed-filter-btn active" data-feedtype="user" onclick="toggleFeedType('user')">user</button>
-          <button class="feed-filter-btn active" data-feedtype="assistant" onclick="toggleFeedType('assistant')">assistant</button>
-          <button class="feed-filter-btn active" data-feedtype="tool_use" onclick="toggleFeedType('tool_use')">tools</button>
-          <button class="feed-filter-btn active" data-feedtype="agent" onclick="toggleFeedType('agent')">agents</button>
-          <button class="feed-filter-btn active" data-feedtype="tool_result" onclick="toggleFeedType('tool_result')">results</button>
-          <button class="feed-filter-btn active" data-feedtype="hook" onclick="toggleFeedType('hook')">hooks</button>
+          <button class="feed-filter-btn all-btn active" onclick="toggleAllFeedTypes()">ALL</button>
+          <button class="feed-filter-btn active" data-feedtype="user" onclick="handleFeedFilterClick(event, 'user')">user</button>
+          <button class="feed-filter-btn active" data-feedtype="assistant" onclick="handleFeedFilterClick(event, 'assistant')">assistant</button>
+          <button class="feed-filter-btn active" data-feedtype="tool_use" onclick="handleFeedFilterClick(event, 'tool_use')">tools</button>
+          <button class="feed-filter-btn active" data-feedtype="agent" onclick="handleFeedFilterClick(event, 'agent')">agents</button>
+          <button class="feed-filter-btn active" data-feedtype="tool_result" onclick="handleFeedFilterClick(event, 'tool_result')">results</button>
+          <button class="feed-filter-btn active" data-feedtype="hook" onclick="handleFeedFilterClick(event, 'hook')">hooks</button>
         </div>
         <div id="feed">
           <div id="feed-empty">
@@ -1311,6 +1361,7 @@
 const state = {
   sessions: {},        // id -> session
   selectedSession: null,
+  focusedSession: null, // keyboard navigation focus (separate from selection)
   eventCount: 0,
   autoScroll: true,
   lastToolEntry: null,
@@ -1322,6 +1373,11 @@ const state = {
   sessionFilter: 'recent', // 'active' | 'recent' | 'all'
   expandedParents: new Set(), // parent session IDs with expanded subagent list
   feedTypeFilters: { user: true, assistant: true, tool_use: true, agent: true, tool_result: true, hook: true },
+  feedFilterBackup: null, // for solo mode restore
+  feedFilterSoloType: null, // currently soloed type
+  // Search state
+  searchResults: null, // cached search results for back-to-results
+  searchQuery: '', // last search query
   // Replay state
   replay: {
     sessionId: null,
@@ -2189,9 +2245,13 @@ function _renderSessionsNow() {
     return;
   }
 
+  // Track visible session IDs for keyboard navigation
+  state._visibleSessionIds = visibleItems.map(vi => vi.sess.id);
+
   visibleItems.forEach(({ sess, isSubagent: isSub, childCount }) => {
     const active = isActive(sess);
     const selected = state.selectedSession === sess.id;
+    const focused = state.focusedSession === sess.id;
     const cacheHit = sess.cacheHitPct != null ? Math.round(sess.cacheHitPct) : null;
     const totalTok = (sess.inputTokens || 0) + (sess.outputTokens || 0);
     const expanded = state.expandedParents.has(sess.id);
@@ -2234,6 +2294,7 @@ function _renderSessionsNow() {
     card.className = 'session-card' +
       (active ? ' active' : '') +
       (selected ? ' selected' : '') +
+      (focused ? ' focused' : '') +
       (isSub ? ' subagent' : '') +
       (sess.isStuck ? ' stuck' : '');
     card.dataset.sid = sess.id;
@@ -2257,6 +2318,12 @@ function _renderSessionsNow() {
     }
     list.appendChild(card);
   });
+
+  // Scroll focused card into view
+  if (state.focusedSession) {
+    const focusedCard = list.querySelector('.session-card.focused');
+    if (focusedCard) focusedCard.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 function toggleSubagents(parentId) {
@@ -2293,10 +2360,10 @@ function toggleSession(id) {
     return;
   }
 
-  // Selecting a new session: clear feed and load messages
+  // Selecting a new session: show loading state then load messages
   if (id) {
     const feed = document.getElementById('feed');
-    feed.innerHTML = '';
+    feed.innerHTML = '<div class="feed-loading">Loading...</div>';
     state.eventCount = 0;
     state.lastToolEntry = null;
     state.lastToolType = null;
@@ -2310,8 +2377,7 @@ async function loadRecentMessages(sessionId) {
   try {
     const resp = await fetch(`/api/sessions/${sessionId}/recent`);
     if (!resp.ok) {
-      console.warn(`loadRecentMessages: ${resp.status} for session ${sessionId}`);
-      return;
+      throw new Error(`HTTP ${resp.status}`);
     }
     const messages = await resp.json();
     if (!messages || !Array.isArray(messages)) return;
@@ -2327,11 +2393,22 @@ async function loadRecentMessages(sessionId) {
     state.lastToolType = null;
     state.toolUseMap = {};
 
+    // Show back-to-results link if we have cached search results
+    if (state.searchResults && state.searchResults.length > 0) {
+      const backEl = document.createElement('div');
+      backEl.className = 'back-to-results';
+      backEl.textContent = '\u2190 Back to results';
+      backEl.addEventListener('click', restoreSearchResults);
+      feed.appendChild(backEl);
+    }
+
     messages.forEach(msg => {
       addFeedEntry(sess, msg);
     });
   } catch (e) {
     console.error('loadRecentMessages failed:', e);
+    const feed = document.getElementById('feed');
+    feed.innerHTML = `<div class="feed-error">Failed to load session messages: ${escHtml(e.message)}<br><button class="retry-btn" onclick="loadRecentMessages('${escHtml(sessionId)}')">Retry</button></div>`;
   }
 }
 
@@ -2637,58 +2714,94 @@ function handleSearch(event) {
   _searchTimeout = setTimeout(() => executeSearch(query), 300);
 }
 
+function highlightQuery(text, query) {
+  if (!query) return escHtml(text);
+  const escaped = escHtml(text);
+  const qEsc = escHtml(query);
+  // Case-insensitive highlight
+  const re = new RegExp(`(${qEsc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return escaped.replace(re, '<mark>$1</mark>');
+}
+
 async function executeSearch(query) {
   const feed = document.getElementById('feed');
   feed.innerHTML = '<div style="color:var(--text-dim);padding:20px;text-align:center;font-size:11px;">Searching...</div>';
   _searchActive = true;
+  state.searchQuery = query;
 
   try {
     const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=100`);
     if (!resp.ok) return;
     const results = await resp.json();
 
-    feed.innerHTML = '';
-    if (!results || results.length === 0) {
-      feed.innerHTML = '<div style="color:var(--text-dim);padding:20px;text-align:center;font-size:11px;">No results</div>';
-      return;
-    }
+    // Cache results for back-to-results
+    state.searchResults = results;
 
-    // Show result count
-    const countEl = document.createElement('div');
-    countEl.style.cssText = 'color:var(--text-dim);padding:4px 12px;font-size:10px;border-bottom:1px solid var(--border);';
-    countEl.textContent = `${results.length} results for "${query}"`;
-    feed.appendChild(countEl);
-
-    state.lastToolEntry = null;
-    results.forEach(r => {
-      const sess = state.sessions[r.sessionId] || { id: r.sessionId };
-      // Build a feed entry with session badge
-      const el = document.createElement('div');
-      const type = r.role || r.type || 'system';
-      const toolName = r.toolName || '';
-      const isToolCall = toolName && type === 'assistant';
-      const displayType = isToolCall ? 'tool_use' : type;
-      const content = r.toolDetail ? `[${toolName}] ${truncate(r.toolDetail, 80)}` : truncate(r.contentText || '', 120);
-
-      el.className = `feed-entry type-${displayType}`;
-      el.innerHTML =
-        `<span class="fe-time">${formatTime(r.timestamp)}</span>` +
-        `<span class="fe-type ${displayType}">[${displayType}]</span>` +
-        `<span class="fe-content">${escHtml(content)}</span>` +
-        `<span class="fe-sid" style="color:var(--blue);cursor:pointer" onclick="selectSearchResult('${r.sessionId}')">${escHtml(r.sessionName || r.sessionId.slice(0, 8))}</span>`;
-      feed.appendChild(el);
-    });
+    renderSearchResults(results, query);
   } catch (e) {
     feed.innerHTML = '<div style="color:var(--red);padding:20px;text-align:center;font-size:11px;">Search failed</div>';
   }
 }
 
+function renderSearchResults(results, query) {
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+
+  if (!results || results.length === 0) {
+    feed.innerHTML = '<div style="color:var(--text-dim);padding:20px;text-align:center;font-size:11px;">No results</div>';
+    return;
+  }
+
+  // Show result count
+  const countEl = document.createElement('div');
+  countEl.style.cssText = 'color:var(--text-dim);padding:4px 12px;font-size:10px;border-bottom:1px solid var(--border);';
+  countEl.textContent = `${results.length} results for "${query}"`;
+  feed.appendChild(countEl);
+
+  state.lastToolEntry = null;
+  results.forEach(r => {
+    const sess = state.sessions[r.sessionId] || { id: r.sessionId };
+    const el = document.createElement('div');
+    const type = r.role || r.type || 'system';
+    const toolName = r.toolName || '';
+    const isToolCall = toolName && type === 'assistant';
+    const displayType = isToolCall ? 'tool_use' : type;
+    const content = r.toolDetail ? `[${toolName}] ${truncate(r.toolDetail, 80)}` : truncate(r.contentText || '', 120);
+
+    el.className = `feed-entry type-${displayType}`;
+    el.innerHTML =
+      `<span class="fe-time">${formatTime(r.timestamp)}</span>` +
+      `<span class="fe-type ${displayType}">[${displayType}]</span>` +
+      `<span class="fe-content">${highlightQuery(content, query)}</span>` +
+      `<span class="fe-sid" style="color:var(--blue);cursor:pointer" onclick="selectSearchResult('${r.sessionId}')">${escHtml(r.sessionName || r.sessionId.slice(0, 8))}</span>`;
+    feed.appendChild(el);
+  });
+}
+
 function selectSearchResult(sessionId) {
-  clearSearch();
+  // Don't clear search — keep query and results cached for back-to-results
+  _searchActive = false;
   state.selectedSession = sessionId;
   renderSessions();
   updateFeedFilter();
   loadRecentMessages(sessionId);
+}
+
+function restoreSearchResults() {
+  if (!state.searchResults || state.searchResults.length === 0) return;
+  _searchActive = true;
+  // Deselect session
+  state.selectedSession = null;
+  renderSessions();
+  updateFeedFilter();
+  updateHash();
+  // Restore search input
+  const input = document.getElementById('search-input');
+  if (state.searchQuery) {
+    input.value = state.searchQuery;
+    document.getElementById('search-clear').style.display = '';
+  }
+  renderSearchResults(state.searchResults, state.searchQuery);
 }
 
 function clearSearch() {
@@ -2696,21 +2809,72 @@ function clearSearch() {
   input.value = '';
   document.getElementById('search-clear').style.display = 'none';
   _searchActive = false;
+  state.searchResults = null;
+  state.searchQuery = '';
   // Restore live feed
   const feed = document.getElementById('feed');
   feed.innerHTML = '';
   state.eventCount = 0;
 }
 
+function handleFeedFilterClick(event, type) {
+  if (event.shiftKey) {
+    soloFeedType(type);
+  } else {
+    // Normal click clears solo state
+    state.feedFilterSoloType = null;
+    state.feedFilterBackup = null;
+    toggleFeedType(type);
+  }
+}
+
 function toggleFeedType(type) {
   state.feedTypeFilters[type] = !state.feedTypeFilters[type];
-  const btn = document.querySelector(`.feed-filter-btn[data-feedtype="${type}"]`);
-  if (btn) btn.classList.toggle('active', state.feedTypeFilters[type]);
+  applyFeedFilterUI();
+}
 
-  // Show/hide existing entries of this type
-  document.querySelectorAll(`.feed-entry.type-${type}`).forEach(el => {
-    el.style.display = state.feedTypeFilters[type] ? '' : 'none';
+function applyFeedFilterUI() {
+  const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook'];
+  types.forEach(t => {
+    const btn = document.querySelector(`.feed-filter-btn[data-feedtype="${t}"]`);
+    if (btn) btn.classList.toggle('active', state.feedTypeFilters[t]);
+    document.querySelectorAll(`.feed-entry.type-${t}`).forEach(el => {
+      el.style.display = state.feedTypeFilters[t] ? '' : 'none';
+    });
   });
+  // Update ALL button
+  const allBtn = document.querySelector('.feed-filter-btn.all-btn');
+  if (allBtn) {
+    const allOn = types.every(t => state.feedTypeFilters[t]);
+    allBtn.classList.toggle('active', allOn);
+  }
+}
+
+function soloFeedType(type) {
+  if (state.feedFilterSoloType === type) {
+    // Un-solo: restore backup
+    if (state.feedFilterBackup) {
+      Object.assign(state.feedTypeFilters, state.feedFilterBackup);
+    }
+    state.feedFilterSoloType = null;
+    state.feedFilterBackup = null;
+  } else {
+    // Solo: save current state, enable only clicked type
+    state.feedFilterBackup = { ...state.feedTypeFilters };
+    const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook'];
+    types.forEach(t => { state.feedTypeFilters[t] = (t === type); });
+    state.feedFilterSoloType = type;
+  }
+  applyFeedFilterUI();
+}
+
+function toggleAllFeedTypes() {
+  const types = ['user', 'assistant', 'tool_use', 'agent', 'tool_result', 'hook'];
+  const allOn = types.every(t => state.feedTypeFilters[t]);
+  types.forEach(t => { state.feedTypeFilters[t] = !allOn; });
+  state.feedFilterSoloType = null;
+  state.feedFilterBackup = null;
+  applyFeedFilterUI();
 }
 
 function toggleExpand(id) {
@@ -3170,9 +3334,62 @@ document.getElementById('replay-scrubber').addEventListener('change', (e) => {
 });
 
 // ── Keyboard shortcuts ────────────────────────────────────────
+
+function getVisibleSessionIds() {
+  return state._visibleSessionIds || [];
+}
+
+function moveFocus(direction) {
+  const ids = getVisibleSessionIds();
+  if (ids.length === 0) return;
+  const currentIdx = state.focusedSession ? ids.indexOf(state.focusedSession) : -1;
+  let nextIdx;
+  if (direction === 'down') {
+    nextIdx = currentIdx < 0 ? 0 : Math.min(currentIdx + 1, ids.length - 1);
+  } else {
+    nextIdx = currentIdx < 0 ? 0 : Math.max(currentIdx - 1, 0);
+  }
+  state.focusedSession = ids[nextIdx];
+  renderSessions();
+}
+
 document.addEventListener('keydown', (e) => {
   // Don't intercept when typing in inputs
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  // Help overlay is open — close on any key
+  const helpOverlay = document.getElementById('help-overlay');
+  if (helpOverlay && e.key !== '?') { helpOverlay.remove(); return; }
+
+  // Replay controls take priority when replay panel is active
+  if (state.replay.sessionId) {
+    switch(e.key) {
+      case ' ':  // Space = play/pause
+        e.preventDefault();
+        replayToggle();
+        return;
+      case 'r':
+      case 'R':
+        replayRestart();
+        return;
+      case 'ArrowLeft': {
+        e.preventDefault();
+        const scrubber = document.getElementById('replay-scrubber');
+        const newVal = Math.max(0, parseInt(scrubber.value) - 1);
+        scrubber.value = newVal;
+        scrubber.dispatchEvent(new Event('change'));
+        return;
+      }
+      case 'ArrowRight': {
+        e.preventDefault();
+        const scrubber = document.getElementById('replay-scrubber');
+        const newVal = Math.min(parseInt(scrubber.max), parseInt(scrubber.value) + 1);
+        scrubber.value = newVal;
+        scrubber.dispatchEvent(new Event('change'));
+        return;
+      }
+    }
+  }
 
   switch(e.key) {
     case '/':  // Focus search
@@ -3181,12 +3398,49 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'Escape':
       if (_searchActive) { clearSearch(); break; }
+      if (state.focusedSession) {
+        state.focusedSession = null;
+        renderSessions();
+        break;
+      }
       if (state.selectedSession) {
         state.selectedSession = null;
         renderSessions();
         updateFeedFilter();
         updateHash();
         break;
+      }
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      moveFocus('down');
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      moveFocus('up');
+      break;
+    case 'Enter':
+      if (state.focusedSession) {
+        toggleSession(state.focusedSession);
+      }
+      break;
+    case 'ArrowRight':
+      if (state.focusedSession) {
+        e.preventDefault();
+        // Expand subagents if parent
+        const sess = state.sessions[state.focusedSession];
+        if (sess && !sess.isSubagent) {
+          state.expandedParents.add(state.focusedSession);
+          renderSessions();
+        }
+      }
+      break;
+    case 'ArrowLeft':
+      if (state.focusedSession) {
+        e.preventDefault();
+        // Collapse subagents if parent
+        state.expandedParents.delete(state.focusedSession);
+        renderSessions();
       }
       break;
     case '1': // Active filter
@@ -3216,12 +3470,19 @@ function toggleHelp() {
     <div class="help-content">
       <h3>Keyboard Shortcuts</h3>
       <div class="help-row"><kbd>/</kbd> Focus search</div>
-      <div class="help-row"><kbd>Esc</kbd> Clear search / deselect session</div>
+      <div class="help-row"><kbd>Esc</kbd> Clear search / deselect / unfocus</div>
+      <div class="help-row"><kbd>\u2191\u2193</kbd> Navigate sessions</div>
+      <div class="help-row"><kbd>Enter</kbd> Select focused session</div>
+      <div class="help-row"><kbd>\u2190\u2192</kbd> Collapse / expand subagents</div>
       <div class="help-row"><kbd>1</kbd> Active sessions filter</div>
       <div class="help-row"><kbd>2</kbd> Recent sessions filter</div>
       <div class="help-row"><kbd>3</kbd> All sessions filter</div>
       <div class="help-row"><kbd>g</kbd> Toggle graph view</div>
       <div class="help-row"><kbd>?</kbd> This help</div>
+      <h3 style="margin-top:12px;">Replay Controls</h3>
+      <div class="help-row"><kbd>Space</kbd> Play / pause</div>
+      <div class="help-row"><kbd>R</kbd> Restart</div>
+      <div class="help-row"><kbd>\u2190\u2192</kbd> Step backward / forward</div>
       <p style="margin-top:12px;color:var(--text-dim);font-size:10px;">Click anywhere to close</p>
     </div>
   `;
