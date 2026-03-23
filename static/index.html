@@ -8,21 +8,22 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:        #0a0a0f;
+    --bg:        #121218;
     --bg2:       #0f0f18;
     --bg3:       #13131f;
     --border:    #1e1e30;
     --border2:   #2a2a40;
     --text:      #e0e0e0;
     --text-dim:  #666680;
-    --green:     #00ff88;
-    --blue:      #4488ff;
-    --yellow:    #ffcc00;
-    --cyan:      #00ccff;
-    --red:       #ff4444;
-    --purple:    #cc88ff;
-    --orange:    #ff8844;
+    --green:     #33dd99;
+    --blue:      #5588ff;
+    --cyan:      #44cccc;
+    --yellow:    #ddcc44;
+    --red:       #dd4455;
+    --purple:    #aa77dd;
+    --orange:    #dd8844;
     --font:      'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    --font-prose: 'Inter', system-ui, sans-serif;
   }
 
   html, body {
@@ -363,6 +364,17 @@
     letter-spacing: 0.5px;
   }
 
+  .session-current-tool {
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+    margin-bottom: 2px;
+  }
+
   #no-sessions {
     text-align: center;
     color: var(--text-dim);
@@ -414,8 +426,9 @@
     display: flex;
     align-items: baseline;
     gap: 0;
-    padding: 2px 12px;
-    border-left: 2px solid transparent;
+    padding: 5px 12px;
+    border-left: 3px solid transparent;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
     animation: fadeSlideIn 0.25s ease-out;
     transition: background 0.15s;
     line-height: 1.6;
@@ -519,6 +532,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 12px;
+    font-family: var(--font-prose);
   }
   .feed-entry.expanded .fe-content {
     overflow: visible;
@@ -554,6 +568,7 @@
     margin: 4px 0 2px 0;
     max-height: 300px;
     overflow-y: auto;
+    font-family: var(--font-prose);
   }
 
   .fe-content.dim  { color: var(--text-dim); }
@@ -1268,7 +1283,7 @@ const state = {
 };
 
 // ── Session state for pixel view ───────────────────────────────
-const sessionState = {};  // id -> { state, toolName, cost, projectName }
+const sessionState = {};  // id -> { state, toolName, toolDetail, cost, projectName }
 
 // ── Pixel sprites (box-shadow pixel art, 10×16 grid at 1px each, 3× scaled) ──
 // Each pixel is "Xpx Ypx 0 0 #color". X/Y are 0-indexed pixel positions.
@@ -1584,6 +1599,7 @@ function setView(view) {
     btnList.classList.add('active');
     btnGraph.classList.remove('active');
   }
+  updateHash();
 }
 
 // ── Graph view rendering ───────────────────────────────────────
@@ -2035,6 +2051,7 @@ function setSessionFilter(filter) {
     btn.classList.toggle('active', btn.dataset.filter === filter);
   });
   renderSessions();
+  updateHash();
   // graph view updates via animation loop
 }
 
@@ -2117,14 +2134,10 @@ function _renderSessionsNow() {
     const hasChildren = !isSub && childCount > 0;
     const chevron = hasChildren ? `<span class="subagent-chevron">${expanded ? '▾' : '▸'} ${childCount}</span>` : '';
 
-    const spriteState = (sessionState[sess.id] || {}).state || 'idle';
-    const spriteFrames = SPRITES[spriteState] || SPRITES.idle;
-    const spriteBoxShadow = spriteFrames[_spriteFrame % spriteFrames.length];
+    const ss = sessionState[sess.id] || {};
+    const currentTool = ss.toolName ? (ss.toolDetail ? `${ss.toolName}: ${ss.toolDetail}` : ss.toolName) : '';
 
     const html = `
-      <div class="inline-sprite-wrap" data-sprite-sid="${sess.id}">
-        <div class="sprite" style="box-shadow:${spriteBoxShadow}"></div>
-      </div>
       <div class="session-card-content">
         <div class="session-row1">
           <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
@@ -2139,6 +2152,7 @@ function _renderSessionsNow() {
           <span class="tok">${formatTokens(totalTok)} tok</span>
           ${cacheHit !== null ? `<span class="sep">·</span><span class="cache">${cacheHit}% cache</span>` : ''}
         </div>
+        ${currentTool ? `<div class="session-current-tool">${escHtml(currentTool)}</div>` : ''}
         <div class="session-meta">
           <span class="sid">${(sess.id || '').slice(0, 8)}</span>
           ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
@@ -2207,9 +2221,15 @@ function toggleSession(id) {
   state.selectedSession = wasSelected ? null : id;
   renderSessions();
   updateFeedFilter();
+  updateHash();
 
-  // Clear feed immediately when changing sessions, then load new messages
-  if (!wasSelected && id) {
+  if (wasSelected) {
+    // Deselecting: switch to multi-session mode, don't clear feed
+    return;
+  }
+
+  // Selecting a new session: clear feed and load messages
+  if (id) {
     const feed = document.getElementById('feed');
     feed.innerHTML = '';
     state.eventCount = 0;
@@ -2257,7 +2277,7 @@ function updateFeedFilter() {
     const name = sess ? (sess.name || state.selectedSession.slice(0, 8)) : state.selectedSession.slice(0, 8);
     lbl.textContent = '▸ ' + name;
   } else {
-    lbl.textContent = '';
+    lbl.textContent = '▸ All Sessions';
   }
 }
 
@@ -2294,12 +2314,13 @@ function getToolName(msg) {
 
 function addFeedEntry(session, message) {
   if (!message) return;
-  // Filter by selected session
+  // Filter by selected session (when null, show all sessions)
   if (state.selectedSession && session.id !== state.selectedSession) return;
   // Skip empty/noise entries
   const text = getMessageText(message);
   if (!text && !message.toolName) return;
   if (text === '[thinking...]') return;
+  const isMultiSession = !state.selectedSession;
 
   const feed = document.getElementById('feed');
   const empty = document.getElementById('feed-empty');
@@ -2394,10 +2415,11 @@ function addFeedEntry(session, message) {
 
   // Show result label for inherited types (e.g. "agent_result" instead of generic "tool_result")
   const typeLabel = isToolResult && displayType !== 'tool_result' ? displayType + '_result' : displayType;
+  const sessionPrefix = isMultiSession ? `<span style="color:var(--blue);font-size:10px;margin-right:6px;">${escHtml(truncate(session.projectName || session.name || sid, 12))}</span>` : '';
   el.innerHTML =
     `<span class="fe-time">${formatTime(ts)}</span>` +
     `<span class="fe-type ${displayType}">[${typeLabel}]</span>` +
-    `<span class="fe-content ${contentClass}">${escHtml(content)}${expandHtml}</span>` +
+    `${sessionPrefix}<span class="fe-content ${contentClass}">${escHtml(content)}${expandHtml}</span>` +
     `<span class="fe-sid">${escHtml(sid)}</span>`;
 
   if (isToolCall || isAgent) {
@@ -2915,7 +2937,7 @@ function connect() {
 
 function updateSessionState(id, session, message) {
   if (!sessionState[id]) {
-    sessionState[id] = { state: 'idle', toolName: null };
+    sessionState[id] = { state: 'idle', toolName: null, toolDetail: null };
   }
   // Use backend-provided status when available
   if (session && session.status) {
@@ -2924,17 +2946,21 @@ function updateSessionState(id, session, message) {
   if (session && session.isActive === false) {
     sessionState[id].state = 'idle';
     sessionState[id].toolName = null;
+    sessionState[id].toolDetail = null;
     return;
   }
-  // Track tool name locally for display
+  // Track tool name and detail locally for display
   if (message) {
     const toolName = message.toolName || getToolName(message);
     if (toolName) {
       sessionState[id].toolName = toolName;
+      sessionState[id].toolDetail = message.toolDetail || null;
     } else if (message.role === 'user') {
       sessionState[id].toolName = null;
+      sessionState[id].toolDetail = null;
     } else if (message.role === 'assistant') {
       sessionState[id].toolName = null;
+      sessionState[id].toolDetail = null;
     }
   }
 }
@@ -2996,7 +3022,7 @@ async function loadInitialSessions() {
         state.sessions[s.id] = s;
         // Initialize all sessions to idle on first load
         if (!sessionState[s.id]) {
-          sessionState[s.id] = { state: 'idle', toolName: null };
+          sessionState[s.id] = { state: 'idle', toolName: null, toolDetail: null };
         }
       }
     });
@@ -3059,6 +3085,7 @@ document.addEventListener('keydown', (e) => {
         state.selectedSession = null;
         renderSessions();
         updateFeedFilter();
+        updateHash();
         break;
       }
       break;
@@ -3102,8 +3129,44 @@ function toggleHelp() {
   document.body.appendChild(help);
 }
 
+// ── URL hash state persistence ─────────────────────────────────
+function updateHash() {
+  const parts = [];
+  if (state.selectedSession) parts.push('session=' + encodeURIComponent(state.selectedSession));
+  if (state.sessionFilter !== 'recent') parts.push('filter=' + encodeURIComponent(state.sessionFilter));
+  if (state.currentView !== 'list') parts.push('view=' + encodeURIComponent(state.currentView));
+  const hash = parts.length ? '#' + parts.join('&') : '';
+  if (location.hash !== hash) {
+    history.replaceState(null, '', hash || location.pathname + location.search);
+  }
+}
+
+function restoreFromHash() {
+  const hash = location.hash.slice(1);
+  if (!hash) return;
+  const params = {};
+  hash.split('&').forEach(pair => {
+    const [k, v] = pair.split('=');
+    if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
+  });
+  if (params.filter && ['active', 'recent', 'all'].includes(params.filter)) {
+    setSessionFilter(params.filter);
+  }
+  if (params.view && ['list', 'graph'].includes(params.view)) {
+    setView(params.view);
+  }
+  if (params.session && state.sessions[params.session]) {
+    state.selectedSession = params.session;
+    renderSessions();
+    updateFeedFilter();
+    loadRecentMessages(params.session);
+  }
+}
+
 // ── Boot ───────────────────────────────────────────────────────
-loadInitialSessions();
+loadInitialSessions().then(() => {
+  restoreFromHash();
+});
 connect();
 </script>
 </body>
