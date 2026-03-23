@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/Zxela/claude-monitor/compare/v1.6.0...v1.7.0) (2026-03-23)
+
+
+### Features
+
+* batch 6 — history persistence, outcome tracking, notifications, comparison table, task descriptions ([8bd785c](https://github.com/Zxela/claude-monitor/commit/8bd785c5b78bcf64a8b52cc6434b3aea38288a9f))
+
 ## [1.6.0](https://github.com/Zxela/claude-monitor/compare/v1.5.0...v1.6.0) (2026-03-23)
 
 
