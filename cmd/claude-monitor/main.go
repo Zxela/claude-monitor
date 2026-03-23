@@ -123,6 +123,14 @@ func main() {
 
 	// processEvent parses a watcher event and updates the session store.
 	// Returns the parsed message, session, and whether it's a new session.
+	// agentMeta caches subagent metadata read from .meta.json files.
+	type agentMeta struct {
+		AgentType   string `json:"agentType"`
+		Description string `json:"description"`
+		Name        string `json:"name"`
+	}
+	agentMetaCache := make(map[string]*agentMeta) // sessionID -> meta
+
 	processEvent := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
 		msg, err := parser.ParseLine(ev.Line)
 		if err != nil {
@@ -130,6 +138,19 @@ func main() {
 		}
 		_, exists := sessionStore.Get(ev.SessionID)
 		isNew := !exists
+
+		// Pre-read subagent meta.json outside the store lock (only once per session).
+		if isNew {
+			if _, cached := agentMetaCache[ev.SessionID]; !cached {
+				metaPath := strings.TrimSuffix(ev.FilePath, ".jsonl") + ".meta.json"
+				if metaData, err := os.ReadFile(metaPath); err == nil {
+					var meta agentMeta
+					if json.Unmarshal(metaData, &meta) == nil {
+						agentMetaCache[ev.SessionID] = &meta
+					}
+				}
+			}
+		}
 
 		sess := sessionStore.Upsert(ev.SessionID, func(s *session.Session) {
 			s.FilePath = ev.FilePath
@@ -166,6 +187,18 @@ func main() {
 					if s.ParentID == "" {
 						s.ParentID = parentSID
 						s.IsSubagent = true
+
+						// Apply cached meta.json for agent name/type.
+						if meta := agentMetaCache[ev.SessionID]; meta != nil {
+							name := meta.Name
+							if name == "" {
+								name = meta.AgentType
+							}
+							if name != "" && s.SessionName == "" {
+								s.SessionName = name
+								s.ProjectName = name
+							}
+						}
 					}
 				}
 			}
@@ -221,14 +254,11 @@ func main() {
 				}
 				s.TaskDescription = desc
 
-				// For subagents named "subagents" with no session name,
-				// use the agent ID as a short label — the task description
-				// is shown separately on the card as a subtitle.
+				// Fallback for subagents without meta.json: use short agent ID.
 				if s.IsSubagent && s.SessionName == "" && s.ProjectName == "subagents" {
-					// Agent IDs look like "agent-a5039f5c4e2f25f78" — show a short form
 					aid := s.ID
 					if strings.HasPrefix(aid, "agent-") {
-						aid = aid[6:] // strip "agent-" prefix
+						aid = aid[6:]
 					}
 					if len(aid) > 8 {
 						aid = aid[:8]
