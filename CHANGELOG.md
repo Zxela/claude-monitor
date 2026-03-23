@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/Zxela/claude-monitor/compare/v1.2.1...v1.3.0) (2026-03-23)
+
+
+### Features
+
+* batch 1 — visual refresh, URL state, multi-session feed, current tool display ([5bca183](https://github.com/Zxela/claude-monitor/commit/5bca183927decc7e7cbad97148ff4ae54c6842ac))
+* batch 2 — error tracking, error badges, feed panel actions, working count ([5f73c2b](https://github.com/Zxela/claude-monitor/commit/5f73c2b8639996d20fa12f72e728b01f7afdc277))
+
 ## [1.2.1](https://github.com/Zxela/claude-monitor/compare/v1.2.0...v1.2.1) (2026-03-23)
 
 
