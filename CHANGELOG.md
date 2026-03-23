@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.5](https://github.com/Zxela/claude-monitor/compare/v1.7.4...v1.7.5) (2026-03-23)
+
+
+### Bug Fixes
+
+* use short agent ID for subagent names instead of task prompt ([0ead099](https://github.com/Zxela/claude-monitor/commit/0ead099fc03fa6109b65c636023a2a3899024cf7))
+
 ## [1.7.4](https://github.com/Zxela/claude-monitor/compare/v1.7.3...v1.7.4) (2026-03-23)
 
 
