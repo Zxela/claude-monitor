@@ -141,6 +141,11 @@ func main() {
 			}
 			if msg.CWD != "" {
 				s.CWD = msg.CWD
+				// Derive a cleaner project name from CWD if we only have
+				// the raw dir hash (e.g. "-root-claude-monitor").
+				if s.SessionName == "" && strings.HasPrefix(s.ProjectName, "-") {
+					s.ProjectName = filepath.Base(msg.CWD)
+				}
 			}
 			if msg.GitBranch != "" {
 				s.GitBranch = msg.GitBranch

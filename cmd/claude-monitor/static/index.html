@@ -225,8 +225,8 @@
     display: flex;
     align-items: center;
     gap: 0;
-    padding: 8px 10px 8px 6px;
-    margin-bottom: 4px;
+    padding: 10px 12px 8px 8px;
+    margin-bottom: 5px;
     border: 1px solid var(--border);
     border-radius: 3px;
     background: var(--bg3);
@@ -272,7 +272,7 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    margin-bottom: 5px;
+    margin-bottom: 4px;
   }
 
   .session-dot {
@@ -380,10 +380,17 @@
   .session-stats {
     font-size: 11px;
     color: var(--text-dim);
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     display: flex;
-    gap: 6px;
+    gap: 8px;
     flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .session-error-count {
+    color: var(--red);
+    font-weight: 600;
+    font-size: 10px;
   }
 
   .session-stats .cost  { color: var(--yellow); }
@@ -396,6 +403,7 @@
     color: #44445a;
     display: flex;
     gap: 8px;
+    margin-top: 2px;
   }
 
   .session-meta .sid {
@@ -585,7 +593,10 @@
   .feed-entry.type-tool_use    { border-left-color: rgba(255,204,0,0.3); }
   .feed-entry.type-agent       { border-left-color: rgba(255,136,68,0.35); }
   .feed-entry.type-tool_result { border-left-color: rgba(0,204,255,0.25); }
-  .feed-entry.type-error       { border-left-color: rgba(255,68,68,0.4); }
+  .feed-entry.type-error       { border-left-color: rgba(255,68,68,0.4); background: rgba(221,68,85,0.04); }
+  .feed-entry.is-error         { border-left-color: var(--red) !important; background: rgba(221,68,85,0.06); }
+  .feed-entry.is-error .fe-content { color: var(--red); }
+  .feed-entry.is-error .fe-type    { color: var(--red); font-weight: 600; }
 
   .feed-entry.tool-group-start {
     margin-bottom: 0;
@@ -2589,34 +2600,43 @@ function _renderSessionsNow() {
     const currentTool = ss.toolName ? (ss.toolDetail ? `${ss.toolName}: ${ss.toolDetail}` : ss.toolName) : '';
 
     const outcomeBadge = (!active && sess.outcome) ? outcomeHtml(sess.outcome) : '';
-    const taskDesc = sess.taskDescription ? `<div class="session-task-desc">${escHtml(truncate(sess.taskDescription, 60))}</div>` : '';
+    const taskDesc = sess.taskDescription ? `<div class="session-task-desc">${escHtml(truncate(sess.taskDescription, 80))}</div>` : '';
+
+    // Better display name: prefer sessionName, then clean up projectName
+    let displayName = sess.sessionName || sess.projectName || sess.name || sess.id;
+    // Clean up project dir hashes like "-root-claude-monitor" → "claude-monitor"
+    if (displayName.startsWith('-') && !sess.sessionName) {
+      displayName = displayName.replace(/^-[^-]+-/, '');
+    }
+
+    const statusBadge = sess.isStuck
+      ? '<span class="stuck-badge">STUCK</span>'
+      : sess.status && sess.status !== 'idle'
+        ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'IDLE' : 'LIVE'}</span>`
+        : (active ? '<span class="session-active-badge">LIVE</span>' : '');
 
     const html = `
       <div class="session-card-content">
         <div class="session-row1">
           <span class="session-dot${active ? ' active' : ''}${sess.status === 'thinking' ? ' thinking' : ''}${sess.status === 'tool_use' ? ' tool' : ''}"></span>
-          <span class="session-name">${truncate(sess.projectName || sess.name || sess.id, 20)}</span>
+          <span class="session-name">${escHtml(truncate(displayName, 28))}</span>
           ${chevron}
           ${outcomeBadge}
-          ${sess.isStuck ? '<span class="stuck-badge">STUCK</span>' : ''}
-          ${sess.status && sess.status !== 'idle' ? `<span class="session-status-badge status-${sess.status}">${sess.status === 'thinking' ? 'THINKING' : sess.status === 'tool_use' ? 'TOOL' : sess.status === 'waiting' ? 'WAITING' : 'LIVE'}</span>` : (active ? '<span class="session-active-badge">LIVE</span>' : '')}
+          ${statusBadge}
         </div>
         ${taskDesc}
         <div class="session-stats">
           <span class="cost">${formatCost(sess.totalCostUSD)}</span>
           ${sess.startedAt && sess.lastActive ? `<span class="cost-rate">${formatCostRate(sess)}</span>` : ''}
-          <span class="sep">·</span>
           <span class="tok">${formatTokens(totalTok)} tok</span>
-          ${cacheHit !== null ? `<span class="sep">·</span><span class="cache">${cacheHit}% cache</span>` : ''}
-          ${sess.errorCount > 0 ? `<span class="sep">·</span><span style="color:var(--red);font-weight:600">\u2715${sess.errorCount}</span>` : ''}
+          ${cacheHit !== null ? `<span class="cache">${cacheHit}%</span>` : ''}
+          ${sess.errorCount > 0 ? `<span class="session-error-count">${sess.errorCount} err</span>` : ''}
         </div>
         ${currentTool ? `<div class="session-current-tool">${escHtml(currentTool)}</div>` : ''}
         <div class="session-meta">
-          <span class="sid">${(sess.id || '').slice(0, 8)}</span>
-          ${sess.model ? `<span class="sep">·</span><span class="model">${sess.model.replace('claude-','')}</span>` : ''}
-          <span class="sep">·</span>
+          ${sess.model ? `<span class="model">${sess.model.replace('claude-','')}</span>` : ''}
           <span>${formatAge(sess.lastActive)}</span>
-          ${sess.startedAt ? `<span class="sep">·</span><span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
+          ${sess.startedAt ? `<span class="duration">${formatDuration(sess.startedAt, sess.lastActive)}</span>` : ''}
         </div>
       </div>
     `;
@@ -2912,8 +2932,9 @@ function addFeedEntry(session, message) {
 
   const hasFullContent = message.fullContent && message.fullContent.length > content.length;
 
+  const isErrorEntry = !!(message.isError);
   const el = document.createElement('div');
-  el.className = `feed-entry type-${displayType}`;
+  el.className = `feed-entry type-${displayType}${isErrorEntry ? ' is-error' : ''}`;
 
   let expandHtml = '';
   if (hasFullContent) {
