@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/Zxela/claude-monitor/compare/v1.7.0...v1.7.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* redesign session cards, highlight errors in feed, improve naming ([7357e8c](https://github.com/Zxela/claude-monitor/commit/7357e8cd65f9272488410b72219908b447a84d78))
+
 ## [1.7.0](https://github.com/Zxela/claude-monitor/compare/v1.6.0...v1.7.0) (2026-03-23)
 
 
