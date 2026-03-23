@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.4](https://github.com/Zxela/claude-monitor/compare/v1.7.3...v1.7.4) (2026-03-23)
+
+
+### Bug Fixes
+
+* separate agent name from task description in feed display ([29dbf43](https://github.com/Zxela/claude-monitor/commit/29dbf43b03f26e8781a4c35bfcfaf7890152066a))
+
 ## [1.7.3](https://github.com/Zxela/claude-monitor/compare/v1.7.2...v1.7.3) (2026-03-23)
 
 
