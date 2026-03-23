@@ -2576,7 +2576,7 @@ function _renderSessionsNow() {
           ${sess.startedAt && sess.lastActive ? `<span class="cost-rate">${formatCostRate(sess)}</span>` : ''}
           <span class="tok">${formatTokens(totalTok)} tok</span>
           ${cacheHit !== null ? `<span class="cache">${cacheHit}%</span>` : ''}
-          ${sess.errorCount > 0 ? `<span class="session-error-count" data-sid="${sess.id}" onclick="event.stopPropagation(); showSessionErrors('${sess.id}')">${sess.errorCount} err</span>` : ''}
+          ${sess.errorCount > 0 ? `<span class="session-error-count" data-sid="${escHtml(sess.id)}" onclick="event.stopPropagation(); showSessionErrors('${escHtml(sess.id)}')">${sess.errorCount} err</span>` : ''}
         </div>
         ${currentTool ? `<div class="session-current-tool">${escHtml(currentTool)}</div>` : ''}
         <div class="session-meta">
@@ -3076,7 +3076,7 @@ function renderSearchResults(results, query) {
       `<span class="fe-time">${formatTime(r.timestamp)}</span>` +
       `<span class="fe-type ${displayType}">[${displayType}]</span>` +
       `<span class="fe-content">${highlightQuery(content, query)}</span>` +
-      `<span class="fe-sid" style="color:var(--blue);cursor:pointer" onclick="selectSearchResult('${r.sessionId}')">${escHtml(r.sessionName || r.sessionId.slice(0, 8))}</span>`;
+      `<span class="fe-sid" style="color:var(--blue);cursor:pointer" onclick="selectSearchResult('${escHtml(r.sessionId)}')">${escHtml(r.sessionName || r.sessionId.slice(0, 8))}</span>`;
     feed.appendChild(el);
   });
 }
@@ -3640,30 +3640,30 @@ async function loadInitialSessions() {
   }
 }
 
-// ── Age ticker ─────────────────────────────────────────────────
-// Periodic UI refresh + session data poll for status transitions.
-setInterval(() => {
+// ── Periodic refresh ────────────────────────────────────────────
+// Single interval: re-render UI every 10s (for age text), poll
+// session data every 30s (3rd tick) to catch status transitions.
+let _pollTick = 0;
+setInterval(async () => {
+  _pollTick++;
+  // Every 30s (3rd tick), re-fetch session data from server
+  if (_pollTick % 3 === 0) {
+    try {
+      const resp = await fetch('/api/sessions');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const sessions = Array.isArray(data) ? data : (data.sessions || []);
+      sessions.forEach(s => {
+        if (s && s.id) {
+          state.sessions[s.id] = { ...(state.sessions[s.id] || {}), ...s };
+        }
+      });
+    } catch (e) { /* ignore */ }
+  }
   renderSessions();
   updateTopBar();
   if (state.currentView === 'table') renderComparisonTable();
 }, 10_000);
-
-// Poll session data every 30s to catch status transitions.
-setInterval(async () => {
-  try {
-    const resp = await fetch('/api/sessions');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const sessions = Array.isArray(data) ? data : (data.sessions || []);
-    sessions.forEach(s => {
-      if (s && s.id) {
-        state.sessions[s.id] = { ...(state.sessions[s.id] || {}), ...s };
-      }
-    });
-    renderSessions();
-    updateTopBar();
-  } catch (e) { /* ignore */ }
-}, 30_000);
 
 // Scrubber seek — fires on mouseup/touchend (change event).
 document.getElementById('replay-scrubber').addEventListener('change', (e) => {

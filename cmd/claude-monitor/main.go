@@ -176,7 +176,7 @@ func main() {
 			s.InputTokens += msg.InputTokens
 			s.OutputTokens += msg.OutputTokens
 			s.CacheReadTokens += msg.CacheReadTokens
-				s.CacheCreationTokens += msg.CacheCreationTokens
+			s.CacheCreationTokens += msg.CacheCreationTokens
 			if msg.IsConversationMessage() {
 				if s.SeenMessageIDs == nil {
 					s.SeenMessageIDs = make(map[string]bool)

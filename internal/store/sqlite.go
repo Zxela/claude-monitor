@@ -53,7 +53,8 @@ const createTableSQL = `CREATE TABLE IF NOT EXISTS session_history (
 	cwd TEXT,
 	git_branch TEXT,
 	task_description TEXT
-)`
+);
+CREATE INDEX IF NOT EXISTS idx_session_history_ended_at ON session_history(ended_at DESC)`
 
 // Open opens a SQLite database at the given path and creates the schema if needed.
 func Open(path string) (*DB, error) {

@@ -143,8 +143,8 @@ func (s *Store) All() []*Session {
 
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
-		// Return a copy to avoid callers mutating shared state.
 		cp := *sess
+		cp.SeenMessageIDs = nil // don't share internal dedup map
 		out = append(out, &cp)
 	}
 	return out
@@ -174,6 +174,7 @@ func (s *Store) Get(id string) (*Session, bool) {
 		return nil, false
 	}
 	cp := *sess
+	cp.SeenMessageIDs = nil
 	return &cp, true
 }
 
