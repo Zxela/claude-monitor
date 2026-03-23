@@ -220,6 +220,21 @@ func main() {
 					desc = string(runes[:200])
 				}
 				s.TaskDescription = desc
+
+				// For subagents named "subagents" with no session name,
+				// derive a display name from the task description.
+				if s.IsSubagent && s.SessionName == "" && s.ProjectName == "subagents" {
+					name := desc
+					// Take first sentence or line, truncated
+					if idx := strings.IndexAny(name, ".\n"); idx > 0 && idx < 60 {
+						name = name[:idx]
+					}
+					rn := []rune(name)
+					if len(rn) > 40 {
+						name = string(rn[:40]) + "…"
+					}
+					s.ProjectName = name
+				}
 			}
 		})
 
