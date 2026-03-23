@@ -298,13 +298,18 @@ func extractContent(raw json.RawMessage) contentInfo {
 						desc, _ := inp["description"].(string)
 						st, _ := inp["subagent_type"].(string)
 						name, _ := inp["name"].(string)
-						parts := []string{}
-						if st != "" { parts = append(parts, st) }
-						if name != "" { parts = append(parts, name) }
-						if desc != "" { parts = append(parts, desc) }
-						if len(parts) > 0 {
-							info.toolDetail = strings.Join(parts, " / ")
-							info.text = fmt.Sprintf("[agent: %s]", info.toolDetail)
+						// Build agent identity (type or name) separate from task description
+						agentName := name
+						if agentName == "" { agentName = st }
+						if agentName != "" && desc != "" {
+							info.toolDetail = agentName
+							info.text = fmt.Sprintf("[agent: %s] %s", agentName, desc)
+						} else if agentName != "" {
+							info.toolDetail = agentName
+							info.text = fmt.Sprintf("[agent: %s]", agentName)
+						} else if desc != "" {
+							info.toolDetail = desc
+							info.text = fmt.Sprintf("[agent] %s", desc)
 						}
 					case "Skill":
 						skill, _ := inp["skill"].(string)
