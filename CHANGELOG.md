@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.7](https://github.com/Zxela/claude-monitor/compare/v1.7.6...v1.7.7) (2026-03-23)
+
+
+### Bug Fixes
+
+* read subagent names from .meta.json companion files ([ae4fd45](https://github.com/Zxela/claude-monitor/commit/ae4fd453e0bc85caadae02932553cca472a1085a))
+
 ## [1.7.6](https://github.com/Zxela/claude-monitor/compare/v1.7.5...v1.7.6) (2026-03-23)
 
 
