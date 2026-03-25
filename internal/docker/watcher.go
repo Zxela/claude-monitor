@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -51,7 +52,7 @@ func Watch(ctx context.Context, client *Client, interval time.Duration) (<-chan 
 				current, err := client.FindClaudePaths(ctx)
 				if err != nil {
 					// Log but continue — Docker may be briefly unavailable
-					fmt.Printf("docker poll error: %v\n", err)
+					log.Printf("docker poll error: %v", err)
 					continue
 				}
 

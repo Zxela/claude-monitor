@@ -158,15 +158,50 @@ func TestIsActive_FalseWhenOldLastActive(t *testing.T) {
 func TestCacheHitPct_CalculatedCorrectly(t *testing.T) {
 	t.Parallel()
 	s := NewStore()
-	// cacheHitPct = cacheReadTokens / (inputTokens + cacheReadTokens) * 100
-	// = 400 / (600 + 400) * 100 = 40.0
+	// cacheHitPct = cacheReadTokens / (inputTokens + cacheReadTokens + cacheCreationTokens) * 100
+	// = 400 / (600 + 400 + 0) * 100 = 40.0
 	sess := s.Upsert("cache-session", func(sess *Session) {
 		sess.InputTokens = 600
 		sess.CacheReadTokens = 400
-		sess.CacheCreationTokens = 5000 // should NOT affect cache hit %
+		sess.CacheCreationTokens = 0
 	})
 	if sess.CacheHitPct != 40.0 {
 		t.Errorf("CacheHitPct: got %f, want 40.0", sess.CacheHitPct)
+	}
+
+	// Cache creation tokens dilute the hit percentage.
+	// = 400 / (100 + 400 + 500) * 100 = 40.0
+	sess2 := s.Upsert("cache-session-2", func(sess *Session) {
+		sess.InputTokens = 100
+		sess.CacheReadTokens = 400
+		sess.CacheCreationTokens = 500
+	})
+	if sess2.CacheHitPct != 40.0 {
+		t.Errorf("CacheHitPct with creation: got %f, want 40.0", sess2.CacheHitPct)
+	}
+}
+
+func TestErrorCount_Tracking(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+	sess := s.Upsert("error-session", func(sess *Session) {
+		sess.ErrorCount++
+	})
+	if sess.ErrorCount != 1 {
+		t.Errorf("ErrorCount: got %d, want 1", sess.ErrorCount)
+	}
+	sess = s.Upsert("error-session", func(sess *Session) {
+		sess.ErrorCount++
+	})
+	if sess.ErrorCount != 2 {
+		t.Errorf("ErrorCount after second error: got %d, want 2", sess.ErrorCount)
+	}
+	// Non-error upsert should not change error count
+	sess = s.Upsert("error-session", func(sess *Session) {
+		sess.MessageCount++
+	})
+	if sess.ErrorCount != 2 {
+		t.Errorf("ErrorCount after non-error upsert: got %d, want 2", sess.ErrorCount)
 	}
 }
 

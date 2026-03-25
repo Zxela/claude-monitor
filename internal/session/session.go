@@ -9,6 +9,9 @@ import (
 // activeThreshold is how recent lastActive must be for a session to be considered active.
 const activeThreshold = 30 * time.Second
 
+// maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
+const maxSeenMessageIDs = 10000
+
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
 	ID           string    `json:"id"`
@@ -33,7 +36,10 @@ type Session struct {
 	CWD            string           `json:"cwd,omitempty"`
 	GitBranch      string           `json:"gitBranch,omitempty"`
 	Model          string           `json:"model,omitempty"`
+	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
+	ErrorCount     int              `json:"errorCount"`
 	IsSubagent     bool             `json:"isSubagent,omitempty"`
+	TaskDescription string          `json:"taskDescription"`
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
@@ -93,20 +99,36 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		s.sessions[sessionID] = sess
 	}
 
+	prevMsgCount := sess.MessageCount
 	update(sess)
 
-	// Invalidate replay cache since new data was written.
-	delete(s.replayCache, sessionID)
+	// Only invalidate replay cache when message count actually changed.
+	if sess.MessageCount != prevMsgCount {
+		delete(s.replayCache, sessionID)
+	}
+
+	// Prevent unbounded growth of the deduplication map.
+	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
+		sess.SeenMessageIDs = make(map[string]bool)
+	}
 
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold
 	if !sess.IsActive {
 		sess.Status = "idle"
+		sess.CostRate = 0
 	}
 
-	// Cache hit % = cache reads / (non-cached input + cache reads).
-	// Excludes cache creation tokens since those are writes, not hits.
-	totalInput := sess.InputTokens + sess.CacheReadTokens
+	// Cost velocity: dollars per minute for active sessions.
+	if sess.IsActive && sess.TotalCost > 0 && !sess.StartedAt.IsZero() {
+		mins := time.Since(sess.StartedAt).Minutes()
+		if mins >= 1 {
+			sess.CostRate = sess.TotalCost / mins
+		}
+	}
+
+	// Cache hit % = cache reads / total input tokens (including cache creation).
+	totalInput := sess.InputTokens + sess.CacheReadTokens + sess.CacheCreationTokens
 	if totalInput > 0 {
 		sess.CacheHitPct = float64(sess.CacheReadTokens) / float64(totalInput) * 100
 	}
@@ -121,8 +143,8 @@ func (s *Store) All() []*Session {
 
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
-		// Return a copy to avoid callers mutating shared state.
 		cp := *sess
+		cp.SeenMessageIDs = nil // don't share internal dedup map
 		out = append(out, &cp)
 	}
 	return out
@@ -152,5 +174,7 @@ func (s *Store) Get(id string) (*Session, bool) {
 		return nil, false
 	}
 	cp := *sess
+	cp.SeenMessageIDs = nil
 	return &cp, true
 }
+

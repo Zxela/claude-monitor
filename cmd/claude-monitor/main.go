@@ -24,6 +24,7 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/parser"
 	"github.com/zxela-claude/claude-monitor/internal/replay"
 	"github.com/zxela-claude/claude-monitor/internal/session"
+	"github.com/zxela-claude/claude-monitor/internal/store"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
 )
 
@@ -59,6 +60,22 @@ func parentSessionIDFromPath(filePath string) string {
 	return ""
 }
 
+// requireSession looks up a session by path parameter "id", validates it has a
+// file path, and writes an HTTP error if not. Returns the session and true on success.
+func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
+	id := r.PathValue("id")
+	sess, ok := store.Get(id)
+	if !ok {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	if sess.FilePath == "" {
+		http.Error(w, "session file not available", http.StatusBadRequest)
+		return nil, false
+	}
+	return sess, true
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(os.Stderr)
@@ -78,8 +95,26 @@ func main() {
 		}
 	}
 
-	store := session.NewStore()
+	sessionStore := session.NewStore()
 	h := hub.NewHub()
+
+	// Open SQLite history database.
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("cannot determine home directory: %v", err)
+	}
+	dbDir := filepath.Join(homeDir, ".claude-monitor")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		log.Fatalf("cannot create data directory: %v", err)
+	}
+	historyDB, err := store.Open(filepath.Join(dbDir, "history.db"))
+	if err != nil {
+		log.Fatalf("cannot open history database: %v", err)
+	}
+	defer historyDB.Close()
+
+	// Track which sessions were previously active for inactivity transition detection.
+	prevActive := make(map[string]bool)
 
 	w, err := watcher.New([]string(extraPaths))
 	if err != nil {
@@ -88,15 +123,36 @@ func main() {
 
 	// processEvent parses a watcher event and updates the session store.
 	// Returns the parsed message, session, and whether it's a new session.
+	// agentMeta caches subagent metadata read from .meta.json files.
+	type agentMeta struct {
+		AgentType   string `json:"agentType"`
+		Description string `json:"description"`
+		Name        string `json:"name"`
+	}
+	agentMetaCache := make(map[string]*agentMeta) // sessionID -> meta
+
 	processEvent := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
 		msg, err := parser.ParseLine(ev.Line)
 		if err != nil {
 			return nil, nil, false
 		}
-		_, exists := store.Get(ev.SessionID)
+		_, exists := sessionStore.Get(ev.SessionID)
 		isNew := !exists
 
-		sess := store.Upsert(ev.SessionID, func(s *session.Session) {
+		// Pre-read subagent meta.json outside the store lock (only once per session).
+		if isNew {
+			if _, cached := agentMetaCache[ev.SessionID]; !cached {
+				metaPath := strings.TrimSuffix(ev.FilePath, ".jsonl") + ".meta.json"
+				if metaData, err := os.ReadFile(metaPath); err == nil {
+					var meta agentMeta
+					if json.Unmarshal(metaData, &meta) == nil {
+						agentMetaCache[ev.SessionID] = &meta
+					}
+				}
+			}
+		}
+
+		sess := sessionStore.Upsert(ev.SessionID, func(s *session.Session) {
 			s.FilePath = ev.FilePath
 			s.ProjectDir = ev.ProjectDir
 			if ev.Label != "" {
@@ -106,6 +162,11 @@ func main() {
 			}
 			if msg.CWD != "" {
 				s.CWD = msg.CWD
+				// Derive a cleaner project name from CWD if we only have
+				// the raw dir hash (e.g. "-root-claude-monitor").
+				if s.SessionName == "" && strings.HasPrefix(s.ProjectName, "-") {
+					s.ProjectName = filepath.Base(msg.CWD)
+				}
 			}
 			if msg.GitBranch != "" {
 				s.GitBranch = msg.GitBranch
@@ -126,14 +187,29 @@ func main() {
 					if s.ParentID == "" {
 						s.ParentID = parentSID
 						s.IsSubagent = true
+
+						// Apply cached meta.json for agent name/type.
+						if meta := agentMetaCache[ev.SessionID]; meta != nil {
+							name := meta.Name
+							if name == "" {
+								name = meta.AgentType
+							}
+							if name != "" && s.SessionName == "" {
+								s.SessionName = name
+								s.ProjectName = name
+							}
+						}
 					}
 				}
+			}
+			if msg.IsError {
+				s.ErrorCount++
 			}
 			s.TotalCost += msg.CostUSD
 			s.InputTokens += msg.InputTokens
 			s.OutputTokens += msg.OutputTokens
 			s.CacheReadTokens += msg.CacheReadTokens
-				s.CacheCreationTokens += msg.CacheCreationTokens
+			s.CacheCreationTokens += msg.CacheCreationTokens
 			if msg.IsConversationMessage() {
 				if s.SeenMessageIDs == nil {
 					s.SeenMessageIDs = make(map[string]bool)
@@ -155,6 +231,8 @@ func main() {
 			} else if !ev.Bootstrap {
 				s.LastActive = time.Now()
 			}
+
+			// Determine new status
 			if msg.StopReason == "end_turn" {
 				s.Status = "waiting"
 			} else if msg.StopReason == "tool_use" {
@@ -166,10 +244,32 @@ func main() {
 			} else if msg.Role == "user" {
 				s.Status = "thinking"
 			}
+
+			// Capture task description from first user message.
+			if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" {
+				desc := msg.ContentText
+				if len([]rune(desc)) > 200 {
+					runes := []rune(desc)
+					desc = string(runes[:200])
+				}
+				s.TaskDescription = desc
+
+				// Fallback for subagents without meta.json: use short agent ID.
+				if s.IsSubagent && s.SessionName == "" && s.ProjectName == "subagents" {
+					aid := s.ID
+					if strings.HasPrefix(aid, "agent-") {
+						aid = aid[6:]
+					}
+					if len(aid) > 8 {
+						aid = aid[:8]
+					}
+					s.ProjectName = "agent " + aid
+				}
+			}
 		})
 
 		if sess.IsSubagent && sess.ParentID != "" {
-			store.LinkChild(sess.ParentID, ev.SessionID)
+			sessionStore.LinkChild(sess.ParentID, ev.SessionID)
 		}
 
 		return msg, sess, isNew
@@ -187,8 +287,9 @@ func main() {
 	go h.Run()
 	events := w.Start(ctx)
 
+	var dc *docker.Client
 	if *dockerEnabled {
-		dc := docker.NewClient(*dockerSocket)
+		dc = docker.NewClient(*dockerSocket)
 		dockerCh, err := docker.Watch(ctx, dc, 5*time.Second)
 		if err != nil {
 			log.Printf("docker discovery: %v (continuing without Docker)", err)
@@ -206,6 +307,31 @@ func main() {
 			}()
 		}
 	}
+
+	// Periodic goroutine: persist history on inactivity transitions.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				for _, sess := range sessionStore.All() {
+					nowActive := sess.IsActive
+					wasActive := prevActive[sess.ID]
+
+					// Save to history when transitioning from active to inactive.
+					if wasActive && !nowActive {
+						if err := historyDB.SaveSession(sess); err != nil {
+							log.Printf("history save error for %s: %v", sess.ID, err)
+						}
+					}
+					prevActive[sess.ID] = nowActive
+				}
+			}
+		}
+	}()
 
 	// Process watcher events: parse, update store, broadcast.
 	go func() {
@@ -264,9 +390,33 @@ func main() {
 		hub.ServeWs(h, w, r)
 	})
 
+	// History REST API.
+	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
+		limitStr := r.URL.Query().Get("limit")
+		limit := 50
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+		offsetStr := r.URL.Query().Get("offset")
+		offset := 0
+		if n, err := strconv.Atoi(offsetStr); err == nil && n >= 0 {
+			offset = n
+		}
+		rows, err := historyDB.ListHistory(limit, offset)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if rows == nil {
+			rows = []store.HistoryRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rows)
+	})
+
 	// Sessions REST API.
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
-		sessions := store.All()
+		sessions := sessionStore.All()
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(sessions); err != nil {
 			log.Printf("api/sessions encode error: %v", err)
@@ -296,7 +446,7 @@ func main() {
 		}
 
 		var results []searchResult
-		for _, sess := range store.All() {
+		for _, sess := range sessionStore.All() {
 			if sess.FilePath == "" {
 				continue
 			}
@@ -332,14 +482,8 @@ func main() {
 
 	// Recent messages for a session — returns last N parsed messages for feed population.
 	mux.HandleFunc("/api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		if sess.FilePath == "" {
-			http.Error(w, "session file not available", http.StatusBadRequest)
 			return
 		}
 		events, err := replay.ReadFile(sess.FilePath)
@@ -377,14 +521,8 @@ func main() {
 
 	// Replay SSE stream route — registered BEFORE the manifest route.
 	mux.HandleFunc("/api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		if sess.FilePath == "" {
-			http.Error(w, "session file not available", http.StatusBadRequest)
 			return
 		}
 		events, err := replay.ReadFile(sess.FilePath)
@@ -399,21 +537,16 @@ func main() {
 
 	// Replay manifest — returns all events with timestamps for the scrubber.
 	mux.HandleFunc("/api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := store.Get(id)
+		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
-			http.NotFound(w, r)
 			return
 		}
-		if sess.FilePath == "" {
-			http.Error(w, "session file not available", http.StatusBadRequest)
-			return
-		}
+		id := r.PathValue("id")
 
 		w.Header().Set("Content-Type", "application/json")
 
 		// Return cached JSON if available (invalidated on each new message).
-		if cached, hit := store.GetReplayJSON(id); hit {
+		if cached, hit := sessionStore.GetReplayJSON(id); hit {
 			w.Write(cached)
 			return
 		}
@@ -455,9 +588,38 @@ func main() {
 		}
 		// Only cache if the file was fully read (no scanner errors).
 		if scanErr == nil {
-			store.SetReplayJSON(id, data)
+			sessionStore.SetReplayJSON(id, data)
 		}
 		w.Write(data)
+	})
+
+	// Stop session (Docker container).
+	mux.HandleFunc("POST /api/sessions/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, ok := sessionStore.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		// Extract container name from projectName (format: "container / project")
+		containerName := ""
+		if parts := strings.SplitN(sess.ProjectName, " / ", 2); len(parts) == 2 {
+			containerName = parts[0]
+		}
+		if containerName == "" || dc == nil {
+			http.Error(w, "not a Docker session or Docker not available", http.StatusBadRequest)
+			return
+		}
+		stopCtx, stopCancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer stopCancel()
+		if err := dc.StopContainer(stopCtx, containerName); err != nil {
+			log.Printf("stop container %s: %v", containerName, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("stopped container %s for session %s", containerName, id)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
 	})
 
 	// Health check.
