@@ -10,7 +10,6 @@ let container: HTMLElement | null = null;
 let data: HistoryRow[] = [];
 let sortCol = 'endedAt';
 let sortAsc = false;
-let loaded = false;
 
 type Column = { key: string; label: string; cls?: string; fmt: (r: HistoryRow) => string };
 
@@ -32,18 +31,14 @@ export function render(mount: HTMLElement): void {
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('view') && state.view === 'history') {
-    if (!loaded) {
-      loadData();
-    } else {
-      show();
-    }
+    // Always re-fetch when opening history view — data may have changed
+    loadData();
   }
 }
 
 async function loadData(): Promise<void> {
   try {
     data = await fetchHistory(200, 0);
-    loaded = true;
     show();
   } catch (err) {
     console.error('Failed to load history:', err);

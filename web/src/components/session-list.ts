@@ -114,12 +114,17 @@ function renderFromState(): void {
     older: [],
   };
 
+  const ACTIVE_THRESHOLD = 30_000; // 30 seconds, matches Go backend
+
   for (const sess of state.sessions.values()) {
-    if (sess.isActive) {
+    // Re-evaluate isActive client-side — the cached flag may be stale
+    const lastActiveMs = new Date(sess.lastActive).getTime();
+    const isActive = (now - lastActiveMs) < ACTIVE_THRESHOLD;
+
+    if (isActive) {
       grouped.active.push(sess);
       continue;
     }
-    const lastActiveMs = new Date(sess.lastActive).getTime();
     if (now - lastActiveMs < 3600_000) {
       grouped.lastHour.push(sess);
     } else if (lastActiveMs >= todayStart.getTime()) {
