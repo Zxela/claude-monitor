@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.3](https://github.com/Zxela/claude-monitor/compare/v1.14.2...v1.14.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* consistent active counts, eliminate render flashing ([83aad96](https://github.com/Zxela/claude-monitor/commit/83aad96f1c4c4cff1d39f45d8e14406b161d6df2))
+
 ## [1.14.2](https://github.com/Zxela/claude-monitor/compare/v1.14.1...v1.14.2) (2026-03-26)
 
 
