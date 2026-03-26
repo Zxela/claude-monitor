@@ -51,6 +51,18 @@ claude-monitor --swagger
 # Then visit http://localhost:7700/swagger
 ```
 
+## Configuration
+
+### Update Notifications
+
+On startup, claude-monitor checks GitHub for newer releases. If an update is available, a banner appears in the web UI with a link to the release page.
+
+To disable the update check:
+
+```bash
+CLAUDE_MONITOR_NO_UPDATE_CHECK=1 claude-monitor
+```
+
 ## Features
 
 ### Session Monitoring
