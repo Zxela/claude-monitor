@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.0](https://github.com/Zxela/claude-monitor/compare/v1.13.2...v1.14.0) (2026-03-26)
+
+
+### Features
+
+* add toolUseMap in feed-panel and toolUseId fields to ParsedMessage ([5941a82](https://github.com/Zxela/claude-monitor/commit/5941a824d8e7134a29594098c37a536ab86eff96))
+
+
+### Bug Fixes
+
+* history opens feed not replay, hide idle badges, real-time sidebar ([f093b0f](https://github.com/Zxela/claude-monitor/commit/f093b0f410aea559ea4bc675dbfa9de732d5095d))
+
 ## [1.13.2](https://github.com/Zxela/claude-monitor/compare/v1.13.1...v1.13.2) (2026-03-26)
 
 
