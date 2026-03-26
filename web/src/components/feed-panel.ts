@@ -7,6 +7,7 @@ import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml } from '../utils';
 import { setLastTool } from '../tool-tracker';
+import { notify } from '../notifications';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -60,6 +61,11 @@ function onWsMessage(event: WsEvent): void {
   if (event.message.toolName && event.message.role === 'assistant') {
     const toolInfo = event.message.toolName + (event.message.toolDetail ? ': ' + event.message.toolDetail.slice(0, 60) : '');
     setLastTool(event.session.id, toolInfo);
+  }
+
+  if (event.message.isError) {
+    const name = event.session.sessionName || event.session.projectName || 'Agent';
+    notify('error', 'Agent Error', `${name}: ${(event.message.contentText || '').slice(0, 100)}`);
   }
 
   const sessionName = event.session.sessionName || event.session.projectName || event.session.id.slice(0, 8);

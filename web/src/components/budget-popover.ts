@@ -1,6 +1,7 @@
 // web/src/components/budget-popover.ts
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
+import { loadSettings, saveSettings, getSettings, notify } from '../notifications';
 import '../styles/views.css';
 
 let popover: HTMLElement | null = null;
@@ -20,6 +21,8 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
   if (saved) {
     update({ budgetThreshold: parseFloat(saved) });
   }
+
+  loadSettings();
 
   gearBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -55,6 +58,14 @@ function togglePopover(anchor: HTMLElement): void {
       <button class="set-btn">Set</button>
       <button class="clear-btn">Clear</button>
     </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--text-dim)">
+      <label style="display:block;margin:3px 0;cursor:pointer">
+        <input type="checkbox" class="notif-budget" ${getSettings().budget ? 'checked' : ''} /> Budget exceeded
+      </label>
+      <label style="display:block;margin:3px 0;cursor:pointer">
+        <input type="checkbox" class="notif-error" ${getSettings().error ? 'checked' : ''} /> Agent errored
+      </label>
+    </div>
   `;
 
   const input = popover.querySelector('input')!;
@@ -74,6 +85,17 @@ function togglePopover(anchor: HTMLElement): void {
 
   anchor.parentElement!.style.position = 'relative';
   anchor.parentElement!.appendChild(popover);
+
+  popover.querySelector('.notif-budget')?.addEventListener('change', (e) => {
+    const s = getSettings();
+    s.budget = (e.target as HTMLInputElement).checked;
+    saveSettings(s);
+  });
+  popover.querySelector('.notif-error')?.addEventListener('change', (e) => {
+    const s = getSettings();
+    s.error = (e.target as HTMLInputElement).checked;
+    saveSettings(s);
+  });
 }
 
 function checkBudget(): void {
@@ -91,6 +113,7 @@ function checkBudget(): void {
       banner.querySelector('button')!.addEventListener('click', () => {
         update({ budgetDismissed: true });
       });
+      notify('budget', 'Budget Exceeded', `Total spend $${total.toFixed(0)} exceeds $${state.budgetThreshold}`);
     } else {
       banner.className = 'budget-banner hidden';
     }
