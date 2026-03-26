@@ -7,19 +7,58 @@ import { renderExpanded, renderCompact } from './session-card';
 import '../styles/sessions.css';
 
 let el: HTMLElement | null = null;
+let listEl: HTMLElement | null = null;
 const MAX_VISIBLE = 15;
 const expandedGroups = new Set<string>();
-// Track which time groups are manually collapsed by user (all start collapsed)
 const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
+let activeFilter: 'active' | 'recent' | 'all' = 'recent';
 
 export function render(container: HTMLElement): void {
   el = document.createElement('div');
   el.className = 'sessions-panel';
+
+  // Filter bar
+  const filterBar = document.createElement('div');
+  filterBar.className = 'session-filter-bar';
+  filterBar.innerHTML = `
+    <button data-filter="active">Active <span id="fc-active"></span></button>
+    <button data-filter="recent" class="active">Recent <span id="fc-recent"></span></button>
+    <button data-filter="all">All <span id="fc-all"></span></button>
+  `;
+  filterBar.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeFilter = btn.dataset.filter as typeof activeFilter;
+      filterBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      refresh();
+    });
+  });
+  el.appendChild(filterBar);
+
+  // Scrollable list area
+  listEl = document.createElement('div');
+  listEl.style.cssText = 'flex:1; overflow-y:auto;';
+  el.appendChild(listEl);
+
   container.appendChild(el);
 
   refresh();
   setInterval(refresh, 5000);
   subscribe(onStateChange);
+
+  // Keyboard shortcuts 1/2/3 for filter
+  document.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.key === '1') { activeFilter = 'active'; refresh(); updateFilterBar(); }
+    if (e.key === '2') { activeFilter = 'recent'; refresh(); updateFilterBar(); }
+    if (e.key === '3') { activeFilter = 'all'; refresh(); updateFilterBar(); }
+  });
+}
+
+function updateFilterBar(): void {
+  el?.querySelectorAll('.session-filter-bar button').forEach(btn => {
+    (btn as HTMLElement).classList.toggle('active', (btn as HTMLElement).dataset.filter === activeFilter);
+  });
 }
 
 async function refresh(): Promise<void> {
@@ -38,11 +77,22 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 }
 
 function renderGrouped(grouped: GroupedSessions): void {
-  if (!el) return;
+  if (!listEl) return;
+
+  // Update filter counts
+  const allSessions = [...grouped.active, ...grouped.lastHour, ...grouped.today, ...grouped.yesterday, ...grouped.thisWeek, ...grouped.older];
+  const recentCutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 hours
+  const recentCount = allSessions.filter(s => s.isActive || new Date(s.lastActive).getTime() > recentCutoff).length;
+  const fcActive = el?.querySelector('#fc-active');
+  const fcRecent = el?.querySelector('#fc-recent');
+  const fcAll = el?.querySelector('#fc-all');
+  if (fcActive) fcActive.textContent = String(grouped.active.length);
+  if (fcRecent) fcRecent.textContent = String(recentCount);
+  if (fcAll) fcAll.textContent = String(allSessions.length);
 
   // Save scroll position
-  const scrollTop = el.scrollTop;
-  el.innerHTML = '';
+  const scrollTop = listEl.scrollTop;
+  listEl.innerHTML = '';
 
   const filter = state.projectFilter;
 
@@ -51,13 +101,18 @@ function renderGrouped(grouped: GroupedSessions): void {
     return applyFilter(sessions, filter).filter(s => !s.isSubagent);
   };
 
+  // Apply active filter
+  const showActive = true; // always show active
+  const showTimeline = activeFilter !== 'active';
+  const recentOnly = activeFilter === 'recent';
+
   // Active Now section
   const activeSessions = filterTopLevel(grouped.active);
-  if (activeSessions.length > 0) {
+  if (activeSessions.length > 0 && showActive) {
     const header = document.createElement('div');
     header.className = 'active-section-header';
     header.textContent = `ACTIVE NOW (${activeSessions.length})`;
-    el.appendChild(header);
+    listEl.appendChild(header);
 
     const section = document.createElement('div');
     section.className = 'active-section';
@@ -65,7 +120,7 @@ function renderGrouped(grouped: GroupedSessions): void {
     for (const sess of activeSessions) {
       renderExpanded(sess, section);
     }
-    el.appendChild(section);
+    listEl.appendChild(section);
   }
 
   // Timeline groups
@@ -77,7 +132,15 @@ function renderGrouped(grouped: GroupedSessions): void {
     ['older', 'Older', grouped.older],
   ];
 
+  if (!showTimeline) {
+    listEl.scrollTop = scrollTop;
+    return;
+  }
+
   for (const [key, label, sessions] of groups) {
+    // In "recent" mode, only show lastHour and today
+    if (recentOnly && key !== 'lastHour' && key !== 'today') continue;
+
     const filtered = filterTopLevel(sessions);
     if (filtered.length === 0) continue;
 
@@ -128,11 +191,11 @@ function renderGrouped(grouped: GroupedSessions): void {
     }
 
     group.appendChild(items);
-    el.appendChild(group);
+    listEl.appendChild(group);
   }
 
   // Restore scroll position
-  el.scrollTop = scrollTop;
+  listEl.scrollTop = scrollTop;
 }
 
 function applyFilter(sessions: Session[], projectFilter: string | null): Session[] {

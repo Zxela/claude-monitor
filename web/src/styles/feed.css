@@ -214,8 +214,15 @@
 }
 
 .feed-filter-btn:hover { color: var(--text); }
-.feed-filter-btn.active { background: var(--border); color: var(--text); }
-.feed-filter-btn.all-btn { color: var(--cyan); }
+.feed-filter-btn.active { color: var(--text); }
+.feed-filter-btn.all-btn { color: var(--cyan); border-color: var(--cyan); }
+.feed-filter-btn[data-type="user"].active { background: rgba(85,136,255,0.2); color: #5588ff; border-color: #5588ff; }
+.feed-filter-btn[data-type="assistant"].active { background: rgba(51,221,153,0.2); color: #33dd99; border-color: #33dd99; }
+.feed-filter-btn[data-type="tool"].active { background: rgba(221,204,68,0.2); color: #ddcc44; border-color: #ddcc44; }
+.feed-filter-btn[data-type="result"].active { background: rgba(68,204,204,0.2); color: #44cccc; border-color: #44cccc; }
+.feed-filter-btn[data-type="agent"].active { background: rgba(221,136,68,0.2); color: #dd8844; border-color: #dd8844; }
+.feed-filter-btn[data-type="hook"].active { background: rgba(170,119,221,0.2); color: #aa77dd; border-color: #aa77dd; }
+.feed-filter-btn[data-type="error"].active { background: rgba(221,68,85,0.2); color: #dd4455; border-color: #dd4455; }
 
 /* Replay panel */
 .replay-panel {

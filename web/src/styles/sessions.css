@@ -1,22 +1,48 @@
 /* Sessions panel */
 .sessions-panel {
-  width: 280px;
-  min-width: 280px;
+  width: 270px;
+  min-width: 270px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 
+/* Session filter bar (Active / Recent / All) */
+.session-filter-bar {
+  display: flex;
+  padding: 6px 8px;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.session-filter-bar button {
+  flex: 1;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.session-filter-bar button:first-child { border-radius: 3px 0 0 3px; }
+.session-filter-bar button:last-child { border-radius: 0 3px 3px 0; }
+.session-filter-bar button:not(:first-child) { border-left: none; }
+.session-filter-bar button.active { background: var(--border); color: var(--text); }
+.session-filter-bar button:hover { color: var(--text); }
+
 /* Active section */
 .active-section {
-  border-bottom: 2px solid var(--green);
-  padding-bottom: 4px;
+  border-bottom: 1px solid var(--green);
+  padding-bottom: 2px;
 }
 
 .active-section-header {
-  padding: 8px 12px 4px;
-  font-size: 11px;
+  padding: 6px 10px 2px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--green);
   text-transform: uppercase;
@@ -28,12 +54,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px 4px;
+  padding: 5px 10px 3px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);
   cursor: pointer;
   user-select: none;
+  border-bottom: 1px solid var(--border);
 }
 
 .time-group-header:hover { color: var(--text); }
@@ -64,9 +91,9 @@
 
 /* ======= Session card (expanded, used in Active section) ======= */
 .session-card {
-  padding: 10px 12px 8px 8px;
-  margin: 0 5px 5px 5px;
-  background: var(--bg-card);
+  padding: 6px 10px 5px 8px;
+  margin: 2px 4px;
+  background: #13131f;
   border: 1px solid var(--border);
   border-radius: 3px;
   border-left: 3px solid var(--border);
@@ -90,10 +117,11 @@
 
 /* Subagent indentation */
 .session-card.subagent {
-  margin-left: 22px;
+  margin-left: 18px;
   border-left: 2px solid rgba(136, 0, 255, 0.4);
   opacity: 0.85;
   font-size: 0.95em;
+  padding: 5px 8px 4px 6px;
 }
 
 /* Row 1: dot + name + chevron + badge */
