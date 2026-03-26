@@ -36,6 +36,42 @@ export function render(container: HTMLElement): void {
       <button class="view-btn" data-view="table" aria-pressed="false">TABLE</button>
     </nav>
   `;
+  // Add hamburger button (outside collapsible)
+  const hamburger = document.createElement('button');
+  hamburger.className = 'topbar-hamburger';
+  hamburger.innerHTML = '☰';
+  hamburger.setAttribute('aria-label', 'Toggle menu');
+  hamburger.setAttribute('aria-expanded', 'false');
+  el.appendChild(hamburger);
+
+  // Wrap stats, search, and view toggle in collapsible div
+  const collapsible = document.createElement('div');
+  collapsible.className = 'topbar-collapsible';
+
+  const stats = el.querySelectorAll('.topbar-stat');
+  const searchBox = el.querySelector('.search-box');
+  const viewToggle = el.querySelector('.view-toggle');
+
+  stats.forEach(stat => collapsible.appendChild(stat));
+  if (searchBox) collapsible.appendChild(searchBox);
+  if (viewToggle) collapsible.appendChild(viewToggle);
+
+  el.appendChild(collapsible);
+
+  // Hamburger click handler
+  hamburger.addEventListener('click', () => {
+    const isOpen = collapsible.classList.toggle('open');
+    hamburger.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  // Escape key closes collapsible
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && collapsible.classList.contains('open')) {
+      collapsible.classList.remove('open');
+      hamburger.setAttribute('aria-expanded', 'false');
+    }
+  });
+
   container.appendChild(el);
 
   statActive = el.querySelector('[data-stat="active"]');

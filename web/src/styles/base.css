@@ -79,6 +79,22 @@ body {
 
 .sb-spacer { flex: 1; }
 
+/* Hamburger menu — hidden by default, shown on mobile */
+.topbar-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--fg, #c9d1d9);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 1;
+}
+
+.topbar-collapsible {
+  display: contents;
+}
+
 /* Responsive: half-screen / narrow window (~960px) */
 @media (max-width: 1100px) {
   .topbar {
@@ -121,6 +137,38 @@ body {
   .topbar-brand { font-size: 10px; padding: 0 8px; }
   .topbar-stat .val { font-size: 11px; }
   .topbar-stat { padding: 0 6px; }
+
+  .topbar-hamburger {
+    display: block;
+  }
+
+  .topbar {
+    position: relative;
+    flex-wrap: nowrap;
+  }
+
+  .topbar-collapsible {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-card, #1a1a2e);
+    border-bottom: 1px solid var(--border, #333);
+    padding: 8px;
+    z-index: 100;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .topbar-collapsible.open {
+    display: flex;
+  }
+
+  .topbar-collapsible .search-box {
+    flex: 1 1 100%;
+    order: 99;
+  }
 }
 
 /* Onboarding tooltip */
