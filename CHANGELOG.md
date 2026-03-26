@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.7](https://github.com/Zxela/claude-monitor/compare/v1.10.6...v1.10.7) (2026-03-26)
+
+
+### Bug Fixes
+
+* strip [hook:X] and [tool: X] prefixes from content, fix expand ([fc2507b](https://github.com/Zxela/claude-monitor/commit/fc2507b38694c83b313bf46f9ff2bc30293172af))
+
 ## [1.10.6](https://github.com/Zxela/claude-monitor/compare/v1.10.5...v1.10.6) (2026-03-26)
 
 
