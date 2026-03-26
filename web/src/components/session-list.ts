@@ -8,6 +8,7 @@ import '../styles/sessions.css';
 
 let el: HTMLElement | null = null;
 let listEl: HTMLElement | null = null;
+let lastRenderTime = 0;
 const MAX_VISIBLE = 15;
 const expandedGroups = new Set<string>();
 const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
@@ -74,6 +75,14 @@ async function refresh(): Promise<void> {
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
     renderFromState();
+  }
+  // Throttled re-render on session updates (max once per second)
+  if (changed.has('sessions')) {
+    const now = Date.now();
+    if (now - lastRenderTime > 1000) {
+      lastRenderTime = now;
+      renderFromState();
+    }
   }
   if (changed.has('focusedSessionId')) {
     // Update focused class on all cards

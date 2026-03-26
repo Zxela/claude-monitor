@@ -33,7 +33,11 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
         <span class="session-dot ${dotClass}"></span>
         <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
         ${childCount > 0 ? `<span class="subagent-chevron">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
-        <span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : session.status.toUpperCase()}</span>
+        ${session.status !== 'idle'
+          ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : session.status.toUpperCase()}</span>`
+          : session.isActive
+            ? '<span class="session-status-badge status-live">LIVE</span>'
+            : ''}
       </div>
       <div class="session-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription || '', 80))}</div>
       <div class="session-stats">

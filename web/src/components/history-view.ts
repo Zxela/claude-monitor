@@ -86,8 +86,7 @@ function show(): void {
       tr.appendChild(td);
     }
     tr.addEventListener('click', () => {
-      // Open replay for this session
-      update({ replaySessionId: row.id, view: 'list' });
+      update({ selectedSessionId: row.id, view: 'list' });
     });
     tbody.appendChild(tr);
   }
