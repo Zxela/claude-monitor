@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.0](https://github.com/Zxela/claude-monitor/compare/v1.10.7...v1.11.0) (2026-03-26)
+
+
+### Features
+
+* hide idle subagents from active panel after 5 minutes ([ed2b9af](https://github.com/Zxela/claude-monitor/commit/ed2b9afb11384bea637eabe27d6619b2d3538a0d))
+* idle subagent toggle, stop committing build assets ([38a4a38](https://github.com/Zxela/claude-monitor/commit/38a4a38720aadb3f2fb8050a302cfa6ac033ee74))
+
 ## [1.10.7](https://github.com/Zxela/claude-monitor/compare/v1.10.6...v1.10.7) (2026-03-26)
 
 
