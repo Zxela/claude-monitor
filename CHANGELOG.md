@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/Zxela/claude-monitor/compare/v1.11.0...v1.12.0) (2026-03-26)
+
+
+### Features
+
+* add OpenAPI spec, comprehensive API tests, --swagger flag ([cd7ef82](https://github.com/Zxela/claude-monitor/commit/cd7ef8247cb911103b249f3e52c1dc9f552a172b))
+
 ## [1.11.0](https://github.com/Zxela/claude-monitor/compare/v1.10.7...v1.11.0) (2026-03-26)
 
 
