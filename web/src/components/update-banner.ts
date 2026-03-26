@@ -15,17 +15,39 @@ export function render(container: HTMLElement): void {
 
       if (updateVersion && !updateDismissed && !sessionStorage.getItem('update-dismissed')) {
         banner.style.display = 'flex';
-        banner.innerHTML = `
-          <span class="update-banner-text">
-            Update available: <strong>${updateVersion}</strong>
-            ${updateUrl ? `<a href="${updateUrl}" target="_blank" rel="noopener">View release</a>` : ''}
-          </span>
-          <button class="update-banner-dismiss" aria-label="Dismiss update notification">&times;</button>
-        `;
-        banner.querySelector('.update-banner-dismiss')!.addEventListener('click', () => {
+        banner.innerHTML = '';
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'update-banner-text';
+
+        const label = document.createTextNode('Update available: ');
+        textSpan.appendChild(label);
+
+        const strong = document.createElement('strong');
+        strong.textContent = updateVersion;
+        textSpan.appendChild(strong);
+
+        if (updateUrl && updateUrl.startsWith('https://github.com/')) {
+          const link = document.createElement('a');
+          link.href = updateUrl;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = 'View release';
+          textSpan.appendChild(document.createTextNode(' '));
+          textSpan.appendChild(link);
+        }
+
+        banner.appendChild(textSpan);
+
+        const dismissBtn = document.createElement('button');
+        dismissBtn.className = 'update-banner-dismiss';
+        dismissBtn.setAttribute('aria-label', 'Dismiss update notification');
+        dismissBtn.textContent = '×';
+        dismissBtn.addEventListener('click', () => {
           sessionStorage.setItem('update-dismissed', '1');
           update({ updateDismissed: true });
         });
+        banner.appendChild(dismissBtn);
       } else {
         banner.style.display = 'none';
       }

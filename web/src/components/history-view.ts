@@ -86,8 +86,10 @@ function groupRows(rows: HistoryRow[]): { parent: HistoryRow; children: HistoryR
     if (parentRow && parentRow.parentId) {
       // Find top-level ancestor
       let ancestor = parentRow;
-      while (ancestor.parentId && rowById.has(ancestor.parentId)) {
+      let depth = 0;
+      while (ancestor.parentId && rowById.has(ancestor.parentId) && depth < 10) {
         ancestor = rowById.get(ancestor.parentId)!;
+        depth++;
       }
       const ancestorChildren = childrenByParent.get(ancestor.id) || [];
       ancestorChildren.push(...children);

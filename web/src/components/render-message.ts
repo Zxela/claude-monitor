@@ -82,17 +82,22 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     expandBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       expanded = !expanded;
+      const navBtn = contentEl.querySelector('.fe-navigate');
       if (expanded) {
         contentEl.textContent = fullContent;
+        contentEl.appendChild(expandBtn);
+        if (navBtn) contentEl.appendChild(navBtn);
+        expandBtn.textContent = '−';
         contentEl.style.whiteSpace = 'pre-wrap';
         contentEl.style.overflow = 'visible';
-        expandBtn.textContent = '−';
         el.classList.add('expanded');
       } else {
         contentEl.textContent = content;
+        contentEl.appendChild(expandBtn);
+        if (navBtn) contentEl.appendChild(navBtn);
+        expandBtn.textContent = '+';
         contentEl.style.whiteSpace = '';
         contentEl.style.overflow = '';
-        expandBtn.textContent = '+';
         el.classList.remove('expanded');
       }
     });
