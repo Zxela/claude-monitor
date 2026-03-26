@@ -213,3 +213,51 @@ body {
 .update-banner-dismiss:hover {
   color: var(--fg, #c9d1d9);
 }
+
+/* History subagent grouping */
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 10px;
+}
+
+.history-subagent-toggle {
+  font-size: 11px;
+  color: var(--fg-muted, #8b949e);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-subagent-toggle input {
+  cursor: pointer;
+}
+
+.history-child-row {
+  opacity: 0.8;
+}
+
+.history-child-row td:nth-child(2) {
+  padding-left: 28px;
+}
+
+.history-disclosure {
+  cursor: pointer;
+  font-size: 10px;
+  margin-right: 6px;
+  color: var(--fg-muted, #8b949e);
+  user-select: none;
+}
+
+.history-disclosure:hover {
+  color: var(--fg, #c9d1d9);
+}
+
+.history-subagent-badge {
+  font-size: 10px;
+  color: var(--fg-muted, #8b949e);
+  margin-left: 8px;
+  font-style: italic;
+}

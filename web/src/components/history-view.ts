@@ -10,6 +10,7 @@ let container: HTMLElement | null = null;
 let data: HistoryRow[] = [];
 let sortCol = 'endedAt';
 let sortAsc = false;
+const collapsedParents = new Set<string>();
 
 type Column = { key: string; label: string; cls?: string; fmt: (r: HistoryRow) => string };
 
@@ -31,8 +32,10 @@ export function render(mount: HTMLElement): void {
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('view') && state.view === 'history') {
-    // Always re-fetch when opening history view — data may have changed
     loadData();
+  }
+  if (changed.has('historyShowSubagents') && state.view === 'history') {
+    show();
   }
 }
 
@@ -58,6 +61,58 @@ function exportCsv(): void {
   URL.revokeObjectURL(url);
 }
 
+/** Group rows: parents first (sorted), children grouped under their parent */
+function groupRows(rows: HistoryRow[]): { parent: HistoryRow; children: HistoryRow[] }[] {
+  const childrenByParent = new Map<string, HistoryRow[]>();
+  const parents: HistoryRow[] = [];
+  const rowById = new Map<string, HistoryRow>();
+
+  for (const row of rows) {
+    rowById.set(row.id, row);
+  }
+
+  // First pass: identify children
+  for (const row of rows) {
+    if (row.parentId) {
+      const list = childrenByParent.get(row.parentId) || [];
+      list.push(row);
+      childrenByParent.set(row.parentId, list);
+    }
+  }
+
+  // Flatten nested subagents: if a child's parent is itself a child, move under the top-level ancestor
+  for (const [parentId, children] of childrenByParent) {
+    const parentRow = rowById.get(parentId);
+    if (parentRow && parentRow.parentId) {
+      // Find top-level ancestor
+      let ancestor = parentRow;
+      while (ancestor.parentId && rowById.has(ancestor.parentId)) {
+        ancestor = rowById.get(ancestor.parentId)!;
+      }
+      const ancestorChildren = childrenByParent.get(ancestor.id) || [];
+      ancestorChildren.push(...children);
+      childrenByParent.set(ancestor.id, ancestorChildren);
+      childrenByParent.delete(parentId);
+    }
+  }
+
+  // Second pass: identify top-level rows (parents and orphan children)
+  for (const row of rows) {
+    if (!row.parentId) {
+      parents.push(row);
+    } else if (!rowById.has(row.parentId)) {
+      // Orphan child — parent not in result set, render as top-level
+      parents.push(row);
+    }
+  }
+
+  const sorted = sortData(parents);
+  return sorted.map(parent => ({
+    parent,
+    children: sortData(childrenByParent.get(parent.id) || []),
+  }));
+}
+
 function show(): void {
   if (!container) return;
   container.innerHTML = '';
@@ -65,12 +120,34 @@ function show(): void {
   const wrapper = document.createElement('div');
   wrapper.className = 'view-overlay';
 
-  // Export button
+  // Toolbar: export + subagent toggle
+  const toolbar = document.createElement('div');
+  toolbar.className = 'history-toolbar';
+
   const exportBtn = document.createElement('button');
   exportBtn.textContent = 'Export CSV';
-  exportBtn.style.cssText = 'margin:8px 10px;padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
+  exportBtn.style.cssText = 'padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
   exportBtn.addEventListener('click', exportCsv);
-  wrapper.appendChild(exportBtn);
+  toolbar.appendChild(exportBtn);
+
+  // Check if any subagents exist in data
+  const hasSubagents = data.some(r => r.parentId);
+  if (hasSubagents) {
+    const toggleLabel = document.createElement('label');
+    toggleLabel.className = 'history-subagent-toggle';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = state.historyShowSubagents;
+    checkbox.setAttribute('aria-label', 'Show subagent sessions');
+    checkbox.addEventListener('change', () => {
+      update({ historyShowSubagents: checkbox.checked });
+    });
+    toggleLabel.appendChild(checkbox);
+    toggleLabel.append(' Show subagents');
+    toolbar.appendChild(toggleLabel);
+  }
+
+  wrapper.appendChild(toolbar);
 
   const table = document.createElement('table');
   const thead = document.createElement('thead');
@@ -100,30 +177,82 @@ function show(): void {
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  const sorted = sortData([...data]);
+  const grouped = groupRows([...data]);
 
-  for (const row of sorted) {
-    const tr = document.createElement('tr');
-    for (const col of COLUMNS) {
-      const td = document.createElement('td');
-      td.textContent = col.fmt(row);
-      if (col.cls) td.className = col.cls;
-      if (col.key === 'projectName') td.title = row.taskDescription || '';
-      tr.appendChild(td);
+  for (const { parent, children } of grouped) {
+    const hasChildren = children.length > 0;
+    const isCollapsed = collapsedParents.has(parent.id) || !state.historyShowSubagents;
+
+    // Parent row
+    const tr = createRow(parent, false);
+    if (hasChildren) {
+      // Add disclosure triangle to the name cell
+      const nameCell = tr.children[1] as HTMLElement;
+      const triangle = document.createElement('span');
+      triangle.className = 'history-disclosure';
+      triangle.textContent = isCollapsed ? '▶' : '▼';
+      triangle.setAttribute('role', 'button');
+      triangle.setAttribute('tabindex', '0');
+      triangle.setAttribute('aria-label', isCollapsed ? 'Expand subagents' : 'Collapse subagents');
+      triangle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (collapsedParents.has(parent.id)) {
+          collapsedParents.delete(parent.id);
+        } else {
+          collapsedParents.add(parent.id);
+        }
+        show();
+      });
+      triangle.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triangle.click(); }
+      });
+      nameCell.insertBefore(triangle, nameCell.firstChild);
+
+      // Add collapsed summary badge
+      if (isCollapsed) {
+        const badge = document.createElement('span');
+        badge.className = 'history-subagent-badge';
+        const childCost = children.reduce((sum, c) => sum + c.totalCost, 0);
+        badge.textContent = `(${children.length} subagent${children.length > 1 ? 's' : ''}, $${childCost.toFixed(2)})`;
+        nameCell.appendChild(badge);
+      }
     }
-    tr.setAttribute('tabindex', '0');
-    tr.setAttribute('role', 'button');
-    tr.setAttribute('aria-label', `View session: ${COLUMNS[1].fmt(row)}`);
-    const openSession = () => { update({ selectedSessionId: row.id, view: 'list' }); };
-    tr.addEventListener('click', openSession);
-    tr.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSession(); }
-    });
     tbody.appendChild(tr);
+
+    // Child rows (if not collapsed)
+    if (hasChildren && !isCollapsed) {
+      for (const child of children) {
+        const childTr = createRow(child, true);
+        tbody.appendChild(childTr);
+      }
+    }
   }
+
   table.appendChild(tbody);
   wrapper.appendChild(table);
   container.appendChild(wrapper);
+}
+
+function createRow(row: HistoryRow, isChild: boolean): HTMLTableRowElement {
+  const tr = document.createElement('tr');
+  if (isChild) tr.className = 'history-child-row';
+
+  for (const col of COLUMNS) {
+    const td = document.createElement('td');
+    td.textContent = col.fmt(row);
+    if (col.cls) td.className = col.cls;
+    if (col.key === 'projectName') td.title = row.taskDescription || '';
+    tr.appendChild(td);
+  }
+  tr.setAttribute('tabindex', '0');
+  tr.setAttribute('role', 'button');
+  tr.setAttribute('aria-label', `View session: ${COLUMNS[1].fmt(row)}`);
+  const openSession = () => { update({ selectedSessionId: row.id, view: 'list' }); };
+  tr.addEventListener('click', openSession);
+  tr.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSession(); }
+  });
+  return tr;
 }
 
 function sortData(rows: HistoryRow[]): HistoryRow[] {
@@ -140,4 +269,3 @@ function sortData(rows: HistoryRow[]): HistoryRow[] {
     return sortAsc ? cmp : -cmp;
   });
 }
-
