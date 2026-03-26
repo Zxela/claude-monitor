@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/Zxela/claude-monitor/compare/v1.8.0...v1.9.0) (2026-03-26)
+
+
+### Features
+
+* add Makefile for unified build commands ([eb29e80](https://github.com/Zxela/claude-monitor/commit/eb29e809624639e487778c8b8b3639b5da9ab035))
+
 ## [1.8.0](https://github.com/Zxela/claude-monitor/compare/v1.7.7...v1.8.0) (2026-03-26)
 
 
