@@ -29,6 +29,7 @@ type HistoryRow struct {
 	CWD             string  `json:"cwd"`
 	GitBranch       string  `json:"gitBranch"`
 	TaskDescription string  `json:"taskDescription"`
+	ParentID        string  `json:"parentId"`
 }
 
 // DB wraps a sql.DB connection to the history SQLite database.
@@ -77,8 +78,8 @@ func (d *DB) SaveSession(s *session.Session) error {
 	_, err := d.db.Exec(`INSERT INTO session_history
 		(id, project_name, session_name, total_cost, input_tokens, output_tokens,
 		 cache_read_tokens, message_count, error_count, started_at, ended_at,
-		 duration_seconds, outcome, model, cwd, git_branch, task_description)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 duration_seconds, outcome, model, cwd, git_branch, task_description, parent_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 project_name=excluded.project_name,
 		 session_name=excluded.session_name,
@@ -95,12 +96,13 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 model=excluded.model,
 		 cwd=excluded.cwd,
 		 git_branch=excluded.git_branch,
-		 task_description=excluded.task_description`,
+		 task_description=excluded.task_description,
+		 parent_id=excluded.parent_id`,
 		s.ID, s.ProjectName, s.SessionName, s.TotalCost,
 		s.InputTokens, s.OutputTokens, s.CacheReadTokens,
 		s.MessageCount, s.ErrorCount,
 		startedAt, endedAt, duration,
-		"", s.Model, s.CWD, s.GitBranch, s.TaskDescription,
+		"", s.Model, s.CWD, s.GitBranch, s.TaskDescription, s.ParentID,
 	)
 	return err
 }
@@ -116,7 +118,7 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 	rows, err := d.db.Query(`SELECT
 		id, project_name, session_name, total_cost, input_tokens, output_tokens,
 		cache_read_tokens, message_count, error_count, started_at, ended_at,
-		duration_seconds, outcome, model, cwd, git_branch, task_description
+		duration_seconds, outcome, model, cwd, git_branch, task_description, parent_id
 		FROM session_history
 		ORDER BY ended_at DESC
 		LIMIT ? OFFSET ?`, limit, offset)
@@ -135,7 +137,7 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 			&r.MessageCount, &r.ErrorCount,
 			&r.StartedAt, &r.EndedAt,
 			&r.DurationSeconds, &outcome, &r.Model, &r.CWD, &r.GitBranch,
-			&r.TaskDescription,
+			&r.TaskDescription, &r.ParentID,
 		); err != nil {
 			return result, err
 		}

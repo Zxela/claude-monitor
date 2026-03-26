@@ -183,3 +183,68 @@ func TestListHistory_OrderByEndedAtDesc(t *testing.T) {
 		t.Errorf("expected oldest last, got %q", rows[2].ID)
 	}
 }
+
+func TestSaveSession_ParentID(t *testing.T) {
+	t.Parallel()
+	db, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	parent := &session.Session{
+		ID:         "parent-1",
+		StartedAt:  now.Add(-10 * time.Minute),
+		LastActive: now,
+	}
+	child := &session.Session{
+		ID:         "child-1",
+		ParentID:   "parent-1",
+		StartedAt:  now.Add(-5 * time.Minute),
+		LastActive: now,
+	}
+
+	if err := db.SaveSession(parent); err != nil {
+		t.Fatalf("SaveSession parent failed: %v", err)
+	}
+	if err := db.SaveSession(child); err != nil {
+		t.Fatalf("SaveSession child failed: %v", err)
+	}
+
+	rows, err := db.ListHistory(10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory failed: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+
+	var childRow *HistoryRow
+	for i := range rows {
+		if rows[i].ID == "child-1" {
+			childRow = &rows[i]
+			break
+		}
+	}
+	if childRow == nil {
+		t.Fatal("child row not found")
+	}
+	if childRow.ParentID != "parent-1" {
+		t.Errorf("ParentID: got %q, want 'parent-1'", childRow.ParentID)
+	}
+
+	var parentRow *HistoryRow
+	for i := range rows {
+		if rows[i].ID == "parent-1" {
+			parentRow = &rows[i]
+			break
+		}
+	}
+	if parentRow == nil {
+		t.Fatal("parent row not found")
+	}
+	if parentRow.ParentID != "" {
+		t.Errorf("Parent's ParentID should be empty, got %q", parentRow.ParentID)
+	}
+}
