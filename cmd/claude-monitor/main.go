@@ -575,6 +575,10 @@ func main() {
 			limit = n
 		}
 
+		// Bound search time to prevent DoS from scanning hundreds of files.
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
 		queryLower := strings.ToLower(query)
 
 		type searchResult struct {
@@ -586,6 +590,15 @@ func main() {
 
 		results := make([]searchResult, 0)
 		for _, sess := range sessionStore.All() {
+			// Check timeout between sessions.
+			select {
+			case <-ctx.Done():
+				break
+			default:
+			}
+			if ctx.Err() != nil {
+				break
+			}
 			if sess.FilePath == "" {
 				continue
 			}
