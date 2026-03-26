@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.5](https://github.com/Zxela/claude-monitor/compare/v1.10.4...v1.10.5) (2026-03-26)
+
+
+### Bug Fixes
+
+* feed entry format, scrollbars, expanded code blocks ([31fc169](https://github.com/Zxela/claude-monitor/commit/31fc16975d2c5013950e61692094f6bf265b613e))
+
 ## [1.10.4](https://github.com/Zxela/claude-monitor/compare/v1.10.3...v1.10.4) (2026-03-26)
 
 
