@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/Zxela/claude-monitor/compare/v1.17.0...v1.17.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* recalculate IsActive in Store.All() to prevent stale active sessions ([16523c8](https://github.com/Zxela/claude-monitor/commit/16523c8027df125117d7b34ddebbf3e280e27a24))
+
 ## [1.17.0](https://github.com/Zxela/claude-monitor/compare/v1.16.5...v1.17.0) (2026-03-26)
 
 
