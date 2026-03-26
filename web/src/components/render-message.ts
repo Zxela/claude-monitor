@@ -49,20 +49,34 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
 
   const time = formatTime(msg.timestamp);
   const label = TYPE_LABELS[type];
-  const content = msg.contentText || msg.toolDetail || msg.toolName || '';
-  const truncLen = type === 'result' ? 100 : 120;
-  const truncated = content.length > truncLen ? content.substring(0, truncLen) + '...' : content;
-  const hasMore = content.length > truncLen;
+  let rawContent = msg.contentText || msg.toolDetail || msg.toolName || '';
 
-  let toolInfo = '';
+  // Strip redundant type prefixes from content (e.g. "hook:SessionStart" -> "SessionStart")
+  // The type is already shown in the fe-type column
+  const prefixesToStrip = ['hook:', 'tool:', 'agent:', 'result:', 'error:'];
+  for (const prefix of prefixesToStrip) {
+    if (rawContent.startsWith(prefix)) {
+      rawContent = rawContent.substring(prefix.length).trim();
+      break;
+    }
+  }
+
+  const truncLen = type === 'result' ? 100 : 120;
+  const truncated = rawContent.length > truncLen ? rawContent.substring(0, truncLen) + '...' : rawContent;
+  const hasMore = rawContent.length > truncLen;
+
+  // Extract subtype for coloring (e.g. "SessionStart" from hook, tool name from tool)
+  let subtypeHtml = '';
   if (msg.toolName && type === 'tool') {
-    toolInfo = `<span class="fe-tool">${escapeHtml(msg.toolName)}</span> `;
+    subtypeHtml = `<span class="fe-subtype" style="color:${TYPE_COLORS[type]}">${escapeHtml(msg.toolName)}</span> `;
+  } else if (msg.hookEvent) {
+    subtypeHtml = `<span class="fe-subtype" style="color:${TYPE_COLORS.hook}">${escapeHtml(msg.hookEvent)}</span> `;
   }
 
   el.innerHTML = `
     <span class="fe-time">${time}</span>
     <span class="fe-type" style="color:${TYPE_COLORS[type]}">${label}</span>
-    ${toolInfo}
+    ${subtypeHtml}
     <span class="fe-content">${escapeHtml(truncated)}</span>
     ${hasMore ? '<span class="fe-expand">+</span>' : ''}
     ${opts.showSessionId ? `<span class="fe-sid">${opts.showSessionId}</span>` : ''}
@@ -75,7 +89,7 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     expandBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       expanded = !expanded;
-      contentEl.textContent = expanded ? content : truncated;
+      contentEl.textContent = expanded ? rawContent : truncated;
       expandBtn.textContent = expanded ? '−' : '+';
       el.classList.toggle('expanded', expanded);
     });

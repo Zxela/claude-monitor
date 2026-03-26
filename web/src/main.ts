@@ -41,6 +41,7 @@ if (gearBtn && costStat) {
 }
 
 // Status bar updates
+const connDot = document.getElementById('conn-dot')!;
 const connIndicator = document.getElementById('conn-indicator')!;
 const sbHost = document.getElementById('sb-host')!;
 const sbEvents = document.getElementById('sb-events')!;
@@ -50,11 +51,13 @@ sbHost.textContent = location.host;
 
 subscribe((_state, changed) => {
   if (changed.has('connected')) {
-    connIndicator.textContent = state.connected ? 'CONNECTED' : 'DISCONNECTED';
-    connIndicator.style.color = state.connected ? 'var(--green)' : 'var(--red)';
+    const c = state.connected;
+    connDot.className = `sb-dot ${c ? 'connected' : 'disconnected'}`;
+    connIndicator.textContent = c ? 'CONNECTED' : 'DISCONNECTED';
+    connIndicator.className = c ? 'connected' : 'disconnected';
   }
   if (changed.has('eventCount')) {
-    sbEvents.textContent = `${state.eventCount} EVENTS`;
+    sbEvents.textContent = String(state.eventCount);
   }
   if (changed.has('version')) {
     sbVersion.textContent = `CLAUDE MONITOR ${state.version}`;

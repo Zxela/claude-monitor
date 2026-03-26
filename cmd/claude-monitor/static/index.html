@@ -6,8 +6,8 @@
   <title>Claude Monitor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="/assets/index-Bq7qDPa5.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-COgM8FZu.css">
+  <script type="module" crossorigin src="/assets/index-BtO8i07O.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CmcbbO7c.css">
 </head>
 <body>
   <div id="app">
@@ -18,11 +18,15 @@
         <div class="feed-empty">Select a session to view its feed</div>
       </div>
     </div>
-    <div id="statusbar" style="display:flex; align-items:center; gap:12px; padding:4px 12px; font-size:11px; color:var(--text-dim); border-top:1px solid var(--border);">
-      <span id="conn-indicator">CONNECTED</span>
-      <span id="sb-host"></span>
-      <span id="sb-events">0 EVENTS</span>
-      <span style="margin-left:auto" id="sb-version"></span>
+    <div id="statusbar">
+      <div class="sb-item">
+        <span class="sb-dot connected" id="conn-dot"></span>
+        <span id="conn-indicator" class="connected">CONNECTED</span>
+      </div>
+      <div class="sb-item" id="sb-host"></div>
+      <div class="sb-item"><span id="sb-events" style="font-weight:600;color:var(--text)">0</span>&nbsp;EVENTS</div>
+      <div class="sb-spacer"></div>
+      <div class="sb-item" id="sb-version"></div>
     </div>
   </div>
 </body>

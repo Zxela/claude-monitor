@@ -16,11 +16,15 @@
         <div class="feed-empty">Select a session to view its feed</div>
       </div>
     </div>
-    <div id="statusbar" style="display:flex; align-items:center; gap:12px; padding:4px 12px; font-size:11px; color:var(--text-dim); border-top:1px solid var(--border);">
-      <span id="conn-indicator">CONNECTED</span>
-      <span id="sb-host"></span>
-      <span id="sb-events">0 EVENTS</span>
-      <span style="margin-left:auto" id="sb-version"></span>
+    <div id="statusbar">
+      <div class="sb-item">
+        <span class="sb-dot connected" id="conn-dot"></span>
+        <span id="conn-indicator" class="connected">CONNECTED</span>
+      </div>
+      <div class="sb-item" id="sb-host"></div>
+      <div class="sb-item"><span id="sb-events" style="font-weight:600;color:var(--text)">0</span>&nbsp;EVENTS</div>
+      <div class="sb-spacer"></div>
+      <div class="sb-item" id="sb-version"></div>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

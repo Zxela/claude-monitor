@@ -13,6 +13,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
   if (session.isSubagent) el.classList.add('subagent');
+  if (session.isActive) el.classList.add('active-card');
 
   const dotClass = session.isActive
     ? (session.status === 'thinking' ? 'dot-thinking' : session.status === 'tool_use' ? 'dot-tool' : 'dot-active')

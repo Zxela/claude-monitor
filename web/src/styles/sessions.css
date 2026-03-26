@@ -9,6 +9,10 @@
   flex-direction: column;
 }
 
+.sessions-panel::-webkit-scrollbar { width: 4px; }
+.sessions-panel::-webkit-scrollbar-track { background: transparent; }
+.sessions-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
 /* Session filter bar (Active / Recent / All) */
 .session-filter-bar {
   display: flex;
@@ -38,16 +42,16 @@
 /* Active section */
 .active-section {
   border-bottom: 1px solid var(--green);
-  padding-bottom: 2px;
+  padding: 2px 6px 4px;
 }
 
 .active-section-header {
-  padding: 6px 10px 2px;
+  padding: 6px 4px 2px;
   font-size: 10px;
   font-weight: 700;
   color: var(--green);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
 }
 
 /* Time group headers */
@@ -90,46 +94,58 @@
 
 .show-all-btn:hover { color: var(--text); }
 
-/* ======= Session card (expanded, used in Active section) ======= */
+/* ======= Session card (expanded) ======= */
 .session-card {
-  padding: 6px 10px 5px 8px;
-  margin: 2px 4px;
+  padding: 8px 10px 6px 10px;
+  margin-bottom: 4px;
   background: #13131f;
   border: 1px solid var(--border);
   border-radius: 3px;
-  border-left: 3px solid var(--border);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Left accent bar via pseudo-element (matches old design) */
+.session-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--border);
+  transition: background 0.2s;
 }
 
 .session-card:hover {
-  background: var(--bg-hover);
   border-color: #444;
+  background: #16162a;
 }
 
 .session-card.selected {
-  background: var(--bg-hover);
-  border-left-color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(68, 136, 255, 0.06);
+  box-shadow: 0 0 12px rgba(68, 136, 255, 0.1);
 }
 
-.session-card.pulse {
-  border-left-color: var(--green);
-}
+.session-card.selected::before { background: var(--cyan); }
+.session-card.active-card::before { background: var(--green); }
 
 /* Subagent indentation */
 .session-card.subagent {
-  margin-left: 18px;
-  border-left: 2px solid rgba(136, 0, 255, 0.4);
+  margin-left: 16px;
   opacity: 0.85;
   font-size: 0.95em;
-  padding: 5px 8px 4px 6px;
 }
+
+.session-card.subagent::before { background: rgba(136, 0, 255, 0.4); }
 
 /* Row 1: dot + name + chevron + badge */
 .session-row1 {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  margin-bottom: 3px;
 }
 
 /* Colored status dot */
@@ -139,41 +155,45 @@
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--text-dim);
+  transition: background 0.3s;
 }
 
 .session-dot.dot-active {
   background: var(--green);
+  box-shadow: 0 0 6px var(--green);
   animation: dotPulse 1.8s ease-in-out infinite;
 }
 
 .session-dot.dot-thinking {
   background: var(--yellow);
+  box-shadow: 0 0 6px var(--yellow);
   animation: dotPulse 1.8s ease-in-out infinite;
 }
 
 .session-dot.dot-tool {
   background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
   animation: dotPulse 1.8s ease-in-out infinite;
 }
 
 .session-dot.dot-idle {
   background: var(--text-dim);
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 @keyframes dotPulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.3; }
 }
 
 .session-card .session-name {
-  font-size: 13px;
+  flex: 1;
   font-weight: 600;
+  font-size: 13px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
   min-width: 0;
 }
 
@@ -181,10 +201,11 @@
 .subagent-chevron {
   color: var(--purple);
   opacity: 0.8;
-  font-size: 11px;
+  font-size: 9px;
   cursor: pointer;
   flex-shrink: 0;
-  padding: 0 2px;
+  margin-left: auto;
+  padding: 0 4px;
 }
 
 .subagent-chevron:hover { opacity: 1; }
@@ -194,22 +215,44 @@
   display: inline-block;
   font-size: 9px;
   font-weight: 700;
+  letter-spacing: 1px;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 2px;
   text-transform: uppercase;
   flex-shrink: 0;
+  animation: dotPulse 1.8s ease-in-out infinite;
 }
 
-.status-thinking { background: #1a3a5c; color: var(--cyan); }
-.status-tool_use { background: #2a1a3a; color: var(--purple); }
-.status-waiting { background: #3a2a1a; color: var(--orange); }
-.status-idle { background: #1a2a1a; color: var(--green); }
+.status-thinking {
+  color: var(--yellow);
+  border: 1px solid rgba(255,204,0,0.3);
+  background: rgba(255,204,0,0.05);
+}
+
+.status-tool_use {
+  color: var(--cyan);
+  border: 1px solid rgba(0,136,255,0.3);
+  background: rgba(0,136,255,0.05);
+}
+
+.status-waiting {
+  color: var(--green);
+  border: 1px solid rgba(0,255,136,0.3);
+  background: rgba(0,255,136,0.05);
+}
+
+.status-idle {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: transparent;
+  animation: none;
+}
 
 /* Task description */
 .session-task-desc {
   font-size: 11px;
   color: var(--text-dim);
-  margin-top: 3px;
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -219,17 +262,25 @@
 .session-stats {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 11px;
   color: var(--text-dim);
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .session-stats .cost { color: var(--yellow); font-weight: 600; }
-.session-stats .cost-rate { color: var(--yellow); opacity: 0.7; }
+.session-stats .cost-rate { color: var(--text-dim); font-size: 9px; opacity: 0.6; }
 .session-stats .tok { color: var(--cyan); }
 .session-stats .cache { color: var(--purple); }
-.session-stats .session-error-count { color: var(--red); }
+.session-stats .session-error-count {
+  color: var(--red);
+  font-weight: 600;
+  font-size: 10px;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
 
 /* Meta row */
 .session-meta {
@@ -237,21 +288,12 @@
   gap: 8px;
   margin-top: 2px;
   font-size: 10px;
-  color: var(--text-dim);
-  opacity: 0.7;
+  color: #44445a;
 }
 
-.session-meta .model {
-  color: var(--text-dim);
-}
-
-.session-meta .duration {
-  color: var(--text-dim);
-}
-
-/* ======= Compact card (used in timeline groups) ======= */
+/* ======= Compact card (timeline groups) ======= */
 .session-card-compact {
-  padding: 4px 12px 4px 8px;
+  padding: 4px 10px 4px 8px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -279,8 +321,8 @@
   min-width: 0;
 }
 
-.session-card-compact .cost { color: var(--yellow); font-size: 11px; }
-.session-card-compact .duration { color: var(--text-dim); font-size: 10px; }
+.session-card-compact .cost { color: var(--yellow); font-size: 11px; font-weight: 600; }
+.session-card-compact .duration { color: #44445a; font-size: 10px; }
 .session-card-compact .model {
   font-size: 9px;
   color: var(--text-dim);
@@ -289,28 +331,4 @@
   border-radius: 2px;
 }
 
-.session-card-compact .subagent-chevron {
-  font-size: 10px;
-}
-
-/* Project filter pills */
-.project-filter {
-  padding: 4px 12px;
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.filter-pill {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-family: var(--font-mono);
-}
-
-.filter-pill:hover { color: var(--text); border-color: var(--text-dim); }
-.filter-pill.active { background: var(--border); color: var(--text); }
+.session-card-compact .subagent-chevron { font-size: 9px; }

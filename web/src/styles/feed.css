@@ -122,16 +122,33 @@
 
 /* Feed entries */
 .feed-entry {
-  padding: 3px 8px;
+  padding: 5px 12px;
   font-size: 12px;
   border-left: 3px solid transparent;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  line-height: 1.4;
+  gap: 0;
+  line-height: 1.6;
+  animation: fadeSlideIn 0.25s ease-out;
+  transition: background 0.15s;
 }
 
-.feed-entry:hover { background: var(--bg-hover); }
+.feed-entry:hover { background: rgba(255,255,255,0.03); }
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Feed entry type-specific left borders */
+.feed-entry.type-user        { border-left-color: rgba(68,136,255,0.3); }
+.feed-entry.type-assistant   { border-left-color: rgba(0,255,136,0.25); }
+.feed-entry.type-tool        { border-left-color: rgba(255,204,0,0.3); }
+.feed-entry.type-agent       { border-left-color: rgba(255,136,68,0.35); }
+.feed-entry.type-result      { border-left-color: rgba(0,204,255,0.25); }
+.feed-entry.type-hook        { border-left-color: rgba(204,136,255,0.3); }
+.feed-entry.type-error       { border-left-color: rgba(255,68,68,0.4); background: rgba(221,68,85,0.04); }
 
 .feed-entry.expanded {
   flex-wrap: wrap;
@@ -145,24 +162,24 @@
 }
 
 .fe-time {
-  color: var(--text-dim);
-  font-size: 10px;
-  flex-shrink: 0;
-  min-width: 65px;
+  flex: 0 0 72px;
+  color: #44445a;
+  font-size: 11px;
 }
 
 .fe-type {
-  font-size: 9px;
-  font-weight: 700;
-  flex-shrink: 0;
-  min-width: 45px;
-  text-transform: uppercase;
+  flex: 0 0 70px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding-right: 8px;
 }
 
-.fe-tool {
-  color: var(--purple);
+.fe-subtype {
   font-size: 11px;
+  font-weight: 600;
   flex-shrink: 0;
+  padding-right: 6px;
 }
 
 .fe-content {

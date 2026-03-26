@@ -30,3 +30,45 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* Status bar */
+#statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 26px;
+  background: #13131f;
+  border-top: 1px solid #2a2a3a;
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 100%;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+}
+
+.sb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: background 0.4s, box-shadow 0.4s;
+}
+
+.sb-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.sb-dot.disconnected { background: var(--red); }
+
+#conn-indicator { font-weight: 600; transition: color 0.4s; }
+#conn-indicator.connected { color: var(--green); }
+#conn-indicator.disconnected { color: var(--red); }
+
+.sb-spacer { flex: 1; }
