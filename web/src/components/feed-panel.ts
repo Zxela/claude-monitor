@@ -8,6 +8,7 @@ import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
+import { open as openTimeline } from './timeline-view';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -131,9 +132,13 @@ function updateHeader(): void {
     const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
       <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
+      <span class="timeline-btn" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
       <span class="back-to-feed" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
     headerEl.querySelector('.back-to-feed')?.addEventListener('click', () => {
       update({ selectedSessionId: null });
+    });
+    headerEl.querySelector('.timeline-btn')?.addEventListener('click', () => {
+      if (state.selectedSessionId) openTimeline(state.selectedSessionId);
     });
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
