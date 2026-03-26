@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/Zxela/claude-monitor/compare/v1.9.0...v1.9.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* restore old HTML styling, subagent nesting, and collapse state ([4665716](https://github.com/Zxela/claude-monitor/commit/46657164e8ed03b2d6c661440628aeaf957c04ee))
+
 ## [1.9.0](https://github.com/Zxela/claude-monitor/compare/v1.8.0...v1.9.0) (2026-03-26)
 
 
