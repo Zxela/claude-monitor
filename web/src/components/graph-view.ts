@@ -34,6 +34,7 @@ let dragging: GraphNode | null = null;
 let hovering: GraphNode | null = null;
 let prevNodeIds = '';
 let settledFrames = 0;
+let graphMode: 'graph' | 'sequence' = 'graph';
 const SETTLE_THRESHOLD = 0.1;
 const SETTLE_FRAMES = 30;
 
@@ -51,7 +52,11 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     }
   }
   if (changed.has('sessions') && state.view === 'graph') {
-    rebuildNodes();
+    if (graphMode === 'graph') {
+      rebuildNodes();
+    } else {
+      show(); // re-render sequence list
+    }
   }
 }
 
@@ -62,24 +67,95 @@ function show(): void {
   const wrapper = document.createElement('div');
   wrapper.className = 'graph-container';
 
-  canvas = document.createElement('canvas');
-  wrapper.appendChild(canvas);
+  // Mode toggle
+  const toggle = document.createElement('div');
+  toggle.className = 'graph-mode-toggle';
+  for (const mode of ['graph', 'sequence'] as const) {
+    const btn = document.createElement('button');
+    btn.className = `graph-mode-btn${graphMode === mode ? ' active' : ''}`;
+    btn.textContent = mode === 'graph' ? 'Graph' : 'Sequence';
+    btn.addEventListener('click', () => {
+      graphMode = mode;
+      show();
+    });
+    toggle.appendChild(btn);
+  }
+  wrapper.appendChild(toggle);
 
-  tooltip = document.createElement('div');
-  tooltip.className = 'graph-tooltip';
-  wrapper.appendChild(tooltip);
+  if (graphMode === 'graph') {
+    canvas = document.createElement('canvas');
+    wrapper.appendChild(canvas);
 
-  container.appendChild(wrapper);
+    tooltip = document.createElement('div');
+    tooltip.className = 'graph-tooltip';
+    wrapper.appendChild(tooltip);
 
-  resizeCanvas();
-  window.addEventListener('resize', resizeCanvas);
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mousemove', onMouseMove);
-  canvas.addEventListener('mouseup', onMouseUp);
-  canvas.addEventListener('click', onClick);
+    container.appendChild(wrapper);
 
-  rebuildNodes();
-  startAnimation();
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('click', onClick);
+
+    rebuildNodes();
+    startAnimation();
+  } else {
+    container.appendChild(wrapper);
+    renderSequence(wrapper);
+  }
+}
+
+function renderSequence(wrapper: HTMLElement): void {
+  const now = Date.now();
+  const threshold = 120_000;
+
+  const sessions = Array.from(state.sessions.values())
+    .filter(s => s.isActive || (now - new Date(s.lastActive).getTime()) < threshold)
+    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+
+  const list = document.createElement('div');
+  list.className = 'sequence-list';
+
+  if (sessions.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 12px;';
+    empty.textContent = 'No active sessions';
+    list.appendChild(empty);
+  }
+
+  for (const sess of sessions) {
+    const depth = sess.parentId ? 1 : 0;
+    const entry = document.createElement('div');
+    entry.className = `sequence-entry${sess.isActive ? ' sequence-active' : ''}`;
+    entry.style.paddingLeft = `${12 + depth * 24}px`;
+
+    const time = sess.startedAt ? new Date(sess.startedAt).toLocaleTimeString() : '';
+    const name = sess.sessionName || sess.projectName || sess.id.slice(0, 8);
+    const cost = `$${sess.totalCostUSD.toFixed(2)}`;
+    const statusClass = sess.isActive
+      ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
+      : 'idle';
+    const statusText = sess.isActive ? sess.status.replace('_', ' ') : 'done';
+
+    entry.innerHTML = `
+      <span class="sequence-time">${time}</span>
+      <span class="sequence-dot ${statusClass}"></span>
+      ${depth > 0 ? '<span class="sequence-connector">└─</span>' : ''}
+      <span class="sequence-name">${escapeHtml(name)}</span>
+      <span class="sequence-cost">${cost}</span>
+      <span class="sequence-status">${statusText}</span>
+    `;
+
+    entry.style.cursor = 'pointer';
+    entry.addEventListener('click', () => {
+      update({ selectedSessionId: sess.id, view: 'list' });
+    });
+    list.appendChild(entry);
+  }
+
+  wrapper.appendChild(list);
 }
 
 function hide(): void {

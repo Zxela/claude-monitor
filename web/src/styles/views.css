@@ -316,3 +316,100 @@
   font-size: 9px;
   color: var(--text);
 }
+
+/* Graph/Sequence toggle */
+.graph-mode-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.graph-mode-btn {
+  padding: 3px 10px;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-card, #1a1a2e);
+  color: var(--text-dim, #666);
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.graph-mode-btn.active {
+  background: var(--bg-hover, #2a2a3e);
+  color: var(--cyan, #00d4ff);
+}
+
+/* Sequence view */
+.sequence-list {
+  padding: 8px 0;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.sequence-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text, #ccc);
+  border-left: 2px solid transparent;
+}
+
+.sequence-entry:hover {
+  background: var(--bg-hover, #2a2a3e);
+}
+
+.sequence-active {
+  border-left-color: var(--cyan, #00d4ff);
+}
+
+.sequence-time {
+  color: var(--text-dim, #666);
+  font-size: 10px;
+  min-width: 70px;
+}
+
+.sequence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sequence-dot.thinking { background: #ffcc00; }
+.sequence-dot.tool-use { background: #4488ff; }
+.sequence-dot.active { background: #00ff88; }
+.sequence-dot.idle { background: #44445a; }
+
+.sequence-connector {
+  color: var(--text-dim, #666);
+  font-size: 10px;
+}
+
+.sequence-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sequence-cost {
+  color: var(--yellow, #ffcc00);
+  font-size: 11px;
+}
+
+.sequence-status {
+  font-size: 9px;
+  color: var(--text-dim, #666);
+  text-transform: uppercase;
+  min-width: 50px;
+  text-align: right;
+}
