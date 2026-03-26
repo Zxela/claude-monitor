@@ -74,9 +74,11 @@ export interface HistoryRow {
 }
 
 export interface WsEvent {
-  event: 'session_new' | 'message';
-  session: Session;
+  event: 'session_new' | 'message' | 'update_available';
+  session?: Session;
   message?: ParsedMessage;
+  version?: string;
+  url?: string;
 }
 
 export interface ParsedMessage {

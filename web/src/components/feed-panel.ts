@@ -56,7 +56,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 }
 
 function onWsMessage(event: WsEvent): void {
-  if (!event.message) return;
+  if (!event.message || !event.session) return;
   if (state.view !== 'list') return;
   if (!feedContent) return;
 

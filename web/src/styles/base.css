@@ -183,3 +183,33 @@ body {
 }
 
 .onboarding-dismiss:hover { background: rgba(88,166,255,0.3); }
+
+/* Update banner */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: var(--bg-secondary, #1a2332);
+  border-bottom: 1px solid var(--accent, #58a6ff);
+  font-size: 13px;
+  color: var(--fg, #c9d1d9);
+}
+
+.update-banner a {
+  color: var(--accent, #58a6ff);
+  margin-left: 8px;
+}
+
+.update-banner-dismiss {
+  background: none;
+  border: none;
+  color: var(--fg-muted, #8b949e);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.update-banner-dismiss:hover {
+  color: var(--fg, #c9d1d9);
+}

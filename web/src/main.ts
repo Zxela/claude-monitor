@@ -15,6 +15,7 @@ import { open as openReplay, togglePlay as replayToggle, restart as replayRestar
 import { toggle as toggleHelp } from './components/help-overlay';
 import { init as initHash } from './hash';
 import { init as initOnboarding } from './components/onboarding';
+import { render as renderUpdateBanner } from './components/update-banner';
 import { expandedParents } from './components/session-card';
 
 // Mount components
@@ -23,6 +24,7 @@ const sessionsMount = document.getElementById('sessions-mount')!;
 const feedMount = document.getElementById('feed-mount')!;
 
 renderTopbar(topbarMount);
+renderUpdateBanner(document.getElementById('app')!);
 renderSessionList(sessionsMount);
 
 // Feed panel + views all render into feed-mount

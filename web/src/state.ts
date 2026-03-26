@@ -30,6 +30,11 @@ export interface AppState {
   renderVersion: number;  // bump to force re-renders
 
   focusedSessionId: string | null;
+
+  // Update
+  updateVersion: string | null;
+  updateUrl: string | null;
+  updateDismissed: boolean;
 }
 
 type Listener = (state: AppState, changedKeys: Set<string>) => void;
@@ -57,6 +62,9 @@ export const state: AppState = {
   budgetDismissed: false,
   renderVersion: 0,
   focusedSessionId: null,
+  updateVersion: null,
+  updateUrl: null,
+  updateDismissed: false,
 };
 
 export function subscribe(listener: Listener): () => void {

@@ -40,6 +40,12 @@ export function connect(): void {
       console.warn('ws: failed to parse message', e.data);
       return;
     }
+    // Handle update_available event (no session data).
+    if (event.event === 'update_available' && event.version) {
+      update({ updateVersion: event.version, updateUrl: event.url ?? null });
+      return;
+    }
+
     update({ eventCount: state.eventCount + 1 });
 
     if (event.session) {
