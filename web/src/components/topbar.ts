@@ -19,11 +19,11 @@ export function render(container: HTMLElement): void {
       <span class="brand-diamond">◆</span>
       CLAUDE MONITOR
     </div>
-    <div class="topbar-stat">ACTIVE <span class="val green" data-stat="active">0</span></div>
-    <div class="topbar-stat">TOTAL SPEND <span class="budget-gear" style="cursor:pointer">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
-    <div class="topbar-stat">WORKING <span class="val green" data-stat="working">0</span></div>
-    <div class="topbar-stat">CACHE HIT <span class="val cyan" data-stat="cache">0%</span></div>
-    <div class="topbar-stat">$/MIN <span class="val yellow" data-stat="rate">$0/m</span></div>
+    <div class="topbar-stat"><span>ACTIVE</span> <span class="val green" data-stat="active">0</span></div>
+    <div class="topbar-stat"><span>TOTAL SPEND</span> <span class="budget-gear">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
+    <div class="topbar-stat"><span>WORKING</span> <span class="val cyan" data-stat="working">0</span></div>
+    <div class="topbar-stat"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
+    <div class="topbar-stat"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
     <div class="search-box">
       <input type="text" placeholder="Search all sessions..." data-search />
     </div>
@@ -82,6 +82,15 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   }
 }
 
+function setVal(el: HTMLElement | null, text: string): void {
+  if (!el || el.textContent === text) return;
+  el.textContent = text;
+  // Flash animation on change
+  el.classList.remove('flash');
+  void (el as HTMLElement).offsetWidth; // force reflow
+  el.classList.add('flash');
+}
+
 function updateStats(): void {
   const sessions = Array.from(state.sessions.values());
   const active = sessions.filter(s => s.isActive);
@@ -93,11 +102,11 @@ function updateStats(): void {
   const totalCacheRead = sessions.reduce((sum, s) => sum + s.cacheReadTokens, 0);
   const cacheHit = totalInput > 0 ? (totalCacheRead / totalInput * 100) : 0;
 
-  if (statActive) statActive.textContent = String(active.length);
-  if (statCost) statCost.textContent = `$${totalCost.toFixed(0)}`;
-  if (statWorking) statWorking.textContent = String(working.length);
-  if (statCache) statCache.textContent = `${cacheHit.toFixed(0)}%`;
-  if (statRate) statRate.textContent = `$${totalRate.toFixed(3)}/m`;
+  setVal(statActive, String(active.length));
+  setVal(statCost, `$${totalCost.toFixed(0)}`);
+  setVal(statWorking, String(working.length));
+  setVal(statCache, cacheHit > 0 ? `${cacheHit.toFixed(0)}%` : '—');
+  setVal(statRate, totalRate > 0 ? `$${totalRate.toFixed(3)}/m` : '—');
 }
 
 export function focusSearch(): void {
