@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.13.0](https://github.com/Zxela/claude-monitor/compare/v1.12.2...v1.13.0) (2026-03-26)
+
+
+### Features
+
+* add Canvas 2D timeline/waterfall view with zoom and pan ([3713608](https://github.com/Zxela/claude-monitor/commit/37136082d3df2c57e99ab96d4de168513c23cb90))
+* add keyboard navigation — ↑↓ focus, Enter select, ←→ expand/collapse ([b6a7754](https://github.com/Zxela/claude-monitor/commit/b6a775490be42821de44ecad5228b9480a4247b9))
+* add scroll lock button and back-to-feed link ([e2f9169](https://github.com/Zxela/claude-monitor/commit/e2f91691747c08d1a7efab1691f339b4f4740faf))
+* browser notifications for budget exceeded and agent errors ([6c6c5aa](https://github.com/Zxela/claude-monitor/commit/6c6c5aa8c8a5e72725776916b7a586ca84dfb234))
+* persist session/view in URL hash, restore on load ([72dd24a](https://github.com/Zxela/claude-monitor/commit/72dd24a3c25fc10a11e4aee6774555ff54dce15f))
+* replay keyboard controls — Space play/pause, R restart, ←→ step ([ea2a0f5](https://github.com/Zxela/claude-monitor/commit/ea2a0f55f898608b4a6caa3c6e299fdee5d97985))
+* show current tool on cards, click error count to filter ([9d10e98](https://github.com/Zxela/claude-monitor/commit/9d10e9806ef71f7379ad6040c5ec88bfcfee5107))
+* visual grouping of tool calls with their results ([6adf7c6](https://github.com/Zxela/claude-monitor/commit/6adf7c6b3e6fdab7abd741fb04f307fb91cfe91d))
+
 ## [1.13.0](https://github.com/Zxela/claude-monitor/compare/v1.12.1...v1.13.0) (2026-03-26)
 
 
