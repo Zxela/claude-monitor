@@ -22,6 +22,13 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+const ACTIVE_THRESHOLD_MS = 45_000; // 45s — slightly longer than backend's 30s to prevent flashing
+
+export function isSessionActive(lastActive: string): boolean {
+  if (!lastActive) return false;
+  return (Date.now() - new Date(lastActive).getTime()) < ACTIVE_THRESHOLD_MS;
+}
+
 export function timeAgo(ts: string): string {
   if (!ts) return '';
   const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);

@@ -1,16 +1,16 @@
 // web/src/components/session-list.ts
-import type { GroupedSessions, Session } from '../types';
+import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe } from '../state';
-import { fetchGroupedSessions } from '../api';
 import { renderExpanded, renderCompact } from './session-card';
+import { isSessionActive } from '../utils';
 import '../styles/sessions.css';
 
 let el: HTMLElement | null = null;
 let listEl: HTMLElement | null = null;
 let lastRenderTime = 0;
 const MAX_VISIBLE = 15;
-const expandedGroups = new Set<string>();
+const showAllGroups = new Set<string>();
 const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
 let activeFilter: 'active' | 'recent' | 'all' = 'recent';
 
@@ -31,7 +31,7 @@ export function render(container: HTMLElement): void {
       activeFilter = btn.dataset.filter as typeof activeFilter;
       filterBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      renderFromState();
+      renderList();
     });
   });
   el.appendChild(filterBar);
@@ -43,17 +43,15 @@ export function render(container: HTMLElement): void {
 
   container.appendChild(el);
 
-  // Initial HTTP fetch + periodic poll
-  refresh();
-  setInterval(refresh, 5000);
+  renderList();
+  setInterval(renderList, 5000);
   subscribe(onStateChange);
 
-  // Keyboard shortcuts 1/2/3 for filter
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.key === '1') { activeFilter = 'active'; renderFromState(); updateFilterBar(); }
-    if (e.key === '2') { activeFilter = 'recent'; renderFromState(); updateFilterBar(); }
-    if (e.key === '3') { activeFilter = 'all'; renderFromState(); updateFilterBar(); }
+    if (e.key === '1') { activeFilter = 'active'; renderList(); updateFilterBar(); }
+    if (e.key === '2') { activeFilter = 'recent'; renderList(); updateFilterBar(); }
+    if (e.key === '3') { activeFilter = 'all'; renderList(); updateFilterBar(); }
   });
 }
 
@@ -63,212 +61,143 @@ function updateFilterBar(): void {
   });
 }
 
-async function refresh(): Promise<void> {
-  try {
-    const grouped = await fetchGroupedSessions();
-    renderGrouped(grouped);
-  } catch (err) {
-    console.error('Failed to fetch grouped sessions:', err);
-  }
-}
-
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
-    renderFromState();
+    renderList();
   }
-  // Throttled re-render on session updates (max once per second)
   if (changed.has('sessions')) {
     const now = Date.now();
     if (now - lastRenderTime > 1000) {
       lastRenderTime = now;
-      renderFromState();
+      renderList();
     }
   }
   if (changed.has('focusedSessionId')) {
-    // Update focused class on all cards
     listEl?.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach(card => {
       card.classList.toggle('focused', card.dataset.sessionId === _state.focusedSessionId);
     });
-    // Scroll focused card into view
     const focused = listEl?.querySelector<HTMLElement>('.focused');
     if (focused) focused.scrollIntoView({ block: 'nearest' });
   }
 }
 
-/** Build time groups from state.sessions locally (no HTTP) */
-function renderFromState(): void {
-  const now = Date.now();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const yesterdayStart = new Date(todayStart);
-  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-  const weekStart = new Date(todayStart);
-  weekStart.setDate(weekStart.getDate() - 7);
-
-  const grouped: GroupedSessions = {
-    active: [],
-    lastHour: [],
-    today: [],
-    yesterday: [],
-    thisWeek: [],
-    older: [],
-  };
-
-  // Use 45s threshold (not 30s) to prevent flashing at the boundary.
-  // The backend uses 30s, but client-side re-renders can oscillate
-  // if a session is right at the edge. 45s adds hysteresis.
-  const ACTIVE_THRESHOLD = 45_000;
-
-  for (const sess of state.sessions.values()) {
-    const lastActiveMs = new Date(sess.lastActive).getTime();
-    const isActive = (now - lastActiveMs) < ACTIVE_THRESHOLD;
-
-    if (isActive) {
-      grouped.active.push(sess);
-      continue;
-    }
-    if (now - lastActiveMs < 3600_000) {
-      grouped.lastHour.push(sess);
-    } else if (lastActiveMs >= todayStart.getTime()) {
-      grouped.today.push(sess);
-    } else if (lastActiveMs >= yesterdayStart.getTime()) {
-      grouped.yesterday.push(sess);
-    } else if (lastActiveMs >= weekStart.getTime()) {
-      grouped.thisWeek.push(sess);
-    } else {
-      grouped.older.push(sess);
-    }
-  }
-
-  renderGrouped(grouped);
-}
-
-function renderGrouped(grouped: GroupedSessions): void {
+function renderList(): void {
   if (!listEl) return;
 
+  const now = Date.now();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 7);
+  const recentCutoff = now - 4 * 3600_000; // 4 hours
+
+  // Group sessions
+  const active: Session[] = [];
+  const lastHour: Session[] = [];
+  const today: Session[] = [];
+  const yesterday: Session[] = [];
+  const thisWeek: Session[] = [];
+  const older: Session[] = [];
+
+  for (const sess of state.sessions.values()) {
+    if (isSessionActive(sess.lastActive)) {
+      active.push(sess);
+      continue;
+    }
+    const ms = new Date(sess.lastActive).getTime();
+    if (now - ms < 3600_000) lastHour.push(sess);
+    else if (ms >= todayStart.getTime()) today.push(sess);
+    else if (ms >= yesterdayStart.getTime()) yesterday.push(sess);
+    else if (ms >= weekStart.getTime()) thisWeek.push(sess);
+    else older.push(sess);
+  }
+
   // Update filter counts
-  const allSessions = [...grouped.active, ...grouped.lastHour, ...grouped.today, ...grouped.yesterday, ...grouped.thisWeek, ...grouped.older];
-  const recentCutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 hours
-  const recentCount = allSessions.filter(s => s.isActive || new Date(s.lastActive).getTime() > recentCutoff).length;
+  const recentCount = active.length + [...lastHour, ...today].filter(s => new Date(s.lastActive).getTime() > recentCutoff).length;
+  const totalCount = state.sessions.size;
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
-  if (fcActive) fcActive.textContent = String(grouped.active.length);
+  if (fcActive) fcActive.textContent = String(active.length);
   if (fcRecent) fcRecent.textContent = String(recentCount);
-  if (fcAll) fcAll.textContent = String(allSessions.length);
+  if (fcAll) fcAll.textContent = String(totalCount);
 
-  // Save scroll position
+  // Save scroll + render
   const scrollTop = listEl.scrollTop;
   listEl.innerHTML = '';
 
   const filter = state.projectFilter;
+  const topLevel = (sessions: Session[]) =>
+    (filter ? sessions.filter(s => s.projectName === filter || s.sessionName === filter) : sessions)
+      .filter(s => !s.isSubagent);
+  const sort = (sessions: Session[]) =>
+    sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 
-  // Filter out subagents that will be rendered inline by their parents
-  const filterTopLevel = (sessions: Session[]): Session[] => {
-    return applyFilter(sessions, filter).filter(s => !s.isSubagent);
-  };
-
-  // Apply active filter
-  const showTimeline = activeFilter !== 'active';
-  const recentOnly = activeFilter === 'recent';
-
-  // Active Now section
-  const activeSessions = filterTopLevel(grouped.active);
-  if (activeSessions.length > 0) {
+  // Active Now
+  const activeSorted = sort(topLevel(active));
+  if (activeSorted.length > 0) {
     const header = document.createElement('div');
     header.className = 'active-section-header';
-    header.textContent = `ACTIVE NOW (${activeSessions.length})`;
+    header.textContent = `ACTIVE NOW (${activeSorted.length})`;
     listEl.appendChild(header);
 
     const section = document.createElement('div');
     section.className = 'active-section';
-    sortByLastActive(activeSessions);
-    for (const sess of activeSessions) {
-      renderExpanded(sess, section);
-    }
+    for (const sess of activeSorted) renderExpanded(sess, section);
     listEl.appendChild(section);
   }
 
-  // Timeline groups
-  const groups: [string, string, Session[]][] = [
-    ['lastHour', 'Last hour', grouped.lastHour],
-    ['today', 'Today', grouped.today],
-    ['yesterday', 'Yesterday', grouped.yesterday],
-    ['thisWeek', 'This week', grouped.thisWeek],
-    ['older', 'Older', grouped.older],
-  ];
-
-  if (!showTimeline) {
+  // Time groups
+  if (activeFilter === 'active') {
     listEl.scrollTop = scrollTop;
     return;
   }
 
-  for (const [key, label, sessions] of groups) {
-    // In "recent" mode, only show lastHour and today
-    if (recentOnly && key !== 'lastHour' && key !== 'today') continue;
+  const groups: [string, string, Session[]][] = [
+    ['lastHour', 'Last hour', lastHour],
+    ['today', 'Today', today],
+    ['yesterday', 'Yesterday', yesterday],
+    ['thisWeek', 'This week', thisWeek],
+    ['older', 'Older', older],
+  ];
 
-    const filtered = filterTopLevel(sessions);
+  for (const [key, label, sessions] of groups) {
+    if (activeFilter === 'recent' && key !== 'lastHour' && key !== 'today') continue;
+
+    const filtered = sort(topLevel(sessions));
     if (filtered.length === 0) continue;
 
-    sortByLastActive(filtered);
-
     const group = document.createElement('div');
-    // Restore collapsed state
-    if (collapsedGroups.has(key)) {
-      group.classList.add('time-group-collapsed');
-    }
+    if (collapsedGroups.has(key)) group.classList.add('time-group-collapsed');
 
-    const isShowingAll = expandedGroups.has(key);
+    const isShowingAll = showAllGroups.has(key);
     const needsTruncation = filtered.length > MAX_VISIBLE && !isShowingAll;
 
     const header = document.createElement('div');
     header.className = 'time-group-header';
-    header.innerHTML = `
-      <span>${label}</span>
-      <span class="time-group-count">${filtered.length}</span>
-    `;
+    header.innerHTML = `<span>${label}</span><span class="time-group-count">${filtered.length}</span>`;
     header.addEventListener('click', () => {
       group.classList.toggle('time-group-collapsed');
-      if (group.classList.contains('time-group-collapsed')) {
-        collapsedGroups.add(key);
-      } else {
-        collapsedGroups.delete(key);
-      }
+      if (group.classList.contains('time-group-collapsed')) collapsedGroups.add(key);
+      else collapsedGroups.delete(key);
     });
     group.appendChild(header);
 
     const items = document.createElement('div');
     items.className = 'time-group-items';
-    const visibleSessions = needsTruncation ? filtered.slice(0, MAX_VISIBLE) : filtered;
-    for (const sess of visibleSessions) {
-      renderCompact(sess, items);
-    }
+    const visible = needsTruncation ? filtered.slice(0, MAX_VISIBLE) : filtered;
+    for (const sess of visible) renderCompact(sess, items);
 
     if (needsTruncation) {
-      const showAll = document.createElement('button');
-      showAll.className = 'show-all-btn';
-      showAll.textContent = `Show all ${filtered.length} sessions`;
-      showAll.addEventListener('click', (e) => {
-        e.stopPropagation();
-        expandedGroups.add(key);
-        renderFromState();
-      });
-      items.appendChild(showAll);
+      const btn = document.createElement('button');
+      btn.className = 'show-all-btn';
+      btn.textContent = `Show all ${filtered.length} sessions`;
+      btn.addEventListener('click', (e) => { e.stopPropagation(); showAllGroups.add(key); renderList(); });
+      items.appendChild(btn);
     }
 
     group.appendChild(items);
     listEl.appendChild(group);
   }
 
-  // Restore scroll position
   listEl.scrollTop = scrollTop;
-}
-
-function applyFilter(sessions: Session[], projectFilter: string | null): Session[] {
-  if (!projectFilter) return sessions;
-  return sessions.filter(s => s.projectName === projectFilter || s.sessionName === projectFilter);
-}
-
-function sortByLastActive(sessions: Session[]): void {
-  sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 }

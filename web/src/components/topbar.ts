@@ -1,5 +1,6 @@
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
+import { isSessionActive } from '../utils';
 import '../styles/topbar.css';
 
 let el: HTMLElement | null = null;
@@ -93,7 +94,7 @@ function setVal(el: HTMLElement | null, text: string): void {
 
 function updateStats(): void {
   const sessions = Array.from(state.sessions.values());
-  const active = sessions.filter(s => s.isActive);
+  const active = sessions.filter(s => isSessionActive(s.lastActive));
   const working = active.filter(s => s.status === 'thinking' || s.status === 'tool_use');
   const totalCost = sessions.reduce((sum, s) => sum + s.totalCostUSD, 0);
   const totalRate = active.reduce((sum, s) => sum + s.costRate, 0);
