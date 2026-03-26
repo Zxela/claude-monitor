@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.13.0](https://github.com/Zxela/claude-monitor/compare/v1.12.1...v1.13.0) (2026-03-26)
+
+
+### Features
+
+* feed panel shows all sessions by default (multi-session mode) ([62a03de](https://github.com/Zxela/claude-monitor/commit/62a03de175d3bfa0a53ad87a3390d6ca94e3a3f8))
+
+
+### Bug Fixes
+
+* widen feed timestamp column to fit 12-hour AM/PM format ([d558a3d](https://github.com/Zxela/claude-monitor/commit/d558a3de5e4310ed2d9b6b6658a15b63e9b7e7d5))
+
 ## [1.12.1](https://github.com/Zxela/claude-monitor/compare/v1.12.0...v1.12.1) (2026-03-26)
 
 
