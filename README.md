@@ -17,7 +17,7 @@
 ---
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="100%" />
+  <img src="docs/screenshots/feed.png" alt="Claude Monitor — live feed with active agents" width="100%" />
 </p>
 
 ## Install
@@ -86,8 +86,8 @@ claude-monitor --swagger
 </table>
 
 <details>
-<summary><strong>Live Feed</strong> — click to expand</summary>
-<img src="docs/screenshots/feed.png" alt="Live Feed" width="100%" />
+<summary><strong>Dashboard Overview</strong> — click to expand</summary>
+<img src="docs/screenshots/dashboard.png" alt="Dashboard" width="100%" />
 </details>
 
 <details>
