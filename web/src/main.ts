@@ -5,18 +5,39 @@ import { fetchGroupedSessions, fetchVersion } from './api';
 import { render as renderTopbar } from './components/topbar';
 import { render as renderSessionList } from './components/session-list';
 import { render as renderSearch } from './components/search';
+import { render as renderFeedPanel } from './components/feed-panel';
+import { render as renderGraphView } from './components/graph-view';
+import { render as renderTableView } from './components/table-view';
+import { render as renderHistoryView } from './components/history-view';
+import { render as renderBudget } from './components/budget-popover';
+import { open as openReplay } from './components/replay';
+import { toggle as toggleHelp } from './components/help-overlay';
 
 // Mount components
 const topbarMount = document.getElementById('topbar-mount')!;
 const sessionsMount = document.getElementById('sessions-mount')!;
+const feedMount = document.getElementById('feed-mount')!;
 
 renderTopbar(topbarMount);
 renderSessionList(sessionsMount);
 
-// Attach search dropdown to the search box in the topbar
+// Feed panel + views all render into feed-mount
+renderFeedPanel(feedMount);
+renderGraphView(feedMount);
+renderTableView(feedMount);
+renderHistoryView(feedMount);
+
+// Search dropdown
 const searchBox = topbarMount.querySelector<HTMLElement>('.search-box');
 if (searchBox) {
   renderSearch(searchBox);
+}
+
+// Budget popover — find the gear button and cost stat in topbar
+const gearBtn = topbarMount.querySelector<HTMLElement>('.budget-gear');
+const costStat = topbarMount.querySelector<HTMLElement>('[data-stat="cost"]');
+if (gearBtn && costStat) {
+  renderBudget(gearBtn, costStat, document.getElementById('app')!);
 }
 
 // Status bar updates
@@ -38,6 +59,10 @@ subscribe((_state, changed) => {
   if (changed.has('version')) {
     sbVersion.textContent = `CLAUDE MONITOR ${state.version}`;
   }
+  // Handle replay trigger from history view
+  if (changed.has('replaySessionId') && state.replaySessionId) {
+    openReplay(state.replaySessionId);
+  }
 });
 
 // Keyboard shortcuts
@@ -47,6 +72,15 @@ document.addEventListener('keydown', (e) => {
   switch (e.key) {
     case 'g':
       update({ view: state.view === 'graph' ? 'list' : 'graph' });
+      break;
+    case 'h':
+      update({ view: state.view === 'history' ? 'list' : 'history' });
+      break;
+    case 't':
+      update({ view: state.view === 'table' ? 'list' : 'table' });
+      break;
+    case '?':
+      toggleHelp();
       break;
     case 'Escape':
       update({ selectedSessionId: null, searchOpen: false });
@@ -77,7 +111,6 @@ async function init() {
       state.sessions.set(sess.id, sess);
     }
     update({ grouped });
-    // Notify subscribers about sessions so topbar stats update
     if (allSessions.length > 0) {
       updateSession(allSessions[allSessions.length - 1]);
     }

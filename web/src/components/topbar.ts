@@ -20,7 +20,7 @@ export function render(container: HTMLElement): void {
       CLAUDE MONITOR
     </div>
     <div class="topbar-stat">ACTIVE <span class="val green" data-stat="active">0</span></div>
-    <div class="topbar-stat">TOTAL SPEND <span class="val yellow" data-stat="cost">$0</span></div>
+    <div class="topbar-stat">TOTAL SPEND <span class="budget-gear" style="cursor:pointer">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
     <div class="topbar-stat">WORKING <span class="val green" data-stat="working">0</span></div>
     <div class="topbar-stat">CACHE HIT <span class="val cyan" data-stat="cache">0%</span></div>
     <div class="topbar-stat">$/MIN <span class="val yellow" data-stat="rate">$0/m</span></div>
