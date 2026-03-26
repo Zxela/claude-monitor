@@ -1,7 +1,7 @@
 /* Sessions panel */
 .sessions-panel {
-  width: 270px;
-  min-width: 270px;
+  width: 283px;
+  min-width: 283px;
   height: 100%;
   border-right: 1px solid var(--border);
   overflow-y: auto;
@@ -298,14 +298,20 @@
 
 /* ======= Compact card (timeline groups) ======= */
 .session-card-compact {
-  padding: 4px 10px 4px 8px;
+  padding: 4px 0 2px 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
   cursor: pointer;
   font-size: 12px;
   transition: background 0.15s;
   border-left: 2px solid transparent;
+}
+
+.compact-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 8px;
 }
 
 .session-card-compact:hover { background: var(--bg-hover); }
@@ -337,6 +343,18 @@
 }
 
 .session-card-compact .subagent-chevron { font-size: 9px; }
+
+.compact-stats {
+  display: flex;
+  gap: 8px;
+  padding: 1px 10px 2px 18px;
+  font-size: 9px;
+  color: var(--text-dim, #666);
+}
+
+.compact-stat-err {
+  color: var(--red, #ff4444);
+}
 
 /* Idle subagent toggle */
 .idle-toggle {

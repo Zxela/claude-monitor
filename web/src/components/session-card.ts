@@ -200,13 +200,15 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   el.setAttribute('aria-label', `Session: ${displayName}`);
 
   el.innerHTML = `
-    <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
-    <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
-    ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
-    <span class="cost">$${session.totalCostUSD.toFixed(2)}</span>
-    <span class="duration">${timeAgo(session.lastActive)}</span>
-    <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
-    ${session.model ? `<span class="model">${session.model.replace('claude-', '').replace('-4-6', '')}</span>` : ''}
+    <div class="compact-row">
+      <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
+      <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
+      ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+      <span class="cost">$${session.totalCostUSD.toFixed(2)}</span>
+      <span class="duration">${timeAgo(session.lastActive)}</span>
+      <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
+      ${session.model ? `<span class="model">${session.model.replace('claude-', '').replace('-4-6', '')}</span>` : ''}
+    </div>
   `;
 
   // Chevron click
@@ -243,6 +245,24 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       selectCompactSession();
     }
   });
+
+  // Stats line
+  const totalTokens = session.inputTokens + session.outputTokens + session.cacheReadTokens;
+  const statsDiv = document.createElement('div');
+  statsDiv.className = 'compact-stats';
+  const statParts: string[] = [];
+  statParts.push(`<span>${formatTokens(totalTokens)} tok</span>`);
+  if (session.cacheHitPct > 0) {
+    statParts.push(`<span>${Math.round(session.cacheHitPct)}% cache</span>`);
+  }
+  if (session.errorCount > 0) {
+    statParts.push(`<span class="compact-stat-err">${session.errorCount} err</span>`);
+  }
+  if (session.costRate > 0) {
+    statParts.push(`<span>$${session.costRate.toFixed(2)}/min</span>`);
+  }
+  statsDiv.innerHTML = statParts.join('');
+  el.appendChild(statsDiv);
 
   container.appendChild(el);
 
