@@ -1,4 +1,6 @@
+// web/src/components/session-list.ts
 import type { GroupedSessions, Session } from '../types';
+import type { AppState } from '../state';
 import { state, subscribe } from '../state';
 import { fetchGroupedSessions } from '../api';
 import { renderExpanded, renderCompact } from './session-card';
@@ -7,6 +9,8 @@ import '../styles/sessions.css';
 let el: HTMLElement | null = null;
 const MAX_VISIBLE = 15;
 const expandedGroups = new Set<string>();
+// Track which time groups are manually collapsed by user
+const collapsedGroups = new Set<string>();
 
 export function render(container: HTMLElement): void {
   el = document.createElement('div');
@@ -27,7 +31,7 @@ async function refresh(): Promise<void> {
   }
 }
 
-function onStateChange(_state: typeof state, changed: Set<string>): void {
+function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('selectedSessionId') || changed.has('sessions') || changed.has('projectFilter')) {
     refresh();
   }
@@ -35,11 +39,20 @@ function onStateChange(_state: typeof state, changed: Set<string>): void {
 
 function renderGrouped(grouped: GroupedSessions): void {
   if (!el) return;
+
+  // Save scroll position
+  const scrollTop = el.scrollTop;
   el.innerHTML = '';
 
   const filter = state.projectFilter;
 
-  const activeSessions = applyFilter(grouped.active, filter);
+  // Filter out subagents that will be rendered inline by their parents
+  const filterTopLevel = (sessions: Session[]): Session[] => {
+    return applyFilter(sessions, filter).filter(s => !s.isSubagent);
+  };
+
+  // Active Now section
+  const activeSessions = filterTopLevel(grouped.active);
   if (activeSessions.length > 0) {
     const header = document.createElement('div');
     header.className = 'active-section-header';
@@ -55,6 +68,7 @@ function renderGrouped(grouped: GroupedSessions): void {
     el.appendChild(section);
   }
 
+  // Timeline groups
   const groups: [string, string, Session[]][] = [
     ['lastHour', 'Last hour', grouped.lastHour],
     ['today', 'Today', grouped.today],
@@ -64,13 +78,19 @@ function renderGrouped(grouped: GroupedSessions): void {
   ];
 
   for (const [key, label, sessions] of groups) {
-    const filtered = applyFilter(sessions, filter);
+    const filtered = filterTopLevel(sessions);
     if (filtered.length === 0) continue;
 
     sortByLastActive(filtered);
 
     const group = document.createElement('div');
-    const isCollapsed = filtered.length > MAX_VISIBLE && !expandedGroups.has(key);
+    // Restore collapsed state
+    if (collapsedGroups.has(key)) {
+      group.classList.add('time-group-collapsed');
+    }
+
+    const isShowingAll = expandedGroups.has(key);
+    const needsTruncation = filtered.length > MAX_VISIBLE && !isShowingAll;
 
     const header = document.createElement('div');
     header.className = 'time-group-header';
@@ -80,17 +100,22 @@ function renderGrouped(grouped: GroupedSessions): void {
     `;
     header.addEventListener('click', () => {
       group.classList.toggle('time-group-collapsed');
+      if (group.classList.contains('time-group-collapsed')) {
+        collapsedGroups.add(key);
+      } else {
+        collapsedGroups.delete(key);
+      }
     });
     group.appendChild(header);
 
     const items = document.createElement('div');
     items.className = 'time-group-items';
-    const visibleSessions = isCollapsed ? filtered.slice(0, MAX_VISIBLE) : filtered;
+    const visibleSessions = needsTruncation ? filtered.slice(0, MAX_VISIBLE) : filtered;
     for (const sess of visibleSessions) {
       renderCompact(sess, items);
     }
 
-    if (isCollapsed && filtered.length > MAX_VISIBLE) {
+    if (needsTruncation) {
       const showAll = document.createElement('button');
       showAll.className = 'show-all-btn';
       showAll.textContent = `Show all ${filtered.length} sessions`;
@@ -105,6 +130,9 @@ function renderGrouped(grouped: GroupedSessions): void {
     group.appendChild(items);
     el.appendChild(group);
   }
+
+  // Restore scroll position
+  el.scrollTop = scrollTop;
 }
 
 function applyFilter(sessions: Session[], projectFilter: string | null): Session[] {
