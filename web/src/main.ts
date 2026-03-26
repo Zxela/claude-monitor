@@ -10,7 +10,7 @@ import { render as renderGraphView } from './components/graph-view';
 import { render as renderTableView } from './components/table-view';
 import { render as renderHistoryView } from './components/history-view';
 import { render as renderBudget } from './components/budget-popover';
-import { open as openReplay } from './components/replay';
+import { open as openReplay, togglePlay as replayToggle, restart as replayRestart, stepForward as replayForward, stepBackward as replayBack } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { init as initHash } from './hash';
 import { expandedParents } from './components/session-card';
@@ -92,6 +92,20 @@ document.addEventListener('keydown', (e) => {
     case '?':
       toggleHelp();
       break;
+    case ' ': {
+      if (state.replaySessionId) {
+        e.preventDefault();
+        replayToggle();
+      }
+      break;
+    }
+    case 'r':
+    case 'R': {
+      if (state.replaySessionId) {
+        replayRestart();
+      }
+      break;
+    }
     case 'Escape':
       update({ selectedSessionId: null, searchOpen: false });
       break;
@@ -120,14 +134,18 @@ document.addEventListener('keydown', (e) => {
       break;
     }
     case 'ArrowRight': {
-      if (state.focusedSessionId) {
+      if (state.replaySessionId) {
+        replayForward();
+      } else if (state.focusedSessionId) {
         expandedParents.add(state.focusedSessionId);
         update({ renderVersion: state.renderVersion + 1 });
       }
       break;
     }
     case 'ArrowLeft': {
-      if (state.focusedSessionId) {
+      if (state.replaySessionId) {
+        replayBack();
+      } else if (state.focusedSessionId) {
         expandedParents.delete(state.focusedSessionId);
         update({ renderVersion: state.renderVersion + 1 });
       }

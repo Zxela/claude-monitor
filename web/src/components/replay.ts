@@ -13,6 +13,7 @@ let progressEl: HTMLElement | null = null;
 let es: EventSource | null = null;
 let totalEvents = 0;
 let currentIndex = 0;
+let manifestEvents: ParsedMessage[] = [];
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -77,7 +78,8 @@ async function loadManifest(sessionId: string): Promise<void> {
   try {
     const res = await fetch(`/api/sessions/${sessionId}/replay`);
     const data = await res.json();
-    totalEvents = data.events?.length ?? 0;
+    manifestEvents = (data.events ?? []).map((e: unknown) => e as ParsedMessage);
+    totalEvents = manifestEvents.length;
     if (scrubber) scrubber.max = String(totalEvents);
     updateProgress();
   } catch (err) {
@@ -85,7 +87,7 @@ async function loadManifest(sessionId: string): Promise<void> {
   }
 }
 
-function togglePlay(): void {
+export function togglePlay(): void {
   if (state.replayPlaying) {
     stopStream();
     update({ replayPlaying: false });
@@ -97,7 +99,7 @@ function togglePlay(): void {
   }
 }
 
-function restart(): void {
+export function restart(): void {
   stopStream();
   currentIndex = 0;
   if (feedEl) feedEl.innerHTML = '<div class="replay-empty">PRESS PLAY TO BEGIN</div>';
@@ -163,6 +165,38 @@ function stopStream(): void {
 function updateProgress(): void {
   if (progressEl) {
     progressEl.textContent = `${currentIndex} / ${totalEvents}`;
+  }
+}
+
+export function stepForward(): void {
+  if (!state.replaySessionId) return;
+  stopStream();
+  update({ replayPlaying: false });
+  if (playBtn) playBtn.textContent = '▶ PLAY';
+  if (currentIndex < totalEvents) {
+    const evt = manifestEvents[currentIndex];
+    if (evt && feedEl) {
+      const empty = feedEl.querySelector('.replay-empty');
+      if (empty) empty.remove();
+      feedEl.appendChild(renderFeedEntry(evt));
+      feedEl.scrollTop = feedEl.scrollHeight;
+    }
+    currentIndex++;
+    if (scrubber) scrubber.value = String(currentIndex);
+    updateProgress();
+  }
+}
+
+export function stepBackward(): void {
+  if (!state.replaySessionId) return;
+  stopStream();
+  update({ replayPlaying: false });
+  if (playBtn) playBtn.textContent = '▶ PLAY';
+  if (currentIndex > 0 && feedEl) {
+    if (feedEl.lastElementChild) feedEl.removeChild(feedEl.lastElementChild);
+    currentIndex--;
+    if (scrubber) scrubber.value = String(currentIndex);
+    updateProgress();
   }
 }
 
