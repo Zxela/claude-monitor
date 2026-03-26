@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2](https://github.com/Zxela/claude-monitor/compare/v1.14.1...v1.14.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* ALL filter toggles off, tool_use/result colors, stop active flashing ([e8bfced](https://github.com/Zxela/claude-monitor/commit/e8bfcedd8ef0b23b721479349118ab4c2cc98a72))
+
 ## [1.14.1](https://github.com/Zxela/claude-monitor/compare/v1.14.0...v1.14.1) (2026-03-26)
 
 
