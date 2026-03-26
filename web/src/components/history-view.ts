@@ -139,13 +139,13 @@ function show(): void {
     toggleLabel.className = 'history-subagent-toggle';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.checked = state.historyShowSubagents;
-    checkbox.setAttribute('aria-label', 'Show subagent sessions');
+    checkbox.checked = !state.historyShowSubagents;
+    checkbox.setAttribute('aria-label', 'Minimize all subagent groups');
     checkbox.addEventListener('change', () => {
-      update({ historyShowSubagents: checkbox.checked });
+      update({ historyShowSubagents: !checkbox.checked });
     });
     toggleLabel.appendChild(checkbox);
-    toggleLabel.append(' Show subagents');
+    toggleLabel.append(' Minimize all');
     toolbar.appendChild(toggleLabel);
   }
 

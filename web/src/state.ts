@@ -68,7 +68,7 @@ export const state: AppState = {
   updateVersion: null,
   updateUrl: null,
   updateDismissed: false,
-  historyShowSubagents: true,
+  historyShowSubagents: false,
 };
 
 export function subscribe(listener: Listener): () => void {
