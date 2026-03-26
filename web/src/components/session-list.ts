@@ -9,8 +9,8 @@ import '../styles/sessions.css';
 let el: HTMLElement | null = null;
 const MAX_VISIBLE = 15;
 const expandedGroups = new Set<string>();
-// Track which time groups are manually collapsed by user
-const collapsedGroups = new Set<string>();
+// Track which time groups are manually collapsed by user (all start collapsed)
+const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
 
 export function render(container: HTMLElement): void {
   el = document.createElement('div');
