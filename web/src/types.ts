@@ -91,6 +91,7 @@ export interface ParsedMessage {
   isError: boolean;
   model?: string;
   hookEvent?: string;
-  toolUseId?: string;    // set on assistant tool_use messages; links tool results back to calls
-  forToolUseId?: string; // set on tool_result messages; references the originating tool_use ID
+  fullContent?: string;  // untruncated content (backend truncates contentText to 200 chars)
+  toolUseId?: string;
+  forToolUseId?: string;
 }

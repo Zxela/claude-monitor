@@ -27,16 +27,17 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   const time = formatTime(msg.timestamp);
   let rawText = msg.contentText || '';
   const detail = msg.toolDetail || '';
+  // Backend sends full untruncated text in fullContent (contentText is capped at 200 chars)
+  const fullText = msg.fullContent || rawText;
 
   // Strip redundant prefixes baked in by the backend parser
-  // e.g. "[hook:PostToolUse] Grep" -> "Grep", "[tool: Bash]" -> "Bash"
   rawText = rawText.replace(/^\[hook:\w+\]\s*/, '');
   rawText = rawText.replace(/^\[tool:\s*\w+\]\s*/, '');
 
   // Build display content
   let content = '';
   let contentClass = '';
-  let fullContent = rawText || detail;
+  let fullContent = fullText || detail;
 
   if (type === 'hook') {
     content = rawText || msg.hookEvent || '';

@@ -79,33 +79,48 @@ body {
 
 .sb-spacer { flex: 1; }
 
-@media (max-width: 1024px) {
+/* Responsive: half-screen / narrow window (~960px) */
+@media (max-width: 1100px) {
   .topbar {
     flex-wrap: wrap;
     height: auto;
     min-height: 36px;
   }
+  /* Search drops to second row */
   .topbar .search-box {
     flex: 1 1 100%;
     order: 99;
     padding: 4px 8px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid #2a2a3a;
+    margin-left: 0;
   }
   .topbar .search-box input { width: 100%; }
-  .topbar-stat { font-size: 10px; padding: 0 10px; }
+  .topbar-stat { font-size: 10px; padding: 0 6px; }
+  .topbar-brand { padding: 0 8px; font-size: 11px; letter-spacing: 1px; }
+  .view-btn { padding: 0 6px; font-size: 9px; }
+  .brand-diamond { font-size: 12px; }
+
+  .sessions-panel { width: 200px; min-width: 200px; }
 }
 
+/* Responsive: mobile / very narrow */
 @media (max-width: 768px) {
   .sessions-panel {
+    width: 260px;
+    min-width: 260px;
     position: fixed;
-    left: 0; top: 36px; bottom: 26px;
+    left: 0; top: 0; bottom: 26px;
     z-index: 50;
     transform: translateX(-100%);
     transition: transform 0.2s;
     background: var(--bg);
+    border-right: 1px solid var(--border);
   }
   .sessions-panel.open { transform: translateX(0); }
-  #main { flex-direction: column; }
+
+  .topbar-brand { font-size: 10px; padding: 0 8px; }
+  .topbar-stat .val { font-size: 11px; }
+  .topbar-stat { padding: 0 6px; }
 }
 
 /* Onboarding tooltip */
