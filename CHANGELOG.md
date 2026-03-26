@@ -1,5 +1,319 @@
 # Changelog
 
+## [1.18.0](https://github.com/Zxela/claude-monitor/compare/v1.17.3...v1.18.0) (2026-03-26)
+
+
+### Features
+
+* classify Agent tool calls as 'agent' type, add click-to-navigate to subagent ([04af71a](https://github.com/Zxela/claude-monitor/commit/04af71a4e54a6fa39e032f7e04615b9ed53b59ec))
+
+## [1.17.3](https://github.com/Zxela/claude-monitor/compare/v1.17.2...v1.17.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* remove green border under Active Now section ([a4b583b](https://github.com/Zxela/claude-monitor/commit/a4b583be6aca63118f2341cbc42266fef687cea5))
+
+## [1.17.2](https://github.com/Zxela/claude-monitor/compare/v1.17.1...v1.17.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* prevent expanded feed entries from overlapping following rows ([e9449c8](https://github.com/Zxela/claude-monitor/commit/e9449c8cbdd9b830a730aae03692021ec3c5b652))
+
+## [1.17.1](https://github.com/Zxela/claude-monitor/compare/v1.17.0...v1.17.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* recalculate IsActive in Store.All() to prevent stale active sessions ([16523c8](https://github.com/Zxela/claude-monitor/commit/16523c8027df125117d7b34ddebbf3e280e27a24))
+
+## [1.17.0](https://github.com/Zxela/claude-monitor/compare/v1.16.5...v1.17.0) (2026-03-26)
+
+
+### Features
+
+* add 'migrate' subcommand (status, rollback, up) ([352e820](https://github.com/Zxela/claude-monitor/commit/352e820fc4515c29f7c4d8ee4a9a5d8b7c0a546f))
+* add agent sequence view with Graph/Sequence toggle ([5696ba0](https://github.com/Zxela/claude-monitor/commit/5696ba05658075fcd4113f89eb75ee3f2278ff15))
+* add internal/update package for GitHub release checking ([90fd598](https://github.com/Zxela/claude-monitor/commit/90fd5981acc6bd5afeb813e506c88da992df34db))
+* add Makefile targets for migration management ([c9d4b37](https://github.com/Zxela/claude-monitor/commit/c9d4b3710a6a522fa6721b9804678892f1276c02))
+* add migration 002 — parent_id column for subagent grouping ([f411841](https://github.com/Zxela/claude-monitor/commit/f411841e38ad52ba238b05df4b74c4fbe1389370))
+* add migration registry with RunUp, RunDown, Status ([60b1d66](https://github.com/Zxela/claude-monitor/commit/60b1d66faa8715ba02c6fc0b5cf8ba729847426d))
+* add parentId to HistoryRow and historyShowSubagents state ([30aef8d](https://github.com/Zxela/claude-monitor/commit/30aef8d893d23366544477e5b2356b778f9af0bc))
+* check for updates on startup, broadcast via WebSocket ([16d73fa](https://github.com/Zxela/claude-monitor/commit/16d73facce796dfc50470f25f35508cca65e7698))
+* group subagent sessions under parents in history view ([836d4c3](https://github.com/Zxela/claude-monitor/commit/836d4c3a8f5e1aa080630410a12f26d7d377e434))
+* persist and return parent_id in session history ([7c37074](https://github.com/Zxela/claude-monitor/commit/7c37074ac71e4db2aec5ff18b29f214c09ad6e8c))
+* replace CREATE TABLE with migration 1, integrate with store.Open ([b98873b](https://github.com/Zxela/claude-monitor/commit/b98873b76af48a05de3b2c523921ac690ff990f1))
+* responsive hamburger menu for topbar on mobile ([8601587](https://github.com/Zxela/claude-monitor/commit/8601587dfc775af310a0d03535c6b1d5e903afcd))
+* show dismissable update banner in web UI ([ac48cad](https://github.com/Zxela/claude-monitor/commit/ac48cad15b4dc7e08abfb61a5a6f4f5b99165dc1))
+* show token/cache/error stats in compact cards, widen sidebar to 283px ([944040f](https://github.com/Zxela/claude-monitor/commit/944040f9870c89c34b4f646fc6ae7f4d34c0331b))
+
+
+### Bug Fixes
+
+* add 5s timeout to search handler to prevent DoS ([51c703a](https://github.com/Zxela/claude-monitor/commit/51c703aeb67085d9ef5b834116f9c29e82d4ead6))
+* add ARIA labels, roles, and keyboard support for accessibility ([9eb7452](https://github.com/Zxela/claude-monitor/commit/9eb74528c422fed76b4267b649685841e5e597a7))
+* add error handling to all API calls in api.ts ([940a784](https://github.com/Zxela/claude-monitor/commit/940a784e1a65394877ecf7f9edd0d070685e3cc6))
+* add mutex to prevent race on prevActive/savedToHistory maps ([6ab214e](https://github.com/Zxela/claude-monitor/commit/6ab214ed44b8d814b5bb33e5aae535357e6967ed))
+* default bind to 127.0.0.1 with --bind flag ([fb24f45](https://github.com/Zxela/claude-monitor/commit/fb24f458ab29aea40a8634e2309a752d190fe1e7))
+* remove WriteTimeout that kills WebSocket and SSE ([249929c](https://github.com/Zxela/claude-monitor/commit/249929ca9d5b358a7b4c8b6ac6f199a53fdb475d))
+* show SESSION HISTORY label and REPLAY button for non-active sessions ([7ff4c2e](https://github.com/Zxela/claude-monitor/commit/7ff4c2e8f91231e0c7d6945c2518485509d483c4))
+* wrap WebSocket JSON.parse in try/catch ([9cc4b61](https://github.com/Zxela/claude-monitor/commit/9cc4b61b1ec20af09639e5fff17810f793e09764))
+
+## [1.16.5](https://github.com/Zxela/claude-monitor/compare/v1.16.4...v1.16.5) (2026-03-26)
+
+
+### Bug Fixes
+
+* Haiku model pricing — versioned name wasn't matching pricing table ([ceee253](https://github.com/Zxela/claude-monitor/commit/ceee253f0a13387597721c42bf897dae1b964623))
+
+## [1.16.4](https://github.com/Zxela/claude-monitor/compare/v1.16.3...v1.16.4) (2026-03-26)
+
+
+### Bug Fixes
+
+* persist history immediately on startup, not after 30s delay ([89db651](https://github.com/Zxela/claude-monitor/commit/89db6510b5c4d69fc82097aa451e598899e2a8aa))
+
+## [1.16.3](https://github.com/Zxela/claude-monitor/compare/v1.16.2...v1.16.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* history DB now persists all inactive sessions, not just transitions ([553a080](https://github.com/Zxela/claude-monitor/commit/553a080f22a41fc445bcbca4a65e97f4cc2fbc69))
+
+## [1.16.2](https://github.com/Zxela/claude-monitor/compare/v1.16.1...v1.16.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* expanded feed entries show full content, responsive layout tweaks ([9ac84ea](https://github.com/Zxela/claude-monitor/commit/9ac84ea31b3b90c9394680eab2f4f049fe1e5a5f))
+
+## [1.16.1](https://github.com/Zxela/claude-monitor/compare/v1.16.0...v1.16.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* remove card slide-in animation — caused flashing on every re-render ([98d2ce8](https://github.com/Zxela/claude-monitor/commit/98d2ce869d2a826ea8a6de357c1b666ec1aba94a))
+
+## [1.16.0](https://github.com/Zxela/claude-monitor/compare/v1.15.0...v1.16.0) (2026-03-26)
+
+
+### Features
+
+* cost breakdown popover with donut chart, token bars, top sessions ([d831fa1](https://github.com/Zxela/claude-monitor/commit/d831fa1f5cdb0f7fb5be98a6348af4d9d8b1ee59))
+* responsive layout for mobile/tablet, first-time onboarding tooltip ([9b55e6e](https://github.com/Zxela/claude-monitor/commit/9b55e6e69a903a86966a52b5d26d3dc3eb179ecf))
+
+## [1.15.0](https://github.com/Zxela/claude-monitor/compare/v1.14.3...v1.15.0) (2026-03-26)
+
+
+### Features
+
+* CSV export, tool result inheritance, card animations, stat tooltips ([e3a5d79](https://github.com/Zxela/claude-monitor/commit/e3a5d79032dc78a405af2e720d6a278c1ec9df7f))
+
+## [1.14.3](https://github.com/Zxela/claude-monitor/compare/v1.14.2...v1.14.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* consistent active counts, eliminate render flashing ([83aad96](https://github.com/Zxela/claude-monitor/commit/83aad96f1c4c4cff1d39f45d8e14406b161d6df2))
+
+## [1.14.2](https://github.com/Zxela/claude-monitor/compare/v1.14.1...v1.14.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* ALL filter toggles off, tool_use/result colors, stop active flashing ([e8bfced](https://github.com/Zxela/claude-monitor/commit/e8bfcedd8ef0b23b721479349118ab4c2cc98a72))
+
+## [1.14.1](https://github.com/Zxela/claude-monitor/compare/v1.14.0...v1.14.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* sessions leave active tab after 30s, history always re-fetches ([01229ee](https://github.com/Zxela/claude-monitor/commit/01229eeb2c29fb4465632bd1b46dbe4b971405b0))
+
+## [1.14.0](https://github.com/Zxela/claude-monitor/compare/v1.13.2...v1.14.0) (2026-03-26)
+
+
+### Features
+
+* add toolUseMap in feed-panel and toolUseId fields to ParsedMessage ([5941a82](https://github.com/Zxela/claude-monitor/commit/5941a824d8e7134a29594098c37a536ab86eff96))
+
+
+### Bug Fixes
+
+* history opens feed not replay, hide idle badges, real-time sidebar ([f093b0f](https://github.com/Zxela/claude-monitor/commit/f093b0f410aea559ea4bc675dbfa9de732d5095d))
+
+## [1.13.2](https://github.com/Zxela/claude-monitor/compare/v1.13.1...v1.13.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* search API returns [] not null when no results (fixes CI test) ([ef299e5](https://github.com/Zxela/claude-monitor/commit/ef299e5cd10ad6ff9ccad33528ce6a6e44042388))
+
+## [1.13.1](https://github.com/Zxela/claude-monitor/compare/v1.13.0...v1.13.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* run go mod tidy — fix CI lint failure ([c0b100a](https://github.com/Zxela/claude-monitor/commit/c0b100af972ea4bc66dcdabf5bd1504fd480cbe0))
+
+## [1.13.0](https://github.com/Zxela/claude-monitor/compare/v1.12.2...v1.13.0) (2026-03-26)
+
+
+### Features
+
+* add Canvas 2D timeline/waterfall view with zoom and pan ([3713608](https://github.com/Zxela/claude-monitor/commit/37136082d3df2c57e99ab96d4de168513c23cb90))
+* add keyboard navigation — ↑↓ focus, Enter select, ←→ expand/collapse ([b6a7754](https://github.com/Zxela/claude-monitor/commit/b6a775490be42821de44ecad5228b9480a4247b9))
+* add scroll lock button and back-to-feed link ([e2f9169](https://github.com/Zxela/claude-monitor/commit/e2f91691747c08d1a7efab1691f339b4f4740faf))
+* browser notifications for budget exceeded and agent errors ([6c6c5aa](https://github.com/Zxela/claude-monitor/commit/6c6c5aa8c8a5e72725776916b7a586ca84dfb234))
+* persist session/view in URL hash, restore on load ([72dd24a](https://github.com/Zxela/claude-monitor/commit/72dd24a3c25fc10a11e4aee6774555ff54dce15f))
+* replay keyboard controls — Space play/pause, R restart, ←→ step ([ea2a0f5](https://github.com/Zxela/claude-monitor/commit/ea2a0f55f898608b4a6caa3c6e299fdee5d97985))
+* show current tool on cards, click error count to filter ([9d10e98](https://github.com/Zxela/claude-monitor/commit/9d10e9806ef71f7379ad6040c5ec88bfcfee5107))
+* visual grouping of tool calls with their results ([6adf7c6](https://github.com/Zxela/claude-monitor/commit/6adf7c6b3e6fdab7abd741fb04f307fb91cfe91d))
+
+## [1.13.0](https://github.com/Zxela/claude-monitor/compare/v1.12.1...v1.13.0) (2026-03-26)
+
+
+### Features
+
+* feed panel shows all sessions by default (multi-session mode) ([62a03de](https://github.com/Zxela/claude-monitor/commit/62a03de175d3bfa0a53ad87a3390d6ca94e3a3f8))
+
+
+### Bug Fixes
+
+* widen feed timestamp column to fit 12-hour AM/PM format ([d558a3d](https://github.com/Zxela/claude-monitor/commit/d558a3de5e4310ed2d9b6b6658a15b63e9b7e7d5))
+
+## [1.12.1](https://github.com/Zxela/claude-monitor/compare/v1.12.0...v1.12.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* topbar matches old design — segmented layout, flash animation ([569fa13](https://github.com/Zxela/claude-monitor/commit/569fa137df5fdcec6de959f8716a6894d1dd6e2d))
+
+## [1.12.0](https://github.com/Zxela/claude-monitor/compare/v1.11.0...v1.12.0) (2026-03-26)
+
+
+### Features
+
+* add OpenAPI spec, comprehensive API tests, --swagger flag ([cd7ef82](https://github.com/Zxela/claude-monitor/commit/cd7ef8247cb911103b249f3e52c1dc9f552a172b))
+
+## [1.11.0](https://github.com/Zxela/claude-monitor/compare/v1.10.7...v1.11.0) (2026-03-26)
+
+
+### Features
+
+* hide idle subagents from active panel after 5 minutes ([ed2b9af](https://github.com/Zxela/claude-monitor/commit/ed2b9afb11384bea637eabe27d6619b2d3538a0d))
+* idle subagent toggle, stop committing build assets ([38a4a38](https://github.com/Zxela/claude-monitor/commit/38a4a38720aadb3f2fb8050a302cfa6ac033ee74))
+
+## [1.10.7](https://github.com/Zxela/claude-monitor/compare/v1.10.6...v1.10.7) (2026-03-26)
+
+
+### Bug Fixes
+
+* strip [hook:X] and [tool: X] prefixes from content, fix expand ([fc2507b](https://github.com/Zxela/claude-monitor/commit/fc2507b38694c83b313bf46f9ff2bc30293172af))
+
+## [1.10.6](https://github.com/Zxela/claude-monitor/compare/v1.10.5...v1.10.6) (2026-03-26)
+
+
+### Bug Fixes
+
+* move expand button inline after truncated text ([ee66907](https://github.com/Zxela/claude-monitor/commit/ee66907fe5fbafae87698ab345516242631f0710))
+
+## [1.10.5](https://github.com/Zxela/claude-monitor/compare/v1.10.4...v1.10.5) (2026-03-26)
+
+
+### Bug Fixes
+
+* feed entry format, scrollbars, expanded code blocks ([31fc169](https://github.com/Zxela/claude-monitor/commit/31fc16975d2c5013950e61692094f6bf265b613e))
+
+## [1.10.4](https://github.com/Zxela/claude-monitor/compare/v1.10.3...v1.10.4) (2026-03-26)
+
+
+### Bug Fixes
+
+* match old design polish — card accents, feed animations, statusbar ([5a015c5](https://github.com/Zxela/claude-monitor/commit/5a015c559b1f352dfb72be4c6beb98623b3c6a99))
+
+## [1.10.3](https://github.com/Zxela/claude-monitor/compare/v1.10.2...v1.10.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* sessions panel border-right extends full height when groups collapsed ([f2dd46e](https://github.com/Zxela/claude-monitor/commit/f2dd46e96611af5e2eaa39abb707d6f2fa51cceb))
+
+## [1.10.2](https://github.com/Zxela/claude-monitor/compare/v1.10.1...v1.10.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* address code review — shared utils, perf, broken chevron ([7a20448](https://github.com/Zxela/claude-monitor/commit/7a20448821fbb8ad24c1edc6f850182175ef3041))
+
+## [1.10.1](https://github.com/Zxela/claude-monitor/compare/v1.10.0...v1.10.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* restore visual density, Active/Recent/All filter, colored feed pills ([474a3b7](https://github.com/Zxela/claude-monitor/commit/474a3b71ccb04e9cf9745779cd5e3391912e9e37))
+
+## [1.10.0](https://github.com/Zxela/claude-monitor/compare/v1.9.1...v1.10.0) (2026-03-26)
+
+
+### Features
+
+* start time groups collapsed by default ([88bad34](https://github.com/Zxela/claude-monitor/commit/88bad340e99b27d2163ca2b043375d0e829a33c5))
+
+## [1.9.1](https://github.com/Zxela/claude-monitor/compare/v1.9.0...v1.9.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* restore old HTML styling, subagent nesting, and collapse state ([4665716](https://github.com/Zxela/claude-monitor/commit/46657164e8ed03b2d6c661440628aeaf957c04ee))
+
+## [1.9.0](https://github.com/Zxela/claude-monitor/compare/v1.8.0...v1.9.0) (2026-03-26)
+
+
+### Features
+
+* add Makefile for unified build commands ([eb29e80](https://github.com/Zxela/claude-monitor/commit/eb29e809624639e487778c8b8b3639b5da9ab035))
+
+## [1.8.0](https://github.com/Zxela/claude-monitor/compare/v1.7.7...v1.8.0) (2026-03-26)
+
+
+### Features
+
+* add /api/projects endpoint ([b844d04](https://github.com/Zxela/claude-monitor/commit/b844d0458ee183ea9b2c204143df271ad7e1c2d0))
+* add /api/sessions/grouped endpoint with time buckets ([195fdba](https://github.com/Zxela/claude-monitor/commit/195fdbab5e5b4283f761ac29ad7f8eac317ed257))
+* add /api/version endpoint ([85fe021](https://github.com/Zxela/claude-monitor/commit/85fe02144ba0dc5601b15a89341f62b8bef6d8dc))
+* add budget popover with localStorage persistence ([54b4acb](https://github.com/Zxela/claude-monitor/commit/54b4acb6f73d040b08b1555d9f0ca2a1d6db591e))
+* add Canvas 2D force-directed graph view ([787e0ad](https://github.com/Zxela/claude-monitor/commit/787e0ad0bea28c5a952914fad2098a5b41ab2d16))
+* add centralized state management module ([4a4a052](https://github.com/Zxela/claude-monitor/commit/4a4a052960869ff6ef5ed16224fcb6b0e6953778))
+* add feed entry and replay styles ([654ba68](https://github.com/Zxela/claude-monitor/commit/654ba689b179c0abefbd221b5df2c25b361ab501))
+* add feed, replay, and budget state fields ([b1cbd94](https://github.com/Zxela/claude-monitor/commit/b1cbd9414deb735b2257c7e7ffb28621aa4702c6))
+* add help overlay with keyboard shortcuts ([143cbc9](https://github.com/Zxela/claude-monitor/commit/143cbc99412b43cadc71c0809cc49ceca3a0e907))
+* add history view with sortable columns ([5a7d6a0](https://github.com/Zxela/claude-monitor/commit/5a7d6a00da4cdbc65addc55986a276b95075138d))
+* add install script with macOS quarantine fix ([5ac05c0](https://github.com/Zxela/claude-monitor/commit/5ac05c0de3c902acc5994e499f0fc797595ab1f2))
+* add live feed panel with type filters ([dea75f4](https://github.com/Zxela/claude-monitor/commit/dea75f43535ebc17d4c259e4bbc6ac71a4883a65))
+* add projectName to search results ([fe11ddf](https://github.com/Zxela/claude-monitor/commit/fe11ddf78d34d445448a3ce4e9e5785d400abdeb))
+* add replay panel with SSE stream and scrubber ([999b970](https://github.com/Zxela/claude-monitor/commit/999b97053d8e00fcea34098103f398fdf3b62dcd))
+* add search component with command-palette dropdown ([8670e54](https://github.com/Zxela/claude-monitor/commit/8670e54d7ff1aa37ad829e1dcaf3811662300cc5))
+* add session card component (expanded + compact variants) ([9171808](https://github.com/Zxela/claude-monitor/commit/9171808b9d77504e1ad96db3961f9841517930f5))
+* add shared message renderer for feed and replay ([0ea7a11](https://github.com/Zxela/claude-monitor/commit/0ea7a1185e49986512036b12bdc28ec0de86ff7c))
+* add sortable table view ([d640f79](https://github.com/Zxela/claude-monitor/commit/d640f798b4ec04564c4afe90b0ba6da5d621ea69))
+* add styles for graph, table, history, budget, and help ([4d9eeb7](https://github.com/Zxela/claude-monitor/commit/4d9eeb7db7ce0e6996580c29e86d4c831256a260))
+* add time-grouped session list component ([4e04cac](https://github.com/Zxela/claude-monitor/commit/4e04cacb10a2994ad954eca4e8483ee7cc4a19e3))
+* add top bar component with stats and search ([37702f8](https://github.com/Zxela/claude-monitor/commit/37702f81ac6bd313c6dcd3dad6e570a8f3f46c34))
+* add TypeScript types and API client ([3b76ab4](https://github.com/Zxela/claude-monitor/commit/3b76ab46d2bad6ef53ab3d04a641e56bf74a4e3a))
+* add version variable and --version flag ([f334778](https://github.com/Zxela/claude-monitor/commit/f3347785ddab6a3d57c8e93510611f61ee49ec58))
+* add WebSocket client with auto-reconnect ([95a5ecd](https://github.com/Zxela/claude-monitor/commit/95a5ecd73f058da6afce3aa7fee0b0f325628bcc))
+* initialize Vite + TypeScript frontend scaffold ([02d35ca](https://github.com/Zxela/claude-monitor/commit/02d35cac43997b765465e55cf62274bc3dc2fa2c))
+* wire all components into main entry point ([d08f490](https://github.com/Zxela/claude-monitor/commit/d08f490b61dfa644e9b5dde28b3a58a238a59b84))
+* wire feed, replay, graph, table, history, budget, help into main ([c4343e4](https://github.com/Zxela/claude-monitor/commit/c4343e4caac97ae2fd196c25c9a8baa9a3915c0e))
+
+
+### Bug Fixes
+
+* topbar stats not updating on initial load, search dropdown z-index ([12df3fc](https://github.com/Zxela/claude-monitor/commit/12df3fce28797a5769ef1c521133808f39e72314))
+* use go-version-file, add CGO_ENABLED=0, compress release assets ([8d7e4f3](https://github.com/Zxela/claude-monitor/commit/8d7e4f3d5361da185216cd5637411f4425af0cda))
+
 ## [1.7.7](https://github.com/Zxela/claude-monitor/compare/v1.7.6...v1.7.7) (2026-03-23)
 
 

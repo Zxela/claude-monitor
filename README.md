@@ -1,63 +1,165 @@
-# claude-monitor
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25" />
+  <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white" alt="Vite" />
+  <a href="https://github.com/Zxela/claude-monitor/actions/workflows/ci.yml"><img src="https://github.com/Zxela/claude-monitor/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/Zxela/claude-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/Zxela/claude-monitor?color=green" alt="Release" /></a>
+  <img src="https://img.shields.io/github/license/Zxela/claude-monitor" alt="License" />
+</p>
 
-A real-time observability dashboard for Claude Code sessions — live cost tracking, session status, tool execution feeds, cross-session search, and agent dependency visualization.
+<h1 align="center">claude-monitor</h1>
 
-## Features
+<p align="center">
+  Real-time observability dashboard for <a href="https://claude.com/claude-code">Claude Code</a> sessions.<br/>
+  Live cost tracking, agent hierarchy, tool execution feeds, session replay, and more.
+</p>
 
-### Core Monitoring
-- **Live session tracking** — watches `.claude/projects/` JSONL files via fsnotify + polling
-- **Historical bootstrap** — reads full session history on startup for immediate stats
-- **Model-specific pricing** — accurate cost for Opus, Sonnet, and Haiku models
-- **Session status** — real-time status tracking: thinking, tool_use, waiting, idle
-- **Docker auto-discovery** — finds `.claude` mounts in running containers automatically
+---
 
-### Dashboard
-- **Session cards** with animated pixel sprites, status badges, cost rate, and model info
-- **Session filtering** — Active / Recent (4h) / All views with live counts
-- **Collapsible subagent hierarchy** — parent sessions expand to show child agents
-- **Keyboard shortcuts** — press `?` for help (`/` search, `g` graph, `1`/`2`/`3` filters)
+<p align="center">
+  <img src="docs/screenshots/feed.png" alt="Claude Monitor — live feed with active agents" width="100%" />
+</p>
 
-### Live Feed
-- **Color-coded event stream** — user, assistant, tool calls, tool results, hooks
-- **Feed type filters** — toggle visibility of each message type
-- **Tool call details** — shows file paths, commands, search patterns, agent/skill names
-- **Expandable content** — click `[+]` to reveal full tool output
-- **Recent message loading** — click a session to immediately see its last 50 messages
-- **Tool call + result grouping** — visual pairing of tool invocations with their results
-
-### Visualizations
-- **Session timeline / waterfall** — horizontal color-coded segments showing conversation flow
-- **Agent dependency graph** — interactive force-directed node diagram of parent/child relationships
-- **Inline pixel sprites** — animated characters in each session card reflecting status
-
-### Analytics
-- **Per-session metrics** — cost, tokens, cache hit %, message count, cost rate ($/min), duration
-- **Global stats** — active count, total spend, active session cost, weighted cache hit %
-- **Budget alerts** — configurable spend threshold with visual warning
-- **Cross-session search** — full-text search across all session content
-
-## Quick Start
+## Install
 
 ```bash
-# Build
-go build -o claude-monitor ./cmd/claude-monitor
+curl -fsSL https://raw.githubusercontent.com/Zxela/claude-monitor/main/install.sh | sh
+```
 
-# Run (watches ~/.claude, auto-discovers Docker containers)
-./claude-monitor
+Or build from source:
+
+```bash
+git clone https://github.com/Zxela/claude-monitor.git
+cd claude-monitor
+make build
+```
+
+## Usage
+
+```bash
+# Start (watches ~/.claude, auto-discovers Docker containers)
+claude-monitor
 
 # Open dashboard
 open http://localhost:7700
 
-# Watch additional paths
-./claude-monitor --watch /custom/.claude/projects
+# Custom port + additional watch paths
+claude-monitor --port 8080 --watch /path/to/.claude/projects
+
+# Enable Swagger UI
+claude-monitor --swagger
+# Then visit http://localhost:7700/swagger
 ```
+
+## Configuration
+
+### Update Notifications
+
+On startup, claude-monitor checks GitHub for newer releases. If an update is available, a banner appears in the web UI with a link to the release page.
+
+To disable the update check:
+
+```bash
+CLAUDE_MONITOR_NO_UPDATE_CHECK=1 claude-monitor
+```
+
+## Features
+
+### Session Monitoring
+
+- **Live session tracking** via fsnotify + polling of `.claude/projects/` JSONL files
+- **Model-specific pricing** for Opus ($15/$75), Sonnet ($3/$15), Haiku ($0.80/$4)
+- **Real-time status** tracking: thinking, tool_use, waiting, idle
+- **Docker auto-discovery** of `.claude` mounts in running containers
+- **Budget alerts** with configurable threshold and browser notifications
+
+### Dashboard
+
+<table>
+<tr><td width="50%">
+
+**Session Panel**
+- Time-grouped sessions: Active Now, Last Hour, Today, Yesterday, This Week, Older
+- Active/Recent/All filter tabs with counts
+- Collapsible subagent hierarchy with idle toggle
+- Current tool display on active cards
+- Click error count to filter feed to errors
+
+</td><td width="50%">
+
+**Live Feed**
+- Color-coded event stream (user, assistant, tool, result, hook, error)
+- Type filter toggles with shift+click solo mode
+- Tool call + result visual grouping
+- Expandable content with code-block styling
+- Multi-session mode by default, single-session on click
+
+</td></tr>
+</table>
+
+<details>
+<summary><strong>Dashboard Overview</strong> — click to expand</summary>
+<img src="docs/screenshots/dashboard.png" alt="Dashboard" width="100%" />
+</details>
+
+<details>
+<summary><strong>Search</strong> — click to expand</summary>
+<img src="docs/screenshots/search.png" alt="Search" width="100%" />
+</details>
+
+### Views
+
+| View | Shortcut | Description |
+|------|----------|-------------|
+| **List** | default | Session cards + live feed |
+| **Graph** | `g` | Force-directed agent dependency graph (Canvas 2D) |
+| **Table** | `t` | Dense sortable comparison table of all sessions |
+| **History** | `h` | SQLite-backed table of completed sessions |
+| **Timeline** | click | Horizontal waterfall of events with zoom/pan |
+| **Replay** | click | Session replay with scrubber, speed control, SSE stream |
+
+<details>
+<summary><strong>Graph View</strong> — click to expand</summary>
+<img src="docs/screenshots/graph.png" alt="Graph View" width="100%" />
+</details>
+
+<details>
+<summary><strong>Table View</strong> — click to expand</summary>
+<img src="docs/screenshots/table.png" alt="Table View" width="100%" />
+</details>
+
+<details>
+<summary><strong>History View</strong> — click to expand</summary>
+<img src="docs/screenshots/history.png" alt="History View" width="100%" />
+</details>
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `/` | Focus search |
+| `Esc` | Clear search / deselect / close |
+| `↑` `↓` | Navigate sessions |
+| `Enter` | Select focused session |
+| `←` `→` | Collapse / expand subagents |
+| `1` `2` `3` | Active / Recent / All filter |
+| `g` `h` `t` | Graph / History / Table view |
+| `?` | Help overlay |
+| `Space` | Replay: play / pause |
+| `R` | Replay: restart |
+
+### Analytics
+
+- **Per-session**: cost, tokens, cache hit %, messages, errors, cost rate ($/min), duration
+- **Global stats**: active count, total spend, working agents, weighted cache %, aggregate $/min
+- **Cross-session search** with highlighted results grouped by session
+- **Session history** persisted to SQLite for historical analysis
 
 ## Docker
 
 ```bash
 docker build -t claude-monitor .
 
-# Mount your .claude directories read-only
 docker run \
   -v ~/.claude:/home/node/.claude:ro \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
@@ -65,55 +167,79 @@ docker run \
   claude-monitor
 ```
 
-> **Security:** Always bind to `127.0.0.1` only. The dashboard shows all session content including tool inputs/outputs.
+> **Security:** Always bind to `127.0.0.1`. The dashboard exposes all session content including tool inputs/outputs.
 
 ## Architecture
 
 ```
-JSONL files (fsnotify + polling) --> parser --> session store
-                                                    |
-Docker containers (auto-discovery) -+               |
-                                                    v
-                                    WebSocket hub --> browser
-                                         |
-                                    REST API
-                                    /api/sessions
-                                    /api/sessions/{id}/recent
-                                    /api/sessions/{id}/replay
-                                    /api/search?q=...
+JSONL files ─────────┐
+  (fsnotify + poll)  │
+                     ├──> Parser ──> Session Store ──> WebSocket Hub ──> Browser
+Docker containers ───┘                    │
+  (auto-discovery)                        │
+                                     REST API ──> SQLite History
+```
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend | Go 1.25, stdlib `net/http`, gorilla/websocket |
+| Frontend | TypeScript 5.7, Vite 6, vanilla DOM (no framework) |
+| Database | modernc.org/sqlite (pure Go, WAL mode) |
+| File watching | fsnotify + 5s polling fallback |
+| Graphs | Canvas 2D (no D3) |
+| Build | Makefile (`make build`, `make dev`, `make test`) |
+
+## API
+
+Full OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml). Enable Swagger UI with `--swagger`.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /api/version` | Server version |
+| `GET /api/sessions` | All sessions with aggregated stats |
+| `GET /api/sessions/grouped` | Sessions grouped by time bucket |
+| `GET /api/projects` | Distinct project names with counts |
+| `GET /api/search?q=&limit=` | Cross-session full-text search |
+| `GET /api/history?limit=&offset=` | Historical sessions from SQLite |
+| `GET /api/sessions/{id}/recent` | Last 50 messages for a session |
+| `GET /api/sessions/{id}/replay` | Replay manifest (all events) |
+| `GET /api/sessions/{id}/replay/stream` | SSE replay stream |
+| `POST /api/sessions/{id}/stop` | Stop Docker container |
+| `GET /ws` | WebSocket (live events) |
+| `GET /swagger` | Swagger UI (requires `--swagger`) |
+
+## Development
+
+```bash
+# Install frontend dependencies
+make install
+
+# Start Go backend + Vite dev server with hot reload
+make dev
+
+# Run all tests
+make test
+
+# Type-check frontend + Go vet
+make lint
+
+# Build production binary
+make build
 ```
 
 ## Watched Paths
 
-By default monitors:
+Default directories monitored:
 - `~/.claude/projects/`
 - `/home/node/.claude/projects/`
 - `/root/.claude/projects/`
-- Docker containers with `.claude` bind mounts (auto-detected)
+- Docker containers with `.claude` bind mounts (auto-detected via Docker socket)
 
-Add more with `--watch <path>`.
+Add more with `--watch <path>` (repeatable).
 
-## API
+## License
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /` | Dashboard |
-| `GET /ws` | WebSocket (live JSON events) |
-| `GET /api/sessions` | All sessions with stats |
-| `GET /api/sessions/{id}/recent` | Last 50 messages for a session |
-| `GET /api/sessions/{id}/replay` | Full replay manifest |
-| `GET /api/sessions/{id}/replay/stream` | SSE replay stream |
-| `GET /api/search?q=<query>` | Cross-session content search |
-| `GET /health` | Health check |
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `/` | Focus search |
-| `Esc` | Clear search / deselect session |
-| `1` | Active sessions filter |
-| `2` | Recent sessions filter |
-| `3` | All sessions filter |
-| `g` | Toggle graph view |
-| `?` | Show help overlay |
+MIT

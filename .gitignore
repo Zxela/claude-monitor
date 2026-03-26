@@ -14,3 +14,10 @@
 .DS_Store
 Thumbs.db
 .claude/worktrees/
+.superpowers/
+
+web/node_modules/
+web/dist/
+
+# Vite build output (generated at build time, not committed)
+cmd/claude-monitor/static/

@@ -484,6 +484,7 @@ func TestComputeCost_ByModel(t *testing.T) {
 		{"opus", "claude-opus-4-6", 15.0 + 75.0 + 1.50 + 18.75},
 		{"sonnet", "claude-sonnet-4-6", 3.0 + 15.0 + 0.30 + 3.75},
 		{"haiku", "claude-haiku-4-5", 0.80 + 4.0 + 0.08 + 1.0},
+		{"haiku versioned", "claude-haiku-4-5-20251001", 0.80 + 4.0 + 0.08 + 1.0},
 		{"unknown falls back to sonnet", "claude-unknown-99", 3.0 + 15.0 + 0.30 + 3.75},
 	}
 

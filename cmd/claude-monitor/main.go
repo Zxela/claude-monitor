@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,8 +27,14 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/replay"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store"
+	"github.com/zxela-claude/claude-monitor/internal/store/migrations"
+	"github.com/zxela-claude/claude-monitor/internal/update"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
+	_ "modernc.org/sqlite"
 )
+
+// version is set by -ldflags at build time.
+var version = "dev"
 
 //go:embed static
 var staticFiles embed.FS
@@ -45,6 +53,77 @@ func (r *repeatable) String() string { return fmt.Sprintf("%v", *r) }
 func (r *repeatable) Set(v string) error {
 	*r = append(*r, v)
 	return nil
+}
+
+func handleMigrate(args []string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("cannot determine home directory: %v", err)
+	}
+	dbPath := filepath.Join(homeDir, ".claude-monitor", "history.db")
+
+	// Ensure directory exists.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		log.Fatalf("cannot create data directory: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		log.Fatalf("cannot open database: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		log.Fatalf("cannot set WAL mode: %v", err)
+	}
+
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	switch sub {
+	case "", "up":
+		applied, err := migrations.RunUp(db)
+		if err != nil {
+			log.Fatalf("migration failed: %v", err)
+		}
+		if applied == 0 {
+			current, _, _, _ := migrations.Status(db)
+			fmt.Printf("Schema version: %d (up to date)\n", current)
+		} else {
+			current, _, _, _ := migrations.Status(db)
+			fmt.Printf("Applied %d migration(s). Schema version: %d (up to date)\n", applied, current)
+		}
+
+	case "status":
+		current, latest, pending, err := migrations.Status(db)
+		if err != nil {
+			log.Fatalf("cannot read status: %v", err)
+		}
+		fmt.Printf("Database: %s\n", dbPath)
+		fmt.Printf("Schema version: %d (latest: %d)\n", current, latest)
+		if len(pending) > 0 {
+			fmt.Println("Pending migrations:")
+			for _, name := range pending {
+				fmt.Printf("  - %s\n", name)
+			}
+		} else {
+			fmt.Println("No pending migrations.")
+		}
+
+	case "rollback":
+		name, err := migrations.RunDown(db)
+		if err != nil {
+			log.Fatalf("rollback failed: %v", err)
+		}
+		current, _, _, _ := migrations.Status(db)
+		fmt.Printf("Rolled back: %s\nSchema version: %d\n", name, current)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown migrate command: %s\nUsage: claude-monitor migrate [status|rollback]\n", sub)
+		os.Exit(1)
+	}
 }
 
 // parentSessionIDFromPath extracts the parent session ID from a subagent JSONL
@@ -76,15 +155,46 @@ func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request
 	return sess, true
 }
 
+const swaggerHTML = `<!DOCTYPE html>
+<html><head>
+<title>Claude Monitor API</title>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+  url: '/swagger/openapi.yaml',
+  dom_id: '#swagger-ui',
+  presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+  layout: "BaseLayout"
+});
+</script>
+</body></html>`
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(os.Stderr)
 
 	port := flag.Int("port", 7700, "HTTP listen port")
+	bind := flag.String("bind", "127.0.0.1", "address to bind to (use 0.0.0.0 for all interfaces)")
 	var extraPaths repeatable
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
+	swaggerEnabled := flag.Bool("swagger", false, "serve Swagger UI at /swagger")
+	// Handle --version before any other initialization.
+	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Printf("claude-monitor %s\n", version)
+		os.Exit(0)
+	}
+
+	// Handle 'migrate' subcommand before flag.Parse().
+	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
+		handleMigrate(os.Args[2:])
+		return
+	}
+
 	flag.Parse()
 
 	// Auto-enable Docker discovery if the socket exists and --docker wasn't explicitly set.
@@ -114,6 +224,8 @@ func main() {
 	defer historyDB.Close()
 
 	// Track which sessions were previously active for inactivity transition detection.
+	// mu protects prevActive and savedToHistory from concurrent goroutine access.
+	var mu sync.Mutex
 	prevActive := make(map[string]bool)
 
 	w, err := watcher.New([]string(extraPaths))
@@ -285,6 +397,29 @@ func main() {
 
 	// Start hub and watcher.
 	go h.Run()
+
+	// Check for updates in the background (non-blocking).
+	if os.Getenv("CLAUDE_MONITOR_NO_UPDATE_CHECK") != "1" && os.Getenv("CLAUDE_MONITOR_NO_UPDATE_CHECK") != "true" {
+		go func() {
+			rel, err := update.CheckLatest(version)
+			if err != nil {
+				log.Printf("update check: %v", err)
+				return
+			}
+			if rel != nil {
+				log.Printf("update available: %s (current: %s) — %s", rel.Version, version, rel.URL)
+				payload, err := json.Marshal(map[string]string{
+					"event":   "update_available",
+					"version": rel.Version,
+					"url":     rel.URL,
+				})
+				if err == nil {
+					h.Broadcast(payload)
+				}
+			}
+		}()
+	}
+
 	events := w.Start(ctx)
 
 	var dc *docker.Client
@@ -308,6 +443,28 @@ func main() {
 		}
 	}
 
+	// Immediately persist all inactive sessions from bootstrap to history DB.
+	savedToHistory := make(map[string]bool)
+	mu.Lock()
+	{
+		saved := 0
+		for _, sess := range sessionStore.All() {
+			if !sess.IsActive && sess.MessageCount > 0 {
+				if err := historyDB.SaveSession(sess); err != nil {
+					log.Printf("history save error for %s: %v", sess.ID, err)
+				} else {
+					saved++
+				}
+				savedToHistory[sess.ID] = true
+			}
+			prevActive[sess.ID] = sess.IsActive
+		}
+		if saved > 0 {
+			log.Printf("persisted %d sessions to history on startup", saved)
+		}
+	}
+	mu.Unlock()
+
 	// Periodic goroutine: persist history on inactivity transitions.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -317,18 +474,28 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				mu.Lock()
 				for _, sess := range sessionStore.All() {
 					nowActive := sess.IsActive
 					wasActive := prevActive[sess.ID]
 
-					// Save to history when transitioning from active to inactive.
-					if wasActive && !nowActive {
+					// Save on active→inactive transition
+					shouldSave := wasActive && !nowActive
+					// Also save inactive sessions we haven't persisted yet
+					// (catches sessions that went inactive before this server started)
+					if !nowActive && !savedToHistory[sess.ID] && sess.MessageCount > 0 {
+						shouldSave = true
+					}
+
+					if shouldSave {
 						if err := historyDB.SaveSession(sess); err != nil {
 							log.Printf("history save error for %s: %v", sess.ID, err)
 						}
+						savedToHistory[sess.ID] = true
 					}
 					prevActive[sess.ID] = nowActive
 				}
+				mu.Unlock()
 			}
 		}
 	}()
@@ -423,6 +590,81 @@ func main() {
 		}
 	})
 
+	// Time-bucketed sessions for the new navigation UI.
+	mux.HandleFunc("/api/sessions/grouped", func(w http.ResponseWriter, r *http.Request) {
+		sessions := sessionStore.All()
+		now := time.Now()
+		hourAgo := now.Add(-1 * time.Hour)
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		yesterdayStart := todayStart.Add(-24 * time.Hour)
+		weekStart := todayStart.Add(-time.Duration(now.Weekday()) * 24 * time.Hour)
+
+		type grouped struct {
+			Active    []*session.Session `json:"active"`
+			LastHour  []*session.Session `json:"lastHour"`
+			Today     []*session.Session `json:"today"`
+			Yesterday []*session.Session `json:"yesterday"`
+			ThisWeek  []*session.Session `json:"thisWeek"`
+			Older     []*session.Session `json:"older"`
+		}
+		g := grouped{
+			Active:    []*session.Session{},
+			LastHour:  []*session.Session{},
+			Today:     []*session.Session{},
+			Yesterday: []*session.Session{},
+			ThisWeek:  []*session.Session{},
+			Older:     []*session.Session{},
+		}
+
+		for _, s := range sessions {
+			if s.IsActive {
+				g.Active = append(g.Active, s)
+				continue
+			}
+			la := s.LastActive
+			switch {
+			case la.After(hourAgo):
+				g.LastHour = append(g.LastHour, s)
+			case la.After(todayStart):
+				g.Today = append(g.Today, s)
+			case la.After(yesterdayStart):
+				g.Yesterday = append(g.Yesterday, s)
+			case la.After(weekStart):
+				g.ThisWeek = append(g.ThisWeek, s)
+			default:
+				g.Older = append(g.Older, s)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(g)
+	})
+
+	// Distinct project names with session counts.
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		sessions := sessionStore.All()
+		counts := make(map[string]int)
+		for _, s := range sessions {
+			name := s.ProjectName
+			if name == "" {
+				name = s.ProjectDir
+			}
+			counts[name]++
+		}
+
+		type projectEntry struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		}
+		result := make([]projectEntry, 0, len(counts))
+		for name, count := range counts {
+			result = append(result, projectEntry{Name: name, Count: count})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	})
+
 	// Cross-session search — searches ContentText and ToolDetail across all sessions.
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("q")
@@ -437,16 +679,30 @@ func main() {
 			limit = n
 		}
 
+		// Bound search time to prevent DoS from scanning hundreds of files.
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
 		queryLower := strings.ToLower(query)
 
 		type searchResult struct {
 			SessionID   string `json:"sessionId"`
 			SessionName string `json:"sessionName"`
+			ProjectName string `json:"projectName"`
 			parser.ParsedMessage
 		}
 
-		var results []searchResult
+		results := make([]searchResult, 0)
 		for _, sess := range sessionStore.All() {
+			// Check timeout between sessions.
+			select {
+			case <-ctx.Done():
+				break
+			default:
+			}
+			if ctx.Err() != nil {
+				break
+			}
 			if sess.FilePath == "" {
 				continue
 			}
@@ -467,6 +723,7 @@ func main() {
 					results = append(results, searchResult{
 						SessionID:     sess.ID,
 						SessionName:   displayName,
+						ProjectName:   sess.ProjectName,
 						ParsedMessage: ev.ParsedMessage,
 					})
 				}
@@ -628,13 +885,33 @@ func main() {
 		w.Write([]byte(`{"ok":true}`))
 	})
 
-	addr := fmt.Sprintf(":%d", *port)
+	// Version endpoint.
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"version": version})
+	})
+
+	// Swagger UI (opt-in via --swagger flag).
+	if *swaggerEnabled {
+		mux.HandleFunc("/swagger/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, "api/openapi.yaml")
+		})
+		mux.HandleFunc("/swagger", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(swaggerHTML))
+		})
+		log.Println("swagger UI enabled at /swagger")
+	}
+
+	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        addr,
+		Handler:     mux,
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 60 * time.Second,
+		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE
+		// streams need long-lived writes. Per-write deadlines are enforced
+		// by gorilla/websocket writeWait and http.ResponseController.
 	}
 
 	// Graceful shutdown on SIGINT / SIGTERM.
@@ -652,7 +929,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("claude-monitor listening on http://localhost%s", addr)
+	log.Printf("claude-monitor listening on http://%s", addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server error: %v", err)
 	}

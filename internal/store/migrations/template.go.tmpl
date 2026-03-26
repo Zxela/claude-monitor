@@ -1,0 +1,17 @@
+package migrations
+
+import "database/sql"
+
+func init() {
+	Register({{.Version}}, Migration{
+		Name: "{{.Name}}",
+		Up: func(db *sql.DB) error {
+			// TODO: implement up migration
+			return nil
+		},
+		Down: func(db *sql.DB) error {
+			// TODO: implement down migration
+			return nil
+		},
+	})
+}

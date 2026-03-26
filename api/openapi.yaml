@@ -1,0 +1,959 @@
+openapi: 3.0.3
+info:
+  title: claude-monitor API
+  description: >
+    REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
+    JSONL session files and broadcasts activity over WebSocket.
+  version: "1.0.0"
+
+servers:
+  - url: http://localhost:7700
+    description: Default local server
+
+tags:
+  - name: health
+    description: Health and version checks
+  - name: sessions
+    description: Live in-memory session data
+  - name: history
+    description: Persistent historical session records from SQLite
+  - name: replay
+    description: Session replay and streaming
+  - name: search
+    description: Full-text search across sessions
+  - name: projects
+    description: Project aggregations
+  - name: realtime
+    description: WebSocket real-time updates
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: Returns a simple JSON object confirming the server is running.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+              example:
+                ok: true
+
+  /api/version:
+    get:
+      tags: [health]
+      summary: Get server version
+      description: Returns the build version string set at compile time via ldflags.
+      operationId: getVersion
+      responses:
+        "200":
+          description: Version string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+              example:
+                version: "v1.2.3"
+
+  /api/sessions:
+    get:
+      tags: [sessions]
+      summary: List all live sessions
+      description: >
+        Returns a flat array of all sessions currently tracked in memory.
+        Sessions are populated from JSONL file watchers and remain until the
+        daemon is restarted.
+      operationId: listSessions
+      responses:
+        "200":
+          description: Array of sessions (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Session"
+
+  /api/sessions/grouped:
+    get:
+      tags: [sessions]
+      summary: Sessions grouped by time bucket
+      description: >
+        Returns all live sessions partitioned into six time buckets based on
+        LastActive: active (within 30 s), lastHour, today, yesterday, thisWeek,
+        and older.
+      operationId: getSessionsGrouped
+      responses:
+        "200":
+          description: Grouped sessions object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupedSessions"
+
+  /api/sessions/{id}/recent:
+    get:
+      tags: [sessions]
+      summary: Last 50 messages for a session
+      description: >
+        Reads the session's JSONL file and returns the last 50 meaningful
+        parsed events (non-empty contentText or toolName, excluding raw
+        streaming chunks).
+      operationId: getSessionRecent
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Array of up to 50 replay events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReplayEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/sessions/{id}/replay:
+    get:
+      tags: [replay]
+      summary: Replay manifest for a session
+      description: >
+        Returns the full ordered list of parsed events for the session, plus
+        the session ID. Results are cached in memory and invalidated whenever
+        new messages arrive. Suitable for driving a timeline scrubber.
+      operationId: getSessionReplay
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Replay manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayManifest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/sessions/{id}/replay/stream:
+    get:
+      tags: [replay]
+      summary: SSE replay stream
+      description: >
+        Streams replay events as Server-Sent Events (SSE). Each SSE `data`
+        field contains a JSON-encoded ReplayEvent. The stream ends with a
+        `event: done` message. Use `from` to start partway through the event
+        list and `speed` to control playback rate (1.0 = real time, 2.0 =
+        double speed, 0 = as fast as possible).
+      operationId: streamSessionReplay
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: from
+          in: query
+          description: Zero-based event index to start replay from (default 0).
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: speed
+          in: query
+          description: >
+            Playback speed multiplier. 0 or omitted means no delay between
+            events. 1.0 is real-time, 2.0 is double speed.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: SSE stream of replay events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  Newline-delimited SSE frames. Each frame is either
+                  `data: <ReplayEvent JSON>` or `event: done\ndata: {}`.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/sessions/{id}/stop:
+    post:
+      tags: [sessions]
+      summary: Stop the Docker container for a session
+      description: >
+        Sends a stop signal to the Docker container associated with this
+        session. Only applicable to sessions discovered via Docker container
+        mounts. Returns 400 if the session is not a Docker session or if
+        Docker integration is unavailable.
+      operationId: stopSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Container stopped successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+              example:
+                ok: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/history:
+    get:
+      tags: [history]
+      summary: Paginated historical sessions
+      description: >
+        Returns persisted session records from SQLite, ordered by ended_at
+        descending. Sessions are written to history when they transition from
+        active to inactive (checked every 30 seconds).
+      operationId: listHistory
+      parameters:
+        - name: limit
+          in: query
+          description: >
+            Maximum number of records to return. Clamped to 1–500.
+            Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+        - name: offset
+          in: query
+          description: Number of records to skip for pagination. Defaults to 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Array of historical session records (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/projects:
+    get:
+      tags: [projects]
+      summary: Distinct project names with session counts
+      description: >
+        Aggregates all live sessions by project name (falling back to
+        projectDir when projectName is empty) and returns each unique project
+        with its session count.
+      operationId: listProjects
+      responses:
+        "200":
+          description: Array of project entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectEntry"
+
+  /api/search:
+    get:
+      tags: [search]
+      summary: Cross-session full-text search
+      description: >
+        Searches contentText, toolDetail, and toolName across all live
+        sessions. Returns an empty array when `q` is absent or blank.
+        Results are limited to `limit` matches across all sessions combined.
+      operationId: searchSessions
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query string (case-insensitive substring match).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >
+            Maximum number of results to return. Clamped to 1–200.
+            Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Array of matching search results (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchResult"
+
+  /ws:
+    get:
+      tags: [realtime]
+      summary: WebSocket connection for real-time updates
+      description: >
+        Upgrades the HTTP connection to WebSocket. After connecting, the
+        server pushes BroadcastEvent JSON messages for every significant
+        session or message change. Clients should reconnect on disconnect.
+      operationId: connectWebSocket
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket connection established
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+components:
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      description: Session ID (matches the JSONL filename stem or the sessionId field).
+      schema:
+        type: string
+
+  responses:
+    NotFound:
+      description: Session not found
+      content:
+        text/plain:
+          schema:
+            type: string
+    BadRequest:
+      description: Bad request (e.g. session has no file path, or not a Docker session)
+      content:
+        text/plain:
+          schema:
+            type: string
+    InternalError:
+      description: Internal server error
+      content:
+        text/plain:
+          schema:
+            type: string
+
+  schemas:
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    VersionResponse:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: string
+          description: Build version string (set via ldflags at compile time).
+          example: "v1.2.3"
+
+    Session:
+      type: object
+      description: >
+        Aggregated live statistics for a single Claude Code session (one JSONL
+        file). Fields derived from parsed messages are accumulated in memory
+        and are not persisted beyond daemon restarts.
+      required:
+        - id
+        - projectDir
+        - projectName
+        - filePath
+        - totalCostUSD
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - cacheHitPct
+        - messageCount
+        - lastActive
+        - isActive
+        - startedAt
+        - status
+        - costRate
+        - errorCount
+        - taskDescription
+      properties:
+        id:
+          type: string
+          description: Session identifier (JSONL filename stem or sessionId field).
+          example: "abc123def456"
+        projectDir:
+          type: string
+          description: Raw project directory hash or path as reported by the watcher.
+          example: "-root-my-project"
+        projectName:
+          type: string
+          description: >
+            Human-readable project name. Derived from custom-title messages,
+            CWD basename, Docker container label, or projectDir as fallback.
+          example: "my-project"
+        sessionName:
+          type: string
+          description: >
+            Optional session-level name from a custom-title or agent-name
+            message. Omitted when empty.
+          example: "Refactor auth module"
+        filePath:
+          type: string
+          description: Absolute path to the JSONL session file on disk.
+          example: "/home/user/.claude/projects/-root-my-project/abc123.jsonl"
+        totalCostUSD:
+          type: number
+          format: double
+          description: Cumulative estimated cost in USD for this session.
+          example: 0.042
+        inputTokens:
+          type: integer
+          format: int64
+          description: Total input tokens consumed (excluding cache tokens).
+          example: 15000
+        outputTokens:
+          type: integer
+          format: int64
+          description: Total output tokens generated.
+          example: 3200
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Total prompt cache read tokens.
+          example: 8000
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Total prompt cache creation tokens.
+          example: 2000
+        cacheHitPct:
+          type: number
+          format: double
+          description: >
+            Cache hit percentage: cacheReadTokens / (inputTokens +
+            cacheReadTokens + cacheCreationTokens) * 100.
+          example: 32.0
+        messageCount:
+          type: integer
+          description: >
+            Number of unique conversation messages (user + assistant turns).
+            Streaming duplicates are deduplicated by messageId.
+          example: 24
+        lastActive:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp of the most recent parsed message.
+          example: "2026-03-25T14:05:00Z"
+        isActive:
+          type: boolean
+          description: >
+            True when lastActive is within the last 30 seconds.
+          example: true
+        startedAt:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp of the earliest parsed message in the session.
+          example: "2026-03-25T13:50:00Z"
+        status:
+          type: string
+          description: >
+            Current session status. One of: `idle`, `thinking`, `tool_use`,
+            `waiting`. Set to `idle` automatically when isActive becomes false.
+          enum: [idle, thinking, tool_use, waiting]
+          example: "thinking"
+        parentId:
+          type: string
+          description: >
+            Session ID of the parent session when this is a subagent session.
+            Omitted for top-level sessions.
+          example: "parentSession123"
+        children:
+          type: array
+          description: Session IDs of subagent sessions spawned by this session.
+          items:
+            type: string
+          example: ["agent-abc", "agent-def"]
+        cwd:
+          type: string
+          description: Working directory extracted from the first CWD-bearing message.
+          example: "/root/my-project"
+        gitBranch:
+          type: string
+          description: Git branch name extracted from session messages.
+          example: "feature/auth-refactor"
+        model:
+          type: string
+          description: Claude model identifier used in this session.
+          example: "claude-sonnet-4-6"
+        costRate:
+          type: number
+          format: double
+          description: >
+            Estimated cost rate in USD per minute. Non-zero only for active
+            sessions after at least one minute of runtime.
+          example: 0.003
+        errorCount:
+          type: integer
+          description: Number of tool_result messages with is_error set.
+          example: 2
+        isSubagent:
+          type: boolean
+          description: True when this session is a subagent of another session.
+          example: false
+        taskDescription:
+          type: string
+          description: >
+            First 200 characters of the first user message, used as a task
+            summary.
+          example: "Refactor the authentication module to use JWT tokens"
+
+    GroupedSessions:
+      type: object
+      description: >
+        Sessions partitioned into six time buckets. Active sessions are those
+        with isActive=true. Inactive sessions are bucketed by lastActive
+        relative to the server's current time.
+      required: [active, lastHour, today, yesterday, thisWeek, older]
+      properties:
+        active:
+          type: array
+          description: Sessions with isActive=true (lastActive within 30 seconds).
+          items:
+            $ref: "#/components/schemas/Session"
+        lastHour:
+          type: array
+          description: Inactive sessions with lastActive within the past hour.
+          items:
+            $ref: "#/components/schemas/Session"
+        today:
+          type: array
+          description: Inactive sessions active since midnight today (but not within last hour).
+          items:
+            $ref: "#/components/schemas/Session"
+        yesterday:
+          type: array
+          description: Inactive sessions active during yesterday.
+          items:
+            $ref: "#/components/schemas/Session"
+        thisWeek:
+          type: array
+          description: Inactive sessions active during the current week (since last Sunday).
+          items:
+            $ref: "#/components/schemas/Session"
+        older:
+          type: array
+          description: Inactive sessions older than the current week.
+          items:
+            $ref: "#/components/schemas/Session"
+
+    HistoryRow:
+      type: object
+      description: >
+        A persisted record of a completed session stored in SQLite. Written
+        when a session transitions from active to inactive.
+      required:
+        - id
+        - projectName
+        - sessionName
+        - totalCost
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - messageCount
+        - errorCount
+        - startedAt
+        - endedAt
+        - durationSeconds
+        - model
+        - cwd
+        - gitBranch
+        - taskDescription
+      properties:
+        id:
+          type: string
+          description: Session identifier.
+          example: "abc123def456"
+        projectName:
+          type: string
+          description: Human-readable project name at time of persistence.
+          example: "my-project"
+        sessionName:
+          type: string
+          description: Session name (custom title or agent name) at time of persistence.
+          example: "Refactor auth module"
+        totalCost:
+          type: number
+          format: double
+          description: Total estimated USD cost for the session.
+          example: 0.042
+        inputTokens:
+          type: integer
+          format: int64
+          description: Total input tokens consumed.
+          example: 15000
+        outputTokens:
+          type: integer
+          format: int64
+          description: Total output tokens generated.
+          example: 3200
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Total prompt cache read tokens.
+          example: 8000
+        messageCount:
+          type: integer
+          description: Total number of unique conversation messages.
+          example: 24
+        errorCount:
+          type: integer
+          description: Number of errored tool results.
+          example: 2
+        startedAt:
+          type: string
+          description: RFC3339 timestamp of session start (empty string if unknown).
+          example: "2026-03-25T13:50:00Z"
+        endedAt:
+          type: string
+          description: RFC3339 timestamp when the session became inactive (empty string if unknown).
+          example: "2026-03-25T14:05:00Z"
+        durationSeconds:
+          type: number
+          format: double
+          description: Session duration in seconds (endedAt - startedAt). 0 if either timestamp is unknown.
+          example: 900.0
+        model:
+          type: string
+          description: Claude model identifier used in the session.
+          example: "claude-sonnet-4-6"
+        cwd:
+          type: string
+          description: Working directory for the session.
+          example: "/root/my-project"
+        gitBranch:
+          type: string
+          description: Git branch name during the session.
+          example: "feature/auth-refactor"
+        taskDescription:
+          type: string
+          description: First 200 characters of the first user message.
+          example: "Refactor the authentication module to use JWT tokens"
+
+    ParsedMessage:
+      type: object
+      description: >
+        Normalised representation of a single JSONL line from a Claude Code
+        session file. Produced by the parser package.
+      required:
+        - type
+        - role
+        - contentText
+        - costUSD
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - timestamp
+        - sessionId
+        - uuid
+      properties:
+        type:
+          type: string
+          description: >
+            Message type from the raw JSONL. Common values: `assistant`,
+            `user`, `human`, `progress`, `system`, `summary`,
+            `custom-title`, `agent-name`, `file-history-snapshot`.
+          example: "assistant"
+        messageId:
+          type: string
+          description: Anthropic message ID from the inner message object. Omitted when absent.
+          example: "msg_01XyzAbc"
+        role:
+          type: string
+          description: Speaker role. One of `assistant`, `user`, or empty for metadata lines.
+          example: "assistant"
+        contentText:
+          type: string
+          description: >
+            Extracted plain-text preview of the message content, truncated to
+            200 characters. For tool calls: `[tool: ToolName]`. For hooks:
+            `[hook:EventName] HookTool`.
+          example: "I'll refactor the auth module to use JWT tokens."
+        fullContent:
+          type: string
+          description: >
+            Full untruncated content when contentText was truncated, or the
+            pretty-printed JSON input for tool_use blocks. Omitted when not
+            applicable.
+          example: "I'll refactor the auth module to use JWT tokens. First, let me..."
+        toolName:
+          type: string
+          description: Name of the tool called (e.g. `Bash`, `Read`, `Agent`). Omitted when not a tool call.
+          example: "Bash"
+        costUSD:
+          type: number
+          format: double
+          description: Estimated cost in USD for this message's token usage.
+          example: 0.003
+        inputTokens:
+          type: integer
+          format: int64
+          description: Input tokens for this message.
+          example: 1200
+        outputTokens:
+          type: integer
+          format: int64
+          description: Output tokens for this message.
+          example: 350
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Cache read tokens for this message.
+          example: 800
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Cache creation tokens for this message.
+          example: 0
+        timestamp:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp from the JSONL line.
+          example: "2026-03-25T14:00:00Z"
+        sessionId:
+          type: string
+          description: Session ID embedded in the JSONL line.
+          example: "abc123def456"
+        uuid:
+          type: string
+          description: Per-message UUID from the JSONL line.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        parentUuid:
+          type: string
+          description: UUID of the parent message (for branched conversations). Omitted when absent.
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        cwd:
+          type: string
+          description: Working directory at message time. Omitted when absent.
+          example: "/root/my-project"
+        gitBranch:
+          type: string
+          description: Git branch at message time. Omitted when absent.
+          example: "feature/auth-refactor"
+        model:
+          type: string
+          description: Model identifier. Omitted when absent.
+          example: "claude-sonnet-4-6"
+        isSidechain:
+          type: boolean
+          description: True when the message belongs to a subagent sidechain. Omitted when false.
+          example: false
+        stopReason:
+          type: string
+          description: >
+            Model stop reason: `end_turn`, `tool_use`, or empty. Omitted when
+            absent.
+          example: "end_turn"
+        hookEvent:
+          type: string
+          description: Hook event name (e.g. `PostToolUse`) for progress/hook messages. Omitted when absent.
+          example: "PostToolUse"
+        hookName:
+          type: string
+          description: Full hook name string (e.g. `PostToolUse:Read`). Omitted when absent.
+          example: "PostToolUse:Read"
+        toolDetail:
+          type: string
+          description: >
+            Additional context for tool calls: file path for Read/Write/Edit,
+            command description for Bash, pattern for Grep/Glob, agent name
+            for Agent, skill name for Skill. Omitted when absent.
+          example: "/root/my-project/auth.go"
+        isAgent:
+          type: boolean
+          description: True when toolName is `Agent`. Omitted when false.
+          example: false
+        toolUseId:
+          type: string
+          description: ID of the first tool_use content block in this message. Omitted when absent.
+          example: "toolu_01AbcDef"
+        toolUseIds:
+          type: array
+          description: >
+            IDs of all tool_use blocks when a message contains multiple
+            batched tool calls. Omitted for single-tool or non-tool messages.
+          items:
+            type: string
+          example: ["toolu_01AbcDef", "toolu_02GhiJkl"]
+        forToolUseId:
+          type: string
+          description: >
+            For tool_result messages: the tool_use_id this result responds to.
+            Omitted when absent.
+          example: "toolu_01AbcDef"
+        isError:
+          type: boolean
+          description: True when this is a tool_result with is_error set or error content. Omitted when false.
+          example: false
+
+    ReplayEvent:
+      type: object
+      description: >
+        A ParsedMessage augmented with a zero-based index representing its
+        position in the session's JSONL file. Used in replay endpoints.
+      allOf:
+        - $ref: "#/components/schemas/ParsedMessage"
+        - type: object
+          required: [index]
+          properties:
+            index:
+              type: integer
+              description: Zero-based position of this event within the session file.
+              example: 42
+
+    ReplayManifest:
+      type: object
+      description: Full ordered event list for a session, used to drive a replay scrubber.
+      required: [sessionId, events]
+      properties:
+        sessionId:
+          type: string
+          description: Session ID this manifest belongs to.
+          example: "abc123def456"
+        events:
+          type: array
+          description: All events in chronological order.
+          items:
+            $ref: "#/components/schemas/ManifestEvent"
+
+    ManifestEvent:
+      type: object
+      description: >
+        Lightweight event summary included in the replay manifest. Contains
+        only the fields needed for timeline rendering and scrubbing.
+      required:
+        - index
+        - timestamp
+        - type
+        - role
+        - contentText
+        - costUSD
+      properties:
+        index:
+          type: integer
+          description: Zero-based event position.
+          example: 42
+        timestamp:
+          type: string
+          format: date-time
+          description: RFC3339 event timestamp.
+          example: "2026-03-25T14:00:00Z"
+        type:
+          type: string
+          description: Message type (e.g. `assistant`, `user`).
+          example: "assistant"
+        role:
+          type: string
+          description: Speaker role.
+          example: "assistant"
+        contentText:
+          type: string
+          description: Truncated plain-text content preview.
+          example: "I'll refactor the auth module."
+        toolName:
+          type: string
+          description: Tool name for tool_use messages. Omitted when absent.
+          example: "Bash"
+        costUSD:
+          type: number
+          format: double
+          description: Estimated cost in USD for this event.
+          example: 0.003
+
+    SearchResult:
+      type: object
+      description: >
+        A matching message from a cross-session search. Embeds all
+        ParsedMessage fields plus session-level context fields.
+      allOf:
+        - $ref: "#/components/schemas/ParsedMessage"
+        - type: object
+          required: [sessionId, sessionName, projectName]
+          properties:
+            sessionId:
+              type: string
+              description: Session ID that contains this message.
+              example: "abc123def456"
+            sessionName:
+              type: string
+              description: >
+                Display name for the session (sessionName if set, otherwise
+                projectName).
+              example: "Refactor auth module"
+            projectName:
+              type: string
+              description: Project name for the containing session.
+              example: "my-project"
+
+    ProjectEntry:
+      type: object
+      description: A distinct project with its live session count.
+      required: [name, count]
+      properties:
+        name:
+          type: string
+          description: >
+            Project name (from projectName, falling back to projectDir when
+            projectName is empty).
+          example: "my-project"
+        count:
+          type: integer
+          description: Number of live sessions belonging to this project.
+          example: 3
+
+    BroadcastEvent:
+      type: object
+      description: >
+        WebSocket message envelope pushed to all connected clients on every
+        significant session or message change.
+      required: [event, session]
+      properties:
+        event:
+          type: string
+          description: >
+            Event type. `session_new` on first message for a session,
+            `message` for subsequent updates.
+          enum: [session_new, message]
+          example: "message"
+        session:
+          $ref: "#/components/schemas/Session"
+        message:
+          $ref: "#/components/schemas/ParsedMessage"

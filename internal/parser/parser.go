@@ -125,7 +125,17 @@ var defaultPricing = pricingTable["claude-sonnet-4-6"]
 func computeCost(model string, usage rawUsage) float64 {
 	p, ok := pricingTable[model]
 	if !ok {
-		p = defaultPricing
+		// Try prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001")
+		for key, pricing := range pricingTable {
+			if len(model) > len(key) && model[:len(key)] == key {
+				p = pricing
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			p = defaultPricing
+		}
 	}
 	return float64(usage.InputTokens)*p.InputPerMTok/1e6 +
 		float64(usage.OutputTokens)*p.OutputPerMTok/1e6 +
