@@ -38,7 +38,6 @@
 
 /* Active section */
 .active-section {
-  border-bottom: 1px solid var(--green);
   padding: 2px 6px 4px;
 }
 
