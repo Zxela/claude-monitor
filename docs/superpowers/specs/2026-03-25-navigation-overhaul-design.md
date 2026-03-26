@@ -231,6 +231,25 @@ var version = "dev"
 
 Upload `.tar.gz` archives instead of raw binaries. This preserves execute permissions and reduces download size. Include a brief README with usage instructions in each archive.
 
+#### Install script (`install.sh`)
+
+A portable shell script users can run via:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Zxela/claude-monitor/main/install.sh | sh
+```
+
+The script:
+1. Detects OS (`uname -s`) and architecture (`uname -m`) to select the correct binary.
+2. Fetches the latest release tag from the GitHub API.
+3. Downloads the matching binary from the release assets.
+4. Installs to `~/.local/bin` (creates it if needed, adds PATH hint if not already on PATH). Falls back to `/usr/local/bin` with sudo if `~/.local/bin` is not viable.
+5. `chmod +x` the binary.
+6. On macOS: runs `xattr -cr` to strip the quarantine attribute — this is the primary fix for "downloaded binary does nothing" on Apple Silicon.
+7. Prints a success message with the installed version and how to run it.
+
+The README gets a one-liner install section at the top. The script is also usable for upgrades (overwrites existing binary).
+
 ## Out of Scope
 
 - Cost dashboard with charts and trend analysis (Priority 2, separate spec).
