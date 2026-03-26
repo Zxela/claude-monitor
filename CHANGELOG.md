@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.4](https://github.com/Zxela/claude-monitor/compare/v1.10.3...v1.10.4) (2026-03-26)
+
+
+### Bug Fixes
+
+* match old design polish — card accents, feed animations, statusbar ([5a015c5](https://github.com/Zxela/claude-monitor/commit/5a015c559b1f352dfb72be4c6beb98623b3c6a99))
+
 ## [1.10.3](https://github.com/Zxela/claude-monitor/compare/v1.10.2...v1.10.3) (2026-03-26)
 
 
