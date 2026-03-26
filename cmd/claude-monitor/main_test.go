@@ -105,6 +105,53 @@ func TestGroupedSessionsEndpoint(t *testing.T) {
 	}
 }
 
+func TestProjectsEndpoint(t *testing.T) {
+	// Build the binary.
+	cmd := exec.Command("go", "build", "-o", "/tmp/claude-monitor-projects-test", "./")
+	cmd.Dir = "."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+
+	// Start the server on port 17703.
+	srv := exec.Command("/tmp/claude-monitor-projects-test", "--port", "17703")
+	if err := srv.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	defer srv.Process.Kill()
+
+	// Wait for server to be ready.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://localhost:17703/health")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// GET /api/projects.
+	resp, err := http.Get("http://localhost:17703/api/projects")
+	if err != nil {
+		t.Fatalf("GET /api/projects failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body []json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response as array: %v", err)
+	}
+	// With no sessions the array should be empty (not nil).
+	if body == nil {
+		t.Error("expected non-nil array response")
+	}
+}
+
 func TestVersionFlag(t *testing.T) {
 	// Build the binary
 	cmd := exec.Command("go", "build", "-o", "/tmp/claude-monitor-test", "./")

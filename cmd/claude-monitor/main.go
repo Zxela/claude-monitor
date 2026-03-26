@@ -482,6 +482,31 @@ func main() {
 		json.NewEncoder(w).Encode(g)
 	})
 
+	// Distinct project names with session counts.
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		sessions := sessionStore.All()
+		counts := make(map[string]int)
+		for _, s := range sessions {
+			name := s.ProjectName
+			if name == "" {
+				name = s.ProjectDir
+			}
+			counts[name]++
+		}
+
+		type projectEntry struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		}
+		result := make([]projectEntry, 0, len(counts))
+		for name, count := range counts {
+			result = append(result, projectEntry{Name: name, Count: count})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	})
+
 	// Cross-session search — searches ContentText and ToolDetail across all sessions.
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("q")
@@ -501,6 +526,7 @@ func main() {
 		type searchResult struct {
 			SessionID   string `json:"sessionId"`
 			SessionName string `json:"sessionName"`
+			ProjectName string `json:"projectName"`
 			parser.ParsedMessage
 		}
 
