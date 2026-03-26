@@ -25,43 +25,43 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   el.dataset.type = type;
 
   const time = formatTime(msg.timestamp);
-  const text = msg.contentText || '';
+  let rawText = msg.contentText || '';
   const detail = msg.toolDetail || '';
 
-  // Build content the same way as the old HTML:
-  // Tools: "[ToolName] detail or text"
-  // Hooks: raw text (hookEvent is shown in type label)
-  // Agents: "[agent: detail]" or "[agent] text"
-  // Everything else: just the text
+  // Strip redundant prefixes baked in by the backend parser
+  // e.g. "[hook:PostToolUse] Grep" -> "Grep", "[tool: Bash]" -> "Bash"
+  rawText = rawText.replace(/^\[hook:\w+\]\s*/, '');
+  rawText = rawText.replace(/^\[tool:\s*\w+\]\s*/, '');
+
+  // Build display content
   let content = '';
   let contentClass = '';
+  let fullContent = rawText || detail;
 
   if (type === 'hook') {
-    content = text;
+    content = rawText || msg.hookEvent || '';
     contentClass = 'hook';
   } else if (type === 'agent') {
-    content = detail ? `[agent: ${detail}]` : truncate(text, 80);
+    content = detail ? `${detail}` : rawText;
     contentClass = 'tool';
+    fullContent = rawText || detail;
   } else if (type === 'tool_use') {
     const name = msg.toolName || '';
-    if (detail) {
-      content = `[${name}] ${truncate(detail, 80)}`;
-    } else {
-      content = `[${name}] ${truncate(text, 80)}`;
-    }
+    const body = detail || rawText;
+    content = name ? `${name}: ${truncate(body, 80)}` : truncate(body, 80);
     contentClass = 'tool';
+    fullContent = body;
   } else if (type === 'tool_result') {
-    content = truncate(text || detail, 100);
+    content = truncate(rawText || detail, 100);
     contentClass = 'result';
   } else if (type === 'error') {
-    content = truncate(text, 120);
+    content = truncate(rawText, 120);
   } else {
-    content = truncate(text, 120);
+    content = truncate(rawText, 120);
     if (type === 'system') contentClass = 'dim';
   }
 
-  const hasMore = text.length > 120 || detail.length > 80;
-  const fullContent = text || detail;
+  const hasMore = fullContent.length > content.length;
 
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +
