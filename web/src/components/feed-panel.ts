@@ -5,11 +5,13 @@ import { state, subscribe, update } from '../state';
 import { fetchRecentMessages } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
+import { escapeHtml } from '../utils';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
 let feedContent: HTMLElement | null = null;
 let filterBar: HTMLElement | null = null;
+let headerEl: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
 const MAX_ENTRIES = 500;
@@ -18,7 +20,9 @@ const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'ag
 
 export function render(mount: HTMLElement): void {
   container = mount;
-  renderEmpty();
+
+  // Start with the feed panel showing (multi-session mode)
+  renderFeedPanel();
 
   subscribe(onStateChange);
   onMessage(onWsMessage);
@@ -28,37 +32,42 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   const sessionChanged = changed.has('selectedSessionId');
   const viewChanged = changed.has('view');
 
-  // Handle both changing at once, or either individually
   if (sessionChanged || viewChanged) {
-    if (state.view === 'list' && state.selectedSessionId) {
+    if (state.view !== 'list') return; // other views take over the mount
+
+    if (state.selectedSessionId) {
       renderFeedPanel();
       loadRecentMessages(state.selectedSessionId);
-    } else if (state.view === 'list') {
-      renderEmpty();
+    } else {
+      // Back to multi-session mode
+      renderFeedPanel();
+      currentLoadSessionId = null;
     }
-    // Other views (graph/table/history) take over the mount — don't render feed
   }
 }
 
 function onWsMessage(event: WsEvent): void {
   if (!event.message) return;
-  if (!state.selectedSessionId) return;
   if (state.view !== 'list') return;
-  if (event.session.id !== state.selectedSessionId) return;
+  if (!feedContent) return;
 
-  appendMessage(event.message);
-}
+  // In single-session mode, only show messages for selected session
+  if (state.selectedSessionId && event.session.id !== state.selectedSessionId) return;
 
-function renderEmpty(): void {
-  if (!container) return;
-  container.innerHTML = '<div class="feed-empty">Select a session to view its feed</div>';
-  feedContent = null;
-  filterBar = null;
+  const sessionName = event.session.sessionName || event.session.projectName || event.session.id.slice(0, 8);
+  const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
+  appendMessage(event.message, opts);
 }
 
 function renderFeedPanel(): void {
   if (!container) return;
   container.innerHTML = '';
+
+  // Header
+  headerEl = document.createElement('div');
+  headerEl.className = 'feed-header';
+  updateHeader();
+  container.appendChild(headerEl);
 
   // Filter bar
   filterBar = document.createElement('div');
@@ -76,6 +85,7 @@ function renderFeedPanel(): void {
   // Feed content area
   feedContent = document.createElement('div');
   feedContent.className = 'feed-content';
+  feedContent.innerHTML = '<div class="feed-empty">WAITING FOR EVENTS...</div>';
   feedContent.addEventListener('scroll', () => {
     if (!feedContent) return;
     const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
@@ -84,23 +94,33 @@ function renderFeedPanel(): void {
   container.appendChild(feedContent);
 }
 
+function updateHeader(): void {
+  if (!headerEl) return;
+  if (state.selectedSessionId) {
+    const sess = state.sessions.get(state.selectedSessionId);
+    const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
+    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
+      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>`;
+  } else {
+    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
+      <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
+  }
+}
+
 function handleFilterClick(type: string, e: MouseEvent): void {
   if (type === 'all') {
-    // Reset all filters to true
     const filters: Record<string, boolean> = {};
     for (const t of FILTER_TYPES) {
       if (t !== 'all') filters[t] = true;
     }
     update({ feedTypeFilters: filters });
   } else if (e.shiftKey) {
-    // Solo mode — show only this type
     const filters: Record<string, boolean> = {};
     for (const t of FILTER_TYPES) {
       if (t !== 'all') filters[t] = (t === type);
     }
     update({ feedTypeFilters: filters });
   } else {
-    // Toggle single type
     const filters = { ...state.feedTypeFilters };
     filters[type] = !filters[type];
     update({ feedTypeFilters: filters });
@@ -129,40 +149,41 @@ function applyFilters(): void {
 
 async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
-  if (currentLoadSessionId === sessionId) return; // prevent concurrent loads for same session
+  if (currentLoadSessionId === sessionId) return;
   currentLoadSessionId = sessionId;
   feedContent.innerHTML = '';
 
   try {
     const messages = await fetchRecentMessages(sessionId);
-    // Guard: if session changed while loading, discard results
     if (currentLoadSessionId !== sessionId) return;
     for (const msg of messages) {
       appendMessage(msg as ParsedMessage);
     }
-  } catch (err) {
+  } catch {
     if (currentLoadSessionId === sessionId) {
-      feedContent.innerHTML = `<div class="feed-empty">Failed to load messages</div>`;
+      feedContent.innerHTML = '<div class="feed-empty">Failed to load messages</div>';
     }
   }
 }
 
-function appendMessage(msg: ParsedMessage): void {
+function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}): void {
   if (!feedContent) return;
 
-  const entry = renderFeedEntry(msg);
+  // Remove the "WAITING FOR EVENTS..." placeholder
+  const empty = feedContent.querySelector('.feed-empty');
+  if (empty) empty.remove();
+
+  const entry = renderFeedEntry(msg, opts);
   const type = detectType(msg);
   const visible = state.feedTypeFilters[type] ?? true;
   if (!visible) entry.style.display = 'none';
 
   feedContent.appendChild(entry);
 
-  // Trim excess entries
   while (feedContent.children.length > MAX_ENTRIES) {
     feedContent.removeChild(feedContent.firstChild!);
   }
 
-  // Auto-scroll
   if (autoScroll) {
     feedContent.scrollTop = feedContent.scrollHeight;
   }
