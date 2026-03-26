@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.2](https://github.com/Zxela/claude-monitor/compare/v1.16.1...v1.16.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* expanded feed entries show full content, responsive layout tweaks ([9ac84ea](https://github.com/Zxela/claude-monitor/commit/9ac84ea31b3b90c9394680eab2f4f049fe1e5a5f))
+
 ## [1.16.1](https://github.com/Zxela/claude-monitor/compare/v1.16.0...v1.16.1) (2026-03-26)
 
 
