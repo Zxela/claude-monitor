@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/Zxela/claude-monitor/compare/v1.12.0...v1.12.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* topbar matches old design — segmented layout, flash animation ([569fa13](https://github.com/Zxela/claude-monitor/commit/569fa137df5fdcec6de959f8716a6894d1dd6e2d))
+
 ## [1.12.0](https://github.com/Zxela/claude-monitor/compare/v1.11.0...v1.12.0) (2026-03-26)
 
 
