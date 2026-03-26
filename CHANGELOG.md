@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.17.0](https://github.com/Zxela/claude-monitor/compare/v1.16.5...v1.17.0) (2026-03-26)
+
+
+### Features
+
+* add 'migrate' subcommand (status, rollback, up) ([352e820](https://github.com/Zxela/claude-monitor/commit/352e820fc4515c29f7c4d8ee4a9a5d8b7c0a546f))
+* add agent sequence view with Graph/Sequence toggle ([5696ba0](https://github.com/Zxela/claude-monitor/commit/5696ba05658075fcd4113f89eb75ee3f2278ff15))
+* add internal/update package for GitHub release checking ([90fd598](https://github.com/Zxela/claude-monitor/commit/90fd5981acc6bd5afeb813e506c88da992df34db))
+* add Makefile targets for migration management ([c9d4b37](https://github.com/Zxela/claude-monitor/commit/c9d4b3710a6a522fa6721b9804678892f1276c02))
+* add migration 002 — parent_id column for subagent grouping ([f411841](https://github.com/Zxela/claude-monitor/commit/f411841e38ad52ba238b05df4b74c4fbe1389370))
+* add migration registry with RunUp, RunDown, Status ([60b1d66](https://github.com/Zxela/claude-monitor/commit/60b1d66faa8715ba02c6fc0b5cf8ba729847426d))
+* add parentId to HistoryRow and historyShowSubagents state ([30aef8d](https://github.com/Zxela/claude-monitor/commit/30aef8d893d23366544477e5b2356b778f9af0bc))
+* check for updates on startup, broadcast via WebSocket ([16d73fa](https://github.com/Zxela/claude-monitor/commit/16d73facce796dfc50470f25f35508cca65e7698))
+* group subagent sessions under parents in history view ([836d4c3](https://github.com/Zxela/claude-monitor/commit/836d4c3a8f5e1aa080630410a12f26d7d377e434))
+* persist and return parent_id in session history ([7c37074](https://github.com/Zxela/claude-monitor/commit/7c37074ac71e4db2aec5ff18b29f214c09ad6e8c))
+* replace CREATE TABLE with migration 1, integrate with store.Open ([b98873b](https://github.com/Zxela/claude-monitor/commit/b98873b76af48a05de3b2c523921ac690ff990f1))
+* responsive hamburger menu for topbar on mobile ([8601587](https://github.com/Zxela/claude-monitor/commit/8601587dfc775af310a0d03535c6b1d5e903afcd))
+* show dismissable update banner in web UI ([ac48cad](https://github.com/Zxela/claude-monitor/commit/ac48cad15b4dc7e08abfb61a5a6f4f5b99165dc1))
+* show token/cache/error stats in compact cards, widen sidebar to 283px ([944040f](https://github.com/Zxela/claude-monitor/commit/944040f9870c89c34b4f646fc6ae7f4d34c0331b))
+
+
+### Bug Fixes
+
+* add 5s timeout to search handler to prevent DoS ([51c703a](https://github.com/Zxela/claude-monitor/commit/51c703aeb67085d9ef5b834116f9c29e82d4ead6))
+* add ARIA labels, roles, and keyboard support for accessibility ([9eb7452](https://github.com/Zxela/claude-monitor/commit/9eb74528c422fed76b4267b649685841e5e597a7))
+* add error handling to all API calls in api.ts ([940a784](https://github.com/Zxela/claude-monitor/commit/940a784e1a65394877ecf7f9edd0d070685e3cc6))
+* add mutex to prevent race on prevActive/savedToHistory maps ([6ab214e](https://github.com/Zxela/claude-monitor/commit/6ab214ed44b8d814b5bb33e5aae535357e6967ed))
+* default bind to 127.0.0.1 with --bind flag ([fb24f45](https://github.com/Zxela/claude-monitor/commit/fb24f458ab29aea40a8634e2309a752d190fe1e7))
+* remove WriteTimeout that kills WebSocket and SSE ([249929c](https://github.com/Zxela/claude-monitor/commit/249929ca9d5b358a7b4c8b6ac6f199a53fdb475d))
+* show SESSION HISTORY label and REPLAY button for non-active sessions ([7ff4c2e](https://github.com/Zxela/claude-monitor/commit/7ff4c2e8f91231e0c7d6945c2518485509d483c4))
+* wrap WebSocket JSON.parse in try/catch ([9cc4b61](https://github.com/Zxela/claude-monitor/commit/9cc4b61b1ec20af09639e5fff17810f793e09764))
+
 ## [1.16.5](https://github.com/Zxela/claude-monitor/compare/v1.16.4...v1.16.5) (2026-03-26)
 
 
