@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -142,6 +143,8 @@ func main() {
 	defer historyDB.Close()
 
 	// Track which sessions were previously active for inactivity transition detection.
+	// mu protects prevActive and savedToHistory from concurrent goroutine access.
+	var mu sync.Mutex
 	prevActive := make(map[string]bool)
 
 	w, err := watcher.New([]string(extraPaths))
@@ -338,6 +341,7 @@ func main() {
 
 	// Immediately persist all inactive sessions from bootstrap to history DB.
 	savedToHistory := make(map[string]bool)
+	mu.Lock()
 	{
 		saved := 0
 		for _, sess := range sessionStore.All() {
@@ -355,6 +359,7 @@ func main() {
 			log.Printf("persisted %d sessions to history on startup", saved)
 		}
 	}
+	mu.Unlock()
 
 	// Periodic goroutine: persist history on inactivity transitions.
 	go func() {
@@ -365,6 +370,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				mu.Lock()
 				for _, sess := range sessionStore.All() {
 					nowActive := sess.IsActive
 					wasActive := prevActive[sess.ID]
@@ -385,6 +391,7 @@ func main() {
 					}
 					prevActive[sess.ID] = nowActive
 				}
+				mu.Unlock()
 			}
 		}
 	}()
