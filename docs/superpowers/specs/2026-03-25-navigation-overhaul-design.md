@@ -191,6 +191,46 @@ The existing `/api/search?q=` endpoint adds:
 - History/SQLite persistence.
 - Docker discovery.
 
+### 5. Release / Build Fixes
+
+The arm64 release binary doesn't work. Several issues found in the release pipeline:
+
+#### Go version mismatch
+
+`go.mod` requires `go 1.25.0` but `.github/workflows/release-please.yml` and `ci.yml` both use `go-version: '1.22'`. Update CI to use the Go version from `go.mod` dynamically:
+
+```yaml
+- uses: actions/setup-go@v5
+  with:
+    go-version-file: 'go.mod'
+```
+
+#### Missing CGO_ENABLED=0
+
+The release build doesn't set `CGO_ENABLED=0`. While Go auto-disables CGO for cross-compilation, being explicit ensures fully static binaries regardless of the CI environment:
+
+```
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ...
+```
+
+#### Missing version variable
+
+LDFLAGS inject `-X main.version=${VERSION}` but `main.go` has no `var version string`. Add:
+
+```go
+var version = "dev"
+```
+
+#### Add --version flag and /api/version endpoint
+
+- `claude-monitor --version` prints the version and exits.
+- `GET /api/version` returns `{"version": "v1.7.6"}`.
+- The status bar in the UI already shows a version string — wire it to the real value.
+
+#### Compressed release assets
+
+Upload `.tar.gz` archives instead of raw binaries. This preserves execute permissions and reduces download size. Include a brief README with usage instructions in each archive.
+
 ## Out of Scope
 
 - Cost dashboard with charts and trend analysis (Priority 2, separate spec).
