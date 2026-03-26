@@ -137,6 +137,7 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 }
 
 // All returns a snapshot slice of all sessions (unordered).
+// IsActive is recalculated for each session based on current time.
 func (s *Store) All() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -145,6 +146,12 @@ func (s *Store) All() []*Session {
 	for _, sess := range s.sessions {
 		cp := *sess
 		cp.SeenMessageIDs = nil // don't share internal dedup map
+		// Recalculate IsActive so callers always see fresh status.
+		cp.IsActive = time.Since(cp.LastActive) < activeThreshold
+		if !cp.IsActive {
+			cp.Status = "idle"
+			cp.CostRate = 0
+		}
 		out = append(out, &cp)
 	}
 	return out
