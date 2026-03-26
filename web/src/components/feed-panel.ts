@@ -12,6 +12,7 @@ let container: HTMLElement | null = null;
 let feedContent: HTMLElement | null = null;
 let filterBar: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
+let scrollLockBtn: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
 const MAX_ENTRIES = 500;
@@ -90,8 +91,24 @@ function renderFeedPanel(): void {
     if (!feedContent) return;
     const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
     autoScroll = atBottom;
+    scrollLockBtn?.classList.toggle('visible', !atBottom);
   });
   container.appendChild(feedContent);
+
+  // Scroll lock button
+  if (!scrollLockBtn) {
+    scrollLockBtn = document.createElement('button');
+    scrollLockBtn.className = 'scroll-lock-btn';
+    scrollLockBtn.textContent = '▼ RESUME SCROLL';
+    scrollLockBtn.addEventListener('click', () => {
+      if (feedContent) {
+        feedContent.scrollTop = feedContent.scrollHeight;
+        autoScroll = true;
+        scrollLockBtn?.classList.remove('visible');
+      }
+    });
+    document.body.appendChild(scrollLockBtn);
+  }
 }
 
 function updateHeader(): void {
@@ -100,7 +117,11 @@ function updateHeader(): void {
     const sess = state.sessions.get(state.selectedSessionId);
     const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
-      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>`;
+      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
+      <span class="back-to-feed" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
+    headerEl.querySelector('.back-to-feed')?.addEventListener('click', () => {
+      update({ selectedSessionId: null });
+    });
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
       <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
