@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.3](https://github.com/Zxela/claude-monitor/compare/v1.10.2...v1.10.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* sessions panel border-right extends full height when groups collapsed ([f2dd46e](https://github.com/Zxela/claude-monitor/commit/f2dd46e96611af5e2eaa39abb707d6f2fa51cceb))
+
 ## [1.10.2](https://github.com/Zxela/claude-monitor/compare/v1.10.1...v1.10.2) (2026-03-26)
 
 
