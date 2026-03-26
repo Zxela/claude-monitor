@@ -14,6 +14,17 @@ export interface AppState {
   connected: boolean;
   eventCount: number;
   version: string;
+
+  // Feed
+  feedTypeFilters: Record<string, boolean>;
+
+  // Replay
+  replaySessionId: string | null;
+  replayPlaying: boolean;
+
+  // Budget
+  budgetThreshold: number | null;
+  budgetDismissed: boolean;
 }
 
 type Listener = (state: AppState, changedKeys: Set<string>) => void;
@@ -34,6 +45,11 @@ export const state: AppState = {
   connected: false,
   eventCount: 0,
   version: '',
+  feedTypeFilters: { user: true, assistant: true, tool: true, result: true, agent: true, hook: true, error: true },
+  replaySessionId: null,
+  replayPlaying: false,
+  budgetThreshold: null,
+  budgetDismissed: false,
 };
 
 export function subscribe(listener: Listener): () => void {

@@ -1,4 +1,4 @@
-import type { GroupedSessions, ProjectEntry, SearchResult, Session, HistoryRow } from './types';
+import type { GroupedSessions, ProjectEntry, SearchResult, Session, HistoryRow, ParsedMessage } from './types';
 
 const BASE = '';
 
@@ -27,7 +27,7 @@ export async function fetchHistory(limit = 50, offset = 0): Promise<HistoryRow[]
   return res.json();
 }
 
-export async function fetchRecentMessages(sessionId: string): Promise<unknown[]> {
+export async function fetchRecentMessages(sessionId: string): Promise<ParsedMessage[]> {
   const res = await fetch(`${BASE}/api/sessions/${sessionId}/recent`);
   return res.json();
 }
