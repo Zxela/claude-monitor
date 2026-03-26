@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.2](https://github.com/Zxela/claude-monitor/compare/v1.17.1...v1.17.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* prevent expanded feed entries from overlapping following rows ([e9449c8](https://github.com/Zxela/claude-monitor/commit/e9449c8cbdd9b830a730aae03692021ec3c5b652))
+
 ## [1.17.1](https://github.com/Zxela/claude-monitor/compare/v1.17.0...v1.17.1) (2026-03-26)
 
 
