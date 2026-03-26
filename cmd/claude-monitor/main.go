@@ -79,6 +79,23 @@ func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request
 	return sess, true
 }
 
+const swaggerHTML = `<!DOCTYPE html>
+<html><head>
+<title>Claude Monitor API</title>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+  url: '/swagger/openapi.yaml',
+  dom_id: '#swagger-ui',
+  presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+  layout: "BaseLayout"
+});
+</script>
+</body></html>`
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(os.Stderr)
@@ -88,6 +105,7 @@ func main() {
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
+	swaggerEnabled := flag.Bool("swagger", false, "serve Swagger UI at /swagger")
 	// Handle --version before any other initialization.
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Printf("claude-monitor %s\n", version)
@@ -719,6 +737,18 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"version": version})
 	})
+
+	// Swagger UI (opt-in via --swagger flag).
+	if *swaggerEnabled {
+		mux.HandleFunc("/swagger/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, "api/openapi.yaml")
+		})
+		mux.HandleFunc("/swagger", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(swaggerHTML))
+		})
+		log.Println("swagger UI enabled at /swagger")
+	}
 
 	addr := fmt.Sprintf(":%d", *port)
 	srv := &http.Server{
