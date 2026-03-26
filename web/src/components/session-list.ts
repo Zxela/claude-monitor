@@ -75,6 +75,15 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
     renderFromState();
   }
+  if (changed.has('focusedSessionId')) {
+    // Update focused class on all cards
+    listEl?.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach(card => {
+      card.classList.toggle('focused', card.dataset.sessionId === _state.focusedSessionId);
+    });
+    // Scroll focused card into view
+    const focused = listEl?.querySelector<HTMLElement>('.focused');
+    if (focused) focused.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 /** Build time groups from state.sessions locally (no HTTP) */

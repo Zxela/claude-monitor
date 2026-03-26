@@ -13,6 +13,7 @@ import { render as renderBudget } from './components/budget-popover';
 import { open as openReplay } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { init as initHash } from './hash';
+import { expandedParents } from './components/session-card';
 
 // Mount components
 const topbarMount = document.getElementById('topbar-mount')!;
@@ -69,6 +70,11 @@ subscribe((_state, changed) => {
   }
 });
 
+function getVisibleSessionIds(): string[] {
+  const cards = document.querySelectorAll<HTMLElement>('[data-session-id]');
+  return Array.from(cards).map(c => c.dataset.sessionId!).filter(Boolean);
+}
+
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -89,6 +95,44 @@ document.addEventListener('keydown', (e) => {
     case 'Escape':
       update({ selectedSessionId: null, searchOpen: false });
       break;
+    case 'ArrowDown': {
+      e.preventDefault();
+      const ids = getVisibleSessionIds();
+      if (ids.length === 0) break;
+      const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : -1;
+      const next = ids[Math.min(idx + 1, ids.length - 1)];
+      update({ focusedSessionId: next });
+      break;
+    }
+    case 'ArrowUp': {
+      e.preventDefault();
+      const ids = getVisibleSessionIds();
+      if (ids.length === 0) break;
+      const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : ids.length;
+      const prev = ids[Math.max(idx - 1, 0)];
+      update({ focusedSessionId: prev });
+      break;
+    }
+    case 'Enter': {
+      if (state.focusedSessionId) {
+        update({ selectedSessionId: state.focusedSessionId === state.selectedSessionId ? null : state.focusedSessionId });
+      }
+      break;
+    }
+    case 'ArrowRight': {
+      if (state.focusedSessionId) {
+        expandedParents.add(state.focusedSessionId);
+        update({ renderVersion: state.renderVersion + 1 });
+      }
+      break;
+    }
+    case 'ArrowLeft': {
+      if (state.focusedSessionId) {
+        expandedParents.delete(state.focusedSessionId);
+        update({ renderVersion: state.renderVersion + 1 });
+      }
+      break;
+    }
   }
 });
 
