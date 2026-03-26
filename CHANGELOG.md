@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.5](https://github.com/Zxela/claude-monitor/compare/v1.16.4...v1.16.5) (2026-03-26)
+
+
+### Bug Fixes
+
+* Haiku model pricing — versioned name wasn't matching pricing table ([ceee253](https://github.com/Zxela/claude-monitor/commit/ceee253f0a13387597721c42bf897dae1b964623))
+
 ## [1.16.4](https://github.com/Zxela/claude-monitor/compare/v1.16.3...v1.16.4) (2026-03-26)
 
 
