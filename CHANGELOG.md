@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/Zxela/claude-monitor/compare/v1.10.0...v1.10.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* restore visual density, Active/Recent/All filter, colored feed pills ([474a3b7](https://github.com/Zxela/claude-monitor/commit/474a3b71ccb04e9cf9745779cd5e3391912e9e37))
+
 ## [1.10.0](https://github.com/Zxela/claude-monitor/compare/v1.9.1...v1.10.0) (2026-03-26)
 
 
