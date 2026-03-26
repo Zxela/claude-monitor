@@ -781,11 +781,13 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        addr,
+		Handler:     mux,
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 60 * time.Second,
+		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE
+		// streams need long-lived writes. Per-write deadlines are enforced
+		// by gorilla/websocket writeWait and http.ResponseController.
 	}
 
 	// Graceful shutdown on SIGINT / SIGTERM.
