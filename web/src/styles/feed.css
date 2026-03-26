@@ -226,6 +226,20 @@
 
 .fe-expand:hover { background: rgba(0,204,255,0.1); }
 
+.fe-navigate {
+  display: inline;
+  cursor: pointer;
+  color: var(--purple, #a855f7);
+  font-size: 11px;
+  font-weight: bold;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(168,85,247,0.3);
+  border-radius: 2px;
+}
+
+.fe-navigate:hover { background: rgba(168,85,247,0.15); }
+
 .fe-sid {
   color: var(--text-dim);
   font-size: 9px;

@@ -1,4 +1,5 @@
 import type { ParsedMessage } from '../types';
+import { state, update } from '../state';
 import { escapeHtml } from '../utils';
 
 export interface RenderOptions {
@@ -10,6 +11,8 @@ type MessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'agent' |
 export function detectType(msg: ParsedMessage): MessageType {
   if (msg.isError) return 'error';
   if (msg.hookEvent) return 'hook';
+  // Agent tool calls show as 'agent' type, not 'tool_use'
+  if (msg.isAgent && msg.role === 'assistant') return 'agent';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
   if (msg.toolName && msg.role === 'tool') return 'tool_result';
   if (msg.type === 'agent' || msg.type === 'agent-name') return 'agent';
@@ -43,7 +46,8 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     content = rawText || msg.hookEvent || '';
     contentClass = 'hook';
   } else if (type === 'agent') {
-    content = detail ? `${detail}` : rawText;
+    const body = detail || rawText;
+    content = body ? `Agent: ${truncate(body, 80)}` : 'Agent';
     contentClass = 'tool';
     fullContent = rawText || detail;
   } else if (type === 'tool_use') {
@@ -63,11 +67,12 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   }
 
   const hasMore = fullContent.length > content.length;
+  const isAgentEntry = type === 'agent' && msg.isAgent;
 
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +
     `<span class="fe-type ${type}">[${type}]</span>` +
-    `<span class="fe-content ${contentClass}">${escapeHtml(content)}${hasMore ? '<span class="fe-expand">+</span>' : ''}</span>` +
+    `<span class="fe-content ${contentClass}">${escapeHtml(content)}${hasMore ? '<span class="fe-expand">+</span>' : ''}${isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : ''}</span>` +
     (opts.showSessionId ? `<span class="fe-sid">${escapeHtml(opts.showSessionId.slice(0, 6))}</span>` : '');
 
   if (hasMore) {
@@ -93,7 +98,48 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     });
   }
 
+  // Agent entries: click navigate arrow to go to the subagent session
+  if (isAgentEntry) {
+    const navBtn = el.querySelector('.fe-navigate');
+    if (navBtn) {
+      navBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        navigateToSubagent(msg);
+      });
+    }
+  }
+
   return el;
+}
+
+/** Find the child session spawned by this agent call and navigate to it. */
+function navigateToSubagent(msg: ParsedMessage): void {
+  const parentId = state.selectedSessionId;
+  if (!parentId) return;
+
+  const parent = state.sessions.get(parentId);
+  if (!parent?.children?.length) return;
+
+  const msgTime = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
+
+  // Find the child session closest in time to this agent call
+  let bestChild: string | null = null;
+  let bestDelta = Infinity;
+
+  for (const childId of parent.children) {
+    const child = state.sessions.get(childId);
+    if (!child) continue;
+    const childStart = new Date(child.startedAt).getTime();
+    const delta = Math.abs(childStart - msgTime);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestChild = childId;
+    }
+  }
+
+  if (bestChild) {
+    update({ selectedSessionId: bestChild });
+  }
 }
 
 function truncate(s: string, n: number): string {

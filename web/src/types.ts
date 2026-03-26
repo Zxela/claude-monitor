@@ -97,4 +97,5 @@ export interface ParsedMessage {
   fullContent?: string;  // untruncated content (backend truncates contentText to 200 chars)
   toolUseId?: string;
   forToolUseId?: string;
+  isAgent?: boolean;
 }
