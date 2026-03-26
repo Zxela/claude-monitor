@@ -1,0 +1,322 @@
+// web/src/components/graph-view.ts
+import type { Session } from '../types';
+import type { AppState } from '../state';
+import { state, subscribe, update } from '../state';
+import '../styles/views.css';
+
+interface GraphNode {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  label: string;
+  session: Session;
+}
+
+interface GraphEdge {
+  source: string;
+  target: string;
+}
+
+let container: HTMLElement | null = null;
+let canvas: HTMLCanvasElement | null = null;
+let tooltip: HTMLElement | null = null;
+let ctx: CanvasRenderingContext2D | null = null;
+let nodes: GraphNode[] = [];
+let edges: GraphEdge[] = [];
+let animFrame: number | null = null;
+let dragging: GraphNode | null = null;
+let hovering: GraphNode | null = null;
+let prevNodeIds = '';
+
+export function render(mount: HTMLElement): void {
+  container = mount;
+  subscribe(onStateChange);
+}
+
+function onStateChange(_state: AppState, changed: Set<string>): void {
+  if (changed.has('view')) {
+    if (state.view === 'graph') {
+      show();
+    } else {
+      hide();
+    }
+  }
+  if (changed.has('sessions') && state.view === 'graph') {
+    rebuildNodes();
+  }
+}
+
+function show(): void {
+  if (!container) return;
+  container.innerHTML = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'graph-container';
+
+  canvas = document.createElement('canvas');
+  wrapper.appendChild(canvas);
+
+  tooltip = document.createElement('div');
+  tooltip.className = 'graph-tooltip';
+  wrapper.appendChild(tooltip);
+
+  container.appendChild(wrapper);
+
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('click', onClick);
+
+  rebuildNodes();
+  startAnimation();
+}
+
+function hide(): void {
+  stopAnimation();
+  window.removeEventListener('resize', resizeCanvas);
+  canvas = null;
+  ctx = null;
+  tooltip = null;
+}
+
+function resizeCanvas(): void {
+  if (!canvas || !container) return;
+  canvas.width = container.clientWidth;
+  canvas.height = container.clientHeight;
+  ctx = canvas.getContext('2d');
+}
+
+function rebuildNodes(): void {
+  if (!canvas) return;
+  const now = Date.now();
+  const threshold = 120_000; // 120 seconds
+
+  const visibleSessions: Session[] = [];
+  for (const sess of state.sessions.values()) {
+    const lastActive = new Date(sess.lastActive).getTime();
+    if (sess.isActive || (now - lastActive) < threshold) {
+      visibleSessions.push(sess);
+    }
+  }
+
+  // Include parents of visible nodes
+  const visibleIds = new Set(visibleSessions.map(s => s.id));
+  for (const sess of visibleSessions) {
+    if (sess.parentId && !visibleIds.has(sess.parentId)) {
+      const parent = state.sessions.get(sess.parentId);
+      if (parent) {
+        visibleSessions.push(parent);
+        visibleIds.add(parent.id);
+      }
+    }
+  }
+
+  const nodeIds = [...visibleIds].sort().join(',');
+  if (nodeIds === prevNodeIds) return;
+  prevNodeIds = nodeIds;
+
+  const oldNodes = new Map(nodes.map(n => [n.id, n]));
+  const cx = (canvas?.width ?? 800) / 2;
+  const cy = (canvas?.height ?? 600) / 2;
+
+  nodes = visibleSessions.map(sess => {
+    const old = oldNodes.get(sess.id);
+    const radius = Math.min(30, Math.max(8, Math.log(sess.totalCostUSD + 1) * 5 + 8));
+    const color = sess.isActive
+      ? (sess.status === 'thinking' ? '#ffcc00' : sess.status === 'tool_use' ? '#4488ff' : '#00ff88')
+      : '#44445a';
+    const label = (sess.sessionName || sess.projectName || sess.id).substring(0, 16);
+
+    return {
+      id: sess.id,
+      x: old?.x ?? cx + (Math.random() - 0.5) * 200,
+      y: old?.y ?? cy + (Math.random() - 0.5) * 200,
+      vx: old?.vx ?? 0,
+      vy: old?.vy ?? 0,
+      radius, color, label, session: sess,
+    };
+  });
+
+  edges = [];
+  for (const sess of visibleSessions) {
+    if (sess.parentId && visibleIds.has(sess.parentId)) {
+      edges.push({ source: sess.parentId, target: sess.id });
+    }
+  }
+}
+
+function simulate(): void {
+  if (!canvas) return;
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Repulsion
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const force = 2000 / (dist * dist);
+      const fx = (dx / dist) * force, fy = (dy / dist) * force;
+      a.vx -= fx; a.vy -= fy;
+      b.vx += fx; b.vy += fy;
+    }
+  }
+
+  // Attraction along edges
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  for (const edge of edges) {
+    const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
+    if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const force = (dist - 100) * 0.01;
+    const fx = (dx / dist) * force, fy = (dy / dist) * force;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  }
+
+  // Center gravity + damping + bounds
+  const cx = w / 2, cy = h / 2;
+  for (const n of nodes) {
+    n.vx += (cx - n.x) * 0.001;
+    n.vy += (cy - n.y) * 0.001;
+    n.vx *= 0.9;
+    n.vy *= 0.9;
+    if (n !== dragging) {
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+    n.x = Math.max(n.radius, Math.min(w - n.radius, n.x));
+    n.y = Math.max(n.radius, Math.min(h - n.radius, n.y));
+  }
+}
+
+function draw(): void {
+  if (!ctx || !canvas) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Edges
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  ctx.strokeStyle = 'rgba(100,100,140,0.3)';
+  ctx.lineWidth = 1;
+  for (const edge of edges) {
+    const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
+    if (!a || !b) continue;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  // Nodes
+  for (const n of nodes) {
+    ctx.globalAlpha = n === hovering ? 1.0 : 0.7;
+    ctx.fillStyle = n.color;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius + (n === hovering ? 2 : 0), 0, Math.PI * 2);
+    ctx.fill();
+    if (n === hovering) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+
+    // Label
+    ctx.fillStyle = '#aaa';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(n.label, n.x, n.y + n.radius + 14);
+
+    // Cost
+    if (n.session.totalCostUSD > 0.01) {
+      ctx.fillStyle = '#888';
+      ctx.font = '8px monospace';
+      ctx.fillText(`$${n.session.totalCostUSD.toFixed(2)}`, n.x, n.y + n.radius + 24);
+    }
+  }
+}
+
+function getNodeAt(x: number, y: number): GraphNode | null {
+  for (const n of nodes) {
+    const dx = x - n.x, dy = y - n.y;
+    if (dx * dx + dy * dy < (n.radius + 4) * (n.radius + 4)) return n;
+  }
+  return null;
+}
+
+function onMouseDown(e: MouseEvent): void {
+  const rect = canvas!.getBoundingClientRect();
+  dragging = getNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function onMouseMove(e: MouseEvent): void {
+  if (!canvas || !tooltip) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+  if (dragging) {
+    dragging.x = mx;
+    dragging.y = my;
+    dragging.vx = 0;
+    dragging.vy = 0;
+    return;
+  }
+
+  const node = getNodeAt(mx, my);
+  hovering = node;
+  canvas.style.cursor = node ? 'pointer' : 'default';
+
+  if (node) {
+    tooltip.innerHTML = `<div><b>${escapeHtml(node.label)}</b></div>
+      <div>$${node.session.totalCostUSD.toFixed(2)} · ${node.session.messageCount} msgs</div>
+      <div>${node.session.status} · ${node.session.model || '?'}</div>`;
+    tooltip.style.left = `${mx + 15}px`;
+    tooltip.style.top = `${my + 15}px`;
+    tooltip.classList.add('visible');
+  } else {
+    tooltip.classList.remove('visible');
+  }
+}
+
+function onMouseUp(): void {
+  dragging = null;
+}
+
+function onClick(e: MouseEvent): void {
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const node = getNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+  if (node) {
+    update({ selectedSessionId: node.id, view: 'list' });
+  }
+}
+
+function startAnimation(): void {
+  function loop() {
+    simulate();
+    draw();
+    animFrame = requestAnimationFrame(loop);
+  }
+  animFrame = requestAnimationFrame(loop);
+}
+
+function stopAnimation(): void {
+  if (animFrame !== null) {
+    cancelAnimationFrame(animFrame);
+    animFrame = null;
+  }
+}
+
+function escapeHtml(s: string): string {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
