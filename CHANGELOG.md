@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/Zxela/claude-monitor/compare/v1.18.0...v1.18.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* XSS in update banner, cycle guard in history view, expand button DOM fix ([b7723e3](https://github.com/Zxela/claude-monitor/commit/b7723e3b8e0f90520f98c0dd2481036513b026b0))
+
 ## [1.18.0](https://github.com/Zxela/claude-monitor/compare/v1.17.3...v1.18.0) (2026-03-26)
 
 
