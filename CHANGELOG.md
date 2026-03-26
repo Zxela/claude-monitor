@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/Zxela/claude-monitor/compare/v1.9.1...v1.10.0) (2026-03-26)
+
+
+### Features
+
+* start time groups collapsed by default ([88bad34](https://github.com/Zxela/claude-monitor/commit/88bad340e99b27d2163ca2b043375d0e829a33c5))
+
 ## [1.9.1](https://github.com/Zxela/claude-monitor/compare/v1.9.0...v1.9.1) (2026-03-26)
 
 
