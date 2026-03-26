@@ -56,6 +56,55 @@ func TestVersionEndpoint(t *testing.T) {
 	}
 }
 
+func TestGroupedSessionsEndpoint(t *testing.T) {
+	// Build the binary.
+	cmd := exec.Command("go", "build", "-o", "/tmp/claude-monitor-grouped-test", "./")
+	cmd.Dir = "."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+
+	// Start the server on port 17702.
+	srv := exec.Command("/tmp/claude-monitor-grouped-test", "--port", "17702")
+	if err := srv.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	defer srv.Process.Kill()
+
+	// Wait for server to be ready.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://localhost:17702/health")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// GET /api/sessions/grouped.
+	resp, err := http.Get("http://localhost:17702/api/sessions/grouped")
+	if err != nil {
+		t.Fatalf("GET /api/sessions/grouped failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	for _, key := range []string{"active", "lastHour", "today", "yesterday", "thisWeek", "older"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response missing expected key %q", key)
+		}
+	}
+}
+
 func TestVersionFlag(t *testing.T) {
 	// Build the binary
 	cmd := exec.Command("go", "build", "-o", "/tmp/claude-monitor-test", "./")

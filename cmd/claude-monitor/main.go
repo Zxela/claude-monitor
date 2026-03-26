@@ -432,6 +432,56 @@ func main() {
 		}
 	})
 
+	// Time-bucketed sessions for the new navigation UI.
+	mux.HandleFunc("/api/sessions/grouped", func(w http.ResponseWriter, r *http.Request) {
+		sessions := sessionStore.All()
+		now := time.Now()
+		hourAgo := now.Add(-1 * time.Hour)
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		yesterdayStart := todayStart.Add(-24 * time.Hour)
+		weekStart := todayStart.Add(-time.Duration(now.Weekday()) * 24 * time.Hour)
+
+		type grouped struct {
+			Active    []*session.Session `json:"active"`
+			LastHour  []*session.Session `json:"lastHour"`
+			Today     []*session.Session `json:"today"`
+			Yesterday []*session.Session `json:"yesterday"`
+			ThisWeek  []*session.Session `json:"thisWeek"`
+			Older     []*session.Session `json:"older"`
+		}
+		g := grouped{
+			Active:    []*session.Session{},
+			LastHour:  []*session.Session{},
+			Today:     []*session.Session{},
+			Yesterday: []*session.Session{},
+			ThisWeek:  []*session.Session{},
+			Older:     []*session.Session{},
+		}
+
+		for _, s := range sessions {
+			if s.IsActive {
+				g.Active = append(g.Active, s)
+				continue
+			}
+			la := s.LastActive
+			switch {
+			case la.After(hourAgo):
+				g.LastHour = append(g.LastHour, s)
+			case la.After(todayStart):
+				g.Today = append(g.Today, s)
+			case la.After(yesterdayStart):
+				g.Yesterday = append(g.Yesterday, s)
+			case la.After(weekStart):
+				g.ThisWeek = append(g.ThisWeek, s)
+			default:
+				g.Older = append(g.Older, s)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(g)
+	})
+
 	// Cross-session search — searches ContentText and ToolDetail across all sessions.
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("q")
