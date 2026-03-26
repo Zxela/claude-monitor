@@ -12,8 +12,9 @@ dev:
 	@echo "Starting Vite dev server on :5173..."
 	@cd web && npm run dev
 
-# Build frontend only
+# Build frontend only (clean stale assets first)
 web:
+	rm -rf cmd/claude-monitor/static/assets
 	cd web && npm run build
 
 # Install frontend dependencies

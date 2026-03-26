@@ -96,23 +96,10 @@ function renderFromState(): void {
     older: [],
   };
 
-  const SUBAGENT_IDLE_TIMEOUT = 5 * 60_000; // 5 minutes
-
   for (const sess of state.sessions.values()) {
     if (sess.isActive) {
-      // Hide idle subagents from active panel after 5 minutes
-      if (sess.isSubagent && sess.status === 'idle') {
-        const idleFor = now - new Date(sess.lastActive).getTime();
-        if (idleFor > SUBAGENT_IDLE_TIMEOUT) {
-          // Fall through to time buckets instead
-        } else {
-          grouped.active.push(sess);
-          continue;
-        }
-      } else {
-        grouped.active.push(sess);
-        continue;
-      }
+      grouped.active.push(sess);
+      continue;
     }
     const lastActiveMs = new Date(sess.lastActive).getTime();
     if (now - lastActiveMs < 3600_000) {

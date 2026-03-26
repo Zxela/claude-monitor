@@ -5,6 +5,8 @@ import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo } fro
 
 // Track which parent sessions have their children expanded
 export const expandedParents = new Set<string>();
+// Track which parents show idle subagents (hidden by default)
+const showIdleChildren = new Set<string>();
 
 export function renderExpanded(session: Session, container: HTMLElement): HTMLElement {
   const el = document.createElement('div');
@@ -75,11 +77,40 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
 
   // Render children if expanded
   if (childCount > 0 && isExpanded && session.children) {
-    for (const childId of session.children) {
-      const child = state.sessions.get(childId);
-      if (child) {
+    const showIdle = showIdleChildren.has(session.id);
+    const children = session.children
+      .map(id => state.sessions.get(id))
+      .filter((c): c is Session => !!c);
+    const activeChildren = children.filter(c => c.status !== 'idle');
+    const idleChildren = children.filter(c => c.status === 'idle');
+
+    for (const child of activeChildren) {
+      renderExpanded(child, container);
+    }
+
+    if (showIdle) {
+      for (const child of idleChildren) {
         renderExpanded(child, container);
       }
+    }
+
+    // Show toggle for idle subagents if there are any
+    if (idleChildren.length > 0) {
+      const toggle = document.createElement('div');
+      toggle.className = 'idle-toggle';
+      toggle.textContent = showIdle
+        ? `Hide ${idleChildren.length} idle`
+        : `Show ${idleChildren.length} idle`;
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (showIdleChildren.has(session.id)) {
+          showIdleChildren.delete(session.id);
+        } else {
+          showIdleChildren.add(session.id);
+        }
+        update({ renderVersion: state.renderVersion + 1 });
+      });
+      container.appendChild(toggle);
     }
   }
 
@@ -137,11 +168,39 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
 
   // Render children if expanded
   if (childCount > 0 && isExpanded && session.children) {
-    for (const childId of session.children) {
-      const child = state.sessions.get(childId);
-      if (child) {
+    const showIdle = showIdleChildren.has(session.id);
+    const children = session.children
+      .map(id => state.sessions.get(id))
+      .filter((c): c is Session => !!c);
+    const activeChildren = children.filter(c => c.status !== 'idle');
+    const idleChildren = children.filter(c => c.status === 'idle');
+
+    for (const child of activeChildren) {
+      renderCompact(child, container);
+    }
+
+    if (showIdle) {
+      for (const child of idleChildren) {
         renderCompact(child, container);
       }
+    }
+
+    if (idleChildren.length > 0) {
+      const toggle = document.createElement('div');
+      toggle.className = 'idle-toggle';
+      toggle.textContent = showIdle
+        ? `Hide ${idleChildren.length} idle`
+        : `Show ${idleChildren.length} idle`;
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (showIdleChildren.has(session.id)) {
+          showIdleChildren.delete(session.id);
+        } else {
+          showIdleChildren.add(session.id);
+        }
+        update({ renderVersion: state.renderVersion + 1 });
+      });
+      container.appendChild(toggle);
     }
   }
 

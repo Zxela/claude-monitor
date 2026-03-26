@@ -329,3 +329,15 @@
 }
 
 .session-card-compact .subagent-chevron { font-size: 9px; }
+
+/* Idle subagent toggle */
+.idle-toggle {
+  margin-left: 20px;
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.idle-toggle:hover { opacity: 1; color: var(--text); }
