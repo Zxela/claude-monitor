@@ -14,6 +14,7 @@ import { render as renderBudget } from './components/budget-popover';
 import { open as openReplay, togglePlay as replayToggle, restart as replayRestart, stepForward as replayForward, stepBackward as replayBack } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { init as initHash } from './hash';
+import { init as initOnboarding } from './components/onboarding';
 import { expandedParents } from './components/session-card';
 
 // Mount components
@@ -188,6 +189,7 @@ async function init() {
 
   connect();
   initHash();
+  initOnboarding();
 }
 
 init();
