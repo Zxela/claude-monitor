@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/Zxela/claude-monitor/compare/v1.14.3...v1.15.0) (2026-03-26)
+
+
+### Features
+
+* CSV export, tool result inheritance, card animations, stat tooltips ([e3a5d79](https://github.com/Zxela/claude-monitor/commit/e3a5d79032dc78a405af2e720d6a278c1ec9df7f))
+
 ## [1.14.3](https://github.com/Zxela/claude-monitor/compare/v1.14.2...v1.14.3) (2026-03-26)
 
 
