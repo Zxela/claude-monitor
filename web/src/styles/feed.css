@@ -155,7 +155,6 @@
 
 .feed-entry.expanded { align-items: flex-start; }
 .feed-entry.expanded .fe-content {
-  overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
   background: rgba(0,0,0,0.3);
@@ -166,6 +165,7 @@
   font-size: 11px;
   line-height: 1.5;
   max-height: 300px;
+  overflow: hidden;
   overflow-y: auto;
 }
 
