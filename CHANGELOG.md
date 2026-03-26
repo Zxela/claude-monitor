@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.4](https://github.com/Zxela/claude-monitor/compare/v1.16.3...v1.16.4) (2026-03-26)
+
+
+### Bug Fixes
+
+* persist history immediately on startup, not after 30s delay ([89db651](https://github.com/Zxela/claude-monitor/commit/89db6510b5c4d69fc82097aa451e598899e2a8aa))
+
 ## [1.16.3](https://github.com/Zxela/claude-monitor/compare/v1.16.2...v1.16.3) (2026-03-26)
 
 
