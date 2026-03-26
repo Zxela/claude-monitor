@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.3](https://github.com/Zxela/claude-monitor/compare/v1.17.2...v1.17.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* remove green border under Active Now section ([a4b583b](https://github.com/Zxela/claude-monitor/commit/a4b583be6aca63118f2341cbc42266fef687cea5))
+
 ## [1.17.2](https://github.com/Zxela/claude-monitor/compare/v1.17.1...v1.17.2) (2026-03-26)
 
 
