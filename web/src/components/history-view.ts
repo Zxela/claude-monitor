@@ -78,10 +78,21 @@ function show(): void {
 
   for (const col of COLUMNS) {
     const th = document.createElement('th');
+    th.setAttribute('role', 'columnheader');
+    th.setAttribute('tabindex', '0');
+    if (sortCol === col.key) {
+      th.setAttribute('aria-sort', sortAsc ? 'ascending' : 'descending');
+    } else {
+      th.setAttribute('aria-sort', 'none');
+    }
     th.innerHTML = `${col.label}${sortCol === col.key ? `<span class="sort-arrow">${sortAsc ? '▲' : '▼'}</span>` : ''}`;
-    th.addEventListener('click', () => {
+    const sortByCol = () => {
       if (sortCol === col.key) { sortAsc = !sortAsc; } else { sortCol = col.key; sortAsc = false; }
       show();
+    };
+    th.addEventListener('click', sortByCol);
+    th.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortByCol(); }
     });
     headerRow.appendChild(th);
   }
@@ -100,8 +111,13 @@ function show(): void {
       if (col.key === 'projectName') td.title = row.taskDescription || '';
       tr.appendChild(td);
     }
-    tr.addEventListener('click', () => {
-      update({ selectedSessionId: row.id, view: 'list' });
+    tr.setAttribute('tabindex', '0');
+    tr.setAttribute('role', 'button');
+    tr.setAttribute('aria-label', `View session: ${COLUMNS[1].fmt(row)}`);
+    const openSession = () => { update({ selectedSessionId: row.id, view: 'list' }); };
+    tr.addEventListener('click', openSession);
+    tr.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSession(); }
     });
     tbody.appendChild(tr);
   }

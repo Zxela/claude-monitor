@@ -28,6 +28,13 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
     e.stopPropagation();
     togglePopover(gearBtn);
   });
+  gearBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePopover(gearBtn);
+    }
+  });
 
   document.addEventListener('click', () => {
     if (popover) { popover.remove(); popover = null; }
@@ -51,6 +58,9 @@ function togglePopover(anchor: HTMLElement): void {
 
   popover = document.createElement('div');
   popover.className = 'budget-popover';
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-modal', 'false');
+  popover.setAttribute('aria-label', 'Budget and notification settings');
   popover.addEventListener('click', e => e.stopPropagation());
   popover.innerHTML = `
     <input type="number" step="1" placeholder="Budget threshold (USD)" value="${state.budgetThreshold ?? ''}" />
@@ -109,7 +119,7 @@ function checkBudget(): void {
     if (!state.budgetDismissed) {
       banner.className = 'budget-banner';
       banner.innerHTML = `Budget exceeded: $${total.toFixed(0)} / $${state.budgetThreshold}
-        <button style="background:none;border:none;color:var(--red);cursor:pointer;font-family:var(--font-mono)">✕</button>`;
+        <button style="background:none;border:none;color:var(--red);cursor:pointer;font-family:var(--font-mono)" aria-label="Dismiss budget warning">✕</button>`;
       banner.querySelector('button')!.addEventListener('click', () => {
         update({ budgetDismissed: true });
       });

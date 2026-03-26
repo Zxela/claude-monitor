@@ -22,19 +22,19 @@ export function render(container: HTMLElement): void {
       CLAUDE MONITOR
     </div>
     <div class="topbar-stat"><span>ACTIVE</span> <span class="val green" data-stat="active">0</span></div>
-    <div class="topbar-stat" title="Lifetime cost across all discovered sessions"><span>TOTAL SPEND</span> <span class="budget-gear">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
+    <div class="topbar-stat" title="Lifetime cost across all discovered sessions"><span>TOTAL SPEND</span> <span class="budget-gear" role="button" tabindex="0" aria-label="Open budget and notification settings">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
     <div class="topbar-stat"><span>WORKING</span> <span class="val cyan" data-stat="working">0</span></div>
     <div class="topbar-stat" title="Weighted cache read percentage across all sessions"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
     <div class="topbar-stat" title="Aggregate cost velocity across all active sessions"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
     <div class="search-box">
-      <input type="text" placeholder="Search all sessions..." data-search />
+      <input type="text" placeholder="Search all sessions..." data-search aria-label="Search sessions" />
     </div>
-    <div class="view-toggle">
-      <button class="view-btn active" data-view="list">LIST</button>
-      <button class="view-btn" data-view="graph">GRAPH</button>
-      <button class="view-btn" data-view="history">HISTORY</button>
-      <button class="view-btn" data-view="table">TABLE</button>
-    </div>
+    <nav class="view-toggle" aria-label="View selection">
+      <button class="view-btn active" data-view="list" aria-pressed="true">LIST</button>
+      <button class="view-btn" data-view="graph" aria-pressed="false">GRAPH</button>
+      <button class="view-btn" data-view="history" aria-pressed="false">HISTORY</button>
+      <button class="view-btn" data-view="table" aria-pressed="false">TABLE</button>
+    </nav>
   `;
   container.appendChild(el);
 
@@ -75,10 +75,21 @@ export function render(container: HTMLElement): void {
   // Cost breakdown popover on clicking the cost value
   const costVal = el.querySelector('[data-stat="cost"]');
   if (costVal) {
-    (costVal as HTMLElement).style.cursor = 'pointer';
-    costVal.addEventListener('click', (e) => {
+    const costEl = costVal as HTMLElement;
+    costEl.style.cursor = 'pointer';
+    costEl.setAttribute('role', 'button');
+    costEl.setAttribute('tabindex', '0');
+    costEl.setAttribute('aria-label', 'Total spend — click to view cost breakdown');
+    costEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      toggleCostBreakdown(costVal as HTMLElement);
+      toggleCostBreakdown(costEl);
+    });
+    costEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleCostBreakdown(costEl);
+      }
     });
   }
 }
@@ -89,7 +100,9 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   }
   if (changed.has('view')) {
     el?.querySelectorAll<HTMLButtonElement>('.view-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === state.view);
+      const isActive = btn.dataset.view === state.view;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-pressed', String(isActive));
     });
   }
 }

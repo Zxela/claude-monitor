@@ -104,6 +104,8 @@ function renderFeedPanel(): void {
   // Feed content area
   feedContent = document.createElement('div');
   feedContent.className = 'feed-content';
+  feedContent.setAttribute('aria-live', 'polite');
+  feedContent.setAttribute('aria-label', 'Live event feed');
   feedContent.innerHTML = '<div class="feed-empty">WAITING FOR EVENTS...</div>';
   feedContent.addEventListener('scroll', () => {
     if (!feedContent) return;
@@ -136,13 +138,25 @@ function updateHeader(): void {
     const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
       <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
-      <span class="timeline-btn" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
-      <span class="back-to-feed" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
-    headerEl.querySelector('.back-to-feed')?.addEventListener('click', () => {
-      update({ selectedSessionId: null });
+      <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
+      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
+    const backBtn = headerEl.querySelector('.back-to-feed');
+    backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
+    backBtn?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        update({ selectedSessionId: null });
+      }
     });
-    headerEl.querySelector('.timeline-btn')?.addEventListener('click', () => {
+    const timelineBtn = headerEl.querySelector('.timeline-btn');
+    timelineBtn?.addEventListener('click', () => {
       if (state.selectedSessionId) openTimeline(state.selectedSessionId);
+    });
+    timelineBtn?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        if (state.selectedSessionId) openTimeline(state.selectedSessionId);
+      }
     });
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>

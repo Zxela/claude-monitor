@@ -26,13 +26,16 @@ export function toggle(anchor: HTMLElement): void {
 
   popover = document.createElement('div');
   popover.className = 'cost-breakdown';
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-modal', 'false');
+  popover.setAttribute('aria-label', 'Cost breakdown');
   popover.addEventListener('click', e => e.stopPropagation());
 
   // Build content
   popover.innerHTML = `
     <div class="cb-header">Cost Breakdown</div>
     <div class="cb-row">
-      <canvas class="cb-chart" width="120" height="120"></canvas>
+      <canvas class="cb-chart" width="120" height="120" role="img" aria-label="Cost by model donut chart"></canvas>
       <div class="cb-legend"></div>
     </div>
     <div class="cb-section">Tokens</div>

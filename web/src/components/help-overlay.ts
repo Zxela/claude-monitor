@@ -12,6 +12,9 @@ export function toggle(): void {
 
   overlay = document.createElement('div');
   overlay.className = 'help-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'Keyboard shortcuts');
   overlay.innerHTML = `
     <div class="help-content">
       <h3>Keyboard Shortcuts</h3>
@@ -35,6 +38,9 @@ export function toggle(): void {
 
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) { overlay!.remove(); overlay = null; }
+  });
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { overlay!.remove(); overlay = null; }
   });
 
   document.body.appendChild(overlay);

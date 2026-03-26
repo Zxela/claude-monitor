@@ -27,12 +27,20 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   const childCount = session.children?.length ?? 0;
   const isExpanded = expandedParents.has(session.id);
 
+  const dotLabel = session.isActive
+    ? (session.status === 'thinking' ? 'Status: thinking' : session.status === 'tool_use' ? 'Status: using tool' : 'Status: active')
+    : 'Status: idle';
+
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', `Session: ${displayName}`);
+
   el.innerHTML = `
     <div class="session-card-content">
       <div class="session-row1">
-        <span class="session-dot ${dotClass}"></span>
+        <span class="session-dot ${dotClass}" aria-label="${dotLabel}" role="img"></span>
         <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
-        ${childCount > 0 ? `<span class="subagent-chevron">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+        ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
         ${session.status !== 'idle'
           ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : session.status.toUpperCase()}</span>`
           : session.isActive
@@ -59,7 +67,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   // Chevron click: toggle expand only (don't select)
   const chevron = el.querySelector('.subagent-chevron');
   if (chevron) {
-    chevron.addEventListener('click', (e) => {
+    const toggleExpand = (e: Event) => {
       e.stopPropagation();
       if (expandedParents.has(session.id)) {
         expandedParents.delete(session.id);
@@ -68,15 +76,29 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       }
       // Trigger re-render via state change
       update({ renderVersion: state.renderVersion + 1 });
+    };
+    chevron.addEventListener('click', toggleExpand);
+    chevron.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        toggleExpand(e);
+      }
     });
   }
 
   // Card click: select session (and auto-expand if has children)
-  el.addEventListener('click', () => {
+  const selectSession = () => {
     if (childCount > 0 && !expandedParents.has(session.id)) {
       expandedParents.add(session.id);
     }
     update({ selectedSessionId: session.id === state.selectedSessionId ? null : session.id });
+  };
+  el.addEventListener('click', selectSession);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      selectSession();
+    }
   });
 
   container.appendChild(el);
@@ -84,12 +106,21 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   // Error count click — filter feed to errors only
   const errEl = el.querySelector('.session-error-count');
   if (errEl) {
-    errEl.addEventListener('click', (e) => {
+    errEl.setAttribute('role', 'button');
+    errEl.setAttribute('tabindex', '0');
+    const filterErrors = (e: Event) => {
       e.stopPropagation();
       update({
         selectedSessionId: session.id,
         feedTypeFilters: { user: false, assistant: false, tool_use: false, tool_result: false, agent: false, hook: false, error: true },
       });
+    };
+    errEl.addEventListener('click', filterErrors);
+    errEl.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        filterErrors(e);
+      }
     });
   }
 
@@ -116,10 +147,12 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
     if (idleChildren.length > 0) {
       const toggle = document.createElement('div');
       toggle.className = 'idle-toggle';
+      toggle.setAttribute('role', 'button');
+      toggle.setAttribute('tabindex', '0');
       toggle.textContent = showIdle
         ? `Hide ${idleChildren.length} idle`
         : `Show ${idleChildren.length} idle`;
-      toggle.addEventListener('click', (e) => {
+      const toggleIdle = (e: Event) => {
         e.stopPropagation();
         if (showIdleChildren.has(session.id)) {
           showIdleChildren.delete(session.id);
@@ -127,6 +160,13 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
           showIdleChildren.add(session.id);
         }
         update({ renderVersion: state.renderVersion + 1 });
+      };
+      toggle.addEventListener('click', toggleIdle);
+      toggle.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+          e.preventDefault();
+          toggleIdle(e);
+        }
       });
       container.appendChild(toggle);
     }
@@ -151,10 +191,18 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   const childCount = session.children?.length ?? 0;
   const isExpanded = expandedParents.has(session.id);
 
+  const compactDotLabel = session.isActive
+    ? (session.status === 'thinking' ? 'Status: thinking' : session.status === 'tool_use' ? 'Status: using tool' : 'Status: active')
+    : 'Status: idle';
+
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', `Session: ${displayName}`);
+
   el.innerHTML = `
-    <span class="session-dot ${dotClass}"></span>
+    <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
     <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
-    ${childCount > 0 ? `<span class="subagent-chevron">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+    ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
     <span class="cost">$${session.totalCostUSD.toFixed(2)}</span>
     <span class="duration">${timeAgo(session.lastActive)}</span>
     <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
@@ -162,9 +210,9 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   `;
 
   // Chevron click
-  const chevron = el.querySelector('.subagent-chevron');
-  if (chevron) {
-    chevron.addEventListener('click', (e) => {
+  const compactChevron = el.querySelector('.subagent-chevron');
+  if (compactChevron) {
+    const toggleCompactExpand = (e: Event) => {
       e.stopPropagation();
       if (expandedParents.has(session.id)) {
         expandedParents.delete(session.id);
@@ -172,14 +220,28 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
         expandedParents.add(session.id);
       }
       update({ renderVersion: state.renderVersion + 1 });
+    };
+    compactChevron.addEventListener('click', toggleCompactExpand);
+    compactChevron.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        toggleCompactExpand(e);
+      }
     });
   }
 
-  el.addEventListener('click', () => {
+  const selectCompactSession = () => {
     if (childCount > 0 && !expandedParents.has(session.id)) {
       expandedParents.add(session.id);
     }
     update({ selectedSessionId: session.id === state.selectedSessionId ? null : session.id });
+  };
+  el.addEventListener('click', selectCompactSession);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      selectCompactSession();
+    }
   });
 
   container.appendChild(el);
@@ -206,10 +268,12 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     if (idleChildren.length > 0) {
       const toggle = document.createElement('div');
       toggle.className = 'idle-toggle';
+      toggle.setAttribute('role', 'button');
+      toggle.setAttribute('tabindex', '0');
       toggle.textContent = showIdle
         ? `Hide ${idleChildren.length} idle`
         : `Show ${idleChildren.length} idle`;
-      toggle.addEventListener('click', (e) => {
+      const toggleIdle = (e: Event) => {
         e.stopPropagation();
         if (showIdleChildren.has(session.id)) {
           showIdleChildren.delete(session.id);
@@ -217,6 +281,13 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
           showIdleChildren.add(session.id);
         }
         update({ renderVersion: state.renderVersion + 1 });
+      };
+      toggle.addEventListener('click', toggleIdle);
+      toggle.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+          e.preventDefault();
+          toggleIdle(e);
+        }
       });
       container.appendChild(toggle);
     }
