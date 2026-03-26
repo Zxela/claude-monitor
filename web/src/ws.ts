@@ -33,7 +33,13 @@ export function connect(): void {
   };
 
   ws.onmessage = (e) => {
-    const event: WsEvent = JSON.parse(e.data);
+    let event: WsEvent;
+    try {
+      event = JSON.parse(e.data);
+    } catch {
+      console.warn('ws: failed to parse message', e.data);
+      return;
+    }
     update({ eventCount: state.eventCount + 1 });
 
     if (event.session) {
