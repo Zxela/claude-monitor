@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/Zxela/claude-monitor/compare/v1.14.0...v1.14.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* sessions leave active tab after 30s, history always re-fetches ([01229ee](https://github.com/Zxela/claude-monitor/commit/01229eeb2c29fb4465632bd1b46dbe4b971405b0))
+
 ## [1.14.0](https://github.com/Zxela/claude-monitor/compare/v1.13.2...v1.14.0) (2026-03-26)
 
 
