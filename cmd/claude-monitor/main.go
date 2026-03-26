@@ -552,6 +552,7 @@ func main() {
 					results = append(results, searchResult{
 						SessionID:     sess.ID,
 						SessionName:   displayName,
+						ProjectName:   sess.ProjectName,
 						ParsedMessage: ev.ParsedMessage,
 					})
 				}
