@@ -21,10 +21,10 @@ export function render(container: HTMLElement): void {
       CLAUDE MONITOR
     </div>
     <div class="topbar-stat"><span>ACTIVE</span> <span class="val green" data-stat="active">0</span></div>
-    <div class="topbar-stat"><span>TOTAL SPEND</span> <span class="budget-gear">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
+    <div class="topbar-stat" title="Lifetime cost across all discovered sessions"><span>TOTAL SPEND</span> <span class="budget-gear">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
     <div class="topbar-stat"><span>WORKING</span> <span class="val cyan" data-stat="working">0</span></div>
-    <div class="topbar-stat"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
-    <div class="topbar-stat"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
+    <div class="topbar-stat" title="Weighted cache read percentage across all sessions"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
+    <div class="topbar-stat" title="Aggregate cost velocity across all active sessions"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
     <div class="search-box">
       <input type="text" placeholder="Search all sessions..." data-search />
     </div>

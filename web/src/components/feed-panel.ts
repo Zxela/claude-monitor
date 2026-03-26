@@ -228,8 +228,14 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   const msgType = detectType(msg);
 
   // Tool results inherit type from originating call (clean up map entry).
-  if (msgType === 'tool_result' && msg.forToolUseId && toolUseMap.has(msg.forToolUseId)) {
-    toolUseMap.delete(msg.forToolUseId);
+  if (msgType === 'tool_result') {
+    const forId = msg.forToolUseId;
+    if (forId && toolUseMap.has(forId)) {
+      const inheritedType = toolUseMap.get(forId)!;
+      entry.dataset.type = inheritedType;
+      // Keep tool_result styling but inherited type for filtering
+      toolUseMap.delete(forId);
+    }
   }
 
   const type = msgType;

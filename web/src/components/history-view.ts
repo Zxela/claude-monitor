@@ -45,12 +45,32 @@ async function loadData(): Promise<void> {
   }
 }
 
+function exportCsv(): void {
+  const headers = COLUMNS.map(c => c.label);
+  const rows = sortData([...data]).map(r => COLUMNS.map(c => `"${c.fmt(r).replace(/"/g, '""')}"`).join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `claude-monitor-history-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function show(): void {
   if (!container) return;
   container.innerHTML = '';
 
   const wrapper = document.createElement('div');
   wrapper.className = 'view-overlay';
+
+  // Export button
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = 'Export CSV';
+  exportBtn.style.cssText = 'margin:8px 10px;padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
+  exportBtn.addEventListener('click', exportCsv);
+  wrapper.appendChild(exportBtn);
 
   const table = document.createElement('table');
   const thead = document.createElement('thead');

@@ -183,6 +183,14 @@
   50% { opacity: 0.3; }
 }
 
+@keyframes cardSlideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.session-card { animation: cardSlideIn 0.3s ease-out; }
+.session-card-compact { animation: cardSlideIn 0.2s ease-out; }
+
 .session-card .session-name {
   flex: 1;
   font-weight: 600;
