@@ -1,6 +1,7 @@
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { isSessionActive } from '../utils';
+import { toggle as toggleCostBreakdown } from './cost-breakdown';
 import '../styles/topbar.css';
 
 let el: HTMLElement | null = null;
@@ -70,6 +71,16 @@ export function render(container: HTMLElement): void {
   });
 
   subscribe(onStateChange);
+
+  // Cost breakdown popover on clicking the cost value
+  const costVal = el.querySelector('[data-stat="cost"]');
+  if (costVal) {
+    (costVal as HTMLElement).style.cursor = 'pointer';
+    costVal.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleCostBreakdown(costVal as HTMLElement);
+    });
+  }
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
