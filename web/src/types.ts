@@ -71,6 +71,7 @@ export interface HistoryRow {
   cwd: string;
   gitBranch: string;
   taskDescription: string;
+  parentId?: string;
 }
 
 export interface WsEvent {
