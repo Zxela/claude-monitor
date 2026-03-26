@@ -170,9 +170,10 @@
 }
 
 .fe-time {
-  flex: 0 0 72px;
+  flex: 0 0 85px;
   color: #44445a;
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .fe-type {
