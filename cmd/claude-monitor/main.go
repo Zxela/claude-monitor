@@ -548,7 +548,7 @@ func main() {
 			parser.ParsedMessage
 		}
 
-		var results []searchResult
+		results := make([]searchResult, 0)
 		for _, sess := range sessionStore.All() {
 			if sess.FilePath == "" {
 				continue
