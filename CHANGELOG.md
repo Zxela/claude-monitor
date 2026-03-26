@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.3](https://github.com/Zxela/claude-monitor/compare/v1.16.2...v1.16.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* history DB now persists all inactive sessions, not just transitions ([553a080](https://github.com/Zxela/claude-monitor/commit/553a080f22a41fc445bcbca4a65e97f4cc2fbc69))
+
 ## [1.16.2](https://github.com/Zxela/claude-monitor/compare/v1.16.1...v1.16.2) (2026-03-26)
 
 
