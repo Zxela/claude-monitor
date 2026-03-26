@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.6](https://github.com/Zxela/claude-monitor/compare/v1.10.5...v1.10.6) (2026-03-26)
+
+
+### Bug Fixes
+
+* move expand button inline after truncated text ([ee66907](https://github.com/Zxela/claude-monitor/commit/ee66907fe5fbafae87698ab345516242631f0710))
+
 ## [1.10.5](https://github.com/Zxela/claude-monitor/compare/v1.10.4...v1.10.5) (2026-03-26)
 
 
