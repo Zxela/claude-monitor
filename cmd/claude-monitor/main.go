@@ -637,6 +637,12 @@ func main() {
 		w.Write([]byte(`{"ok":true}`))
 	})
 
+	// Version endpoint.
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"version": version})
+	})
+
 	addr := fmt.Sprintf(":%d", *port)
 	srv := &http.Server{
 		Addr:         addr,

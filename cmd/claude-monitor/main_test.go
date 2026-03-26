@@ -1,10 +1,60 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestVersionEndpoint(t *testing.T) {
+	// Build the binary with a known version string.
+	cmd := exec.Command("go", "build", "-ldflags", "-X main.version=v1.0.0-test", "-o", "/tmp/claude-monitor-ver-test", "./")
+	cmd.Dir = "."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+
+	// Start the server on port 17701.
+	srv := exec.Command("/tmp/claude-monitor-ver-test", "--port", "17701")
+	if err := srv.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	defer srv.Process.Kill()
+
+	// Wait for server to be ready.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://localhost:17701/health")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// GET /api/version.
+	resp, err := http.Get("http://localhost:17701/api/version")
+	if err != nil {
+		t.Fatalf("GET /api/version failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if got := body["version"]; got != "v1.0.0-test" {
+		t.Errorf("expected version %q, got %q", "v1.0.0-test", got)
+	}
+}
 
 func TestVersionFlag(t *testing.T) {
 	// Build the binary
