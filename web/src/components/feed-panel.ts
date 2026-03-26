@@ -105,7 +105,8 @@ function renderFeedPanel(): void {
   feedContent = document.createElement('div');
   feedContent.className = 'feed-content';
   feedContent.setAttribute('aria-live', 'polite');
-  feedContent.setAttribute('aria-label', 'Live event feed');
+  const sess = state.selectedSessionId ? state.sessions.get(state.selectedSessionId) : null;
+  feedContent.setAttribute('aria-label', sess?.isActive !== false ? 'Live event feed' : 'Session history');
   feedContent.innerHTML = '<div class="feed-empty">WAITING FOR EVENTS...</div>';
   feedContent.addEventListener('scroll', () => {
     if (!feedContent) return;
@@ -136,9 +137,12 @@ function updateHeader(): void {
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
     const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
-    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
+    const isLive = sess?.isActive ?? false;
+    const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
+    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
       <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
+      ${!isLive ? '<span class="replay-btn" role="button" tabindex="0" aria-label="Replay session" style="margin-left:4px;color:var(--purple,#a855f7);font-size:9px;cursor:pointer;border:1px solid rgba(168,85,247,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">▶ REPLAY</span>' : ''}
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
@@ -158,6 +162,22 @@ function updateHeader(): void {
         if (state.selectedSessionId) openTimeline(state.selectedSessionId);
       }
     });
+    if (!isLive) {
+      const replayBtn = headerEl.querySelector('.replay-btn');
+      replayBtn?.addEventListener('click', () => {
+        if (state.selectedSessionId) {
+          update({ replaySessionId: state.selectedSessionId });
+        }
+      });
+      replayBtn?.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+          e.preventDefault();
+          if (state.selectedSessionId) {
+            update({ replaySessionId: state.selectedSessionId });
+          }
+        }
+      });
+    }
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
       <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
