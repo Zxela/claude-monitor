@@ -101,6 +101,7 @@ func main() {
 	log.SetOutput(os.Stderr)
 
 	port := flag.Int("port", 7700, "HTTP listen port")
+	bind := flag.String("bind", "127.0.0.1", "address to bind to (use 0.0.0.0 for all interfaces)")
 	var extraPaths repeatable
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
@@ -778,7 +779,7 @@ func main() {
 		log.Println("swagger UI enabled at /swagger")
 	}
 
-	addr := fmt.Sprintf(":%d", *port)
+	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      mux,
@@ -802,7 +803,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("claude-monitor listening on http://localhost%s", addr)
+	log.Printf("claude-monitor listening on http://%s", addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server error: %v", err)
 	}
