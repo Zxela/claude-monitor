@@ -6,10 +6,12 @@ import { fetchRecentMessages } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml } from '../utils';
+import { setLastTool } from '../tool-tracker';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
 let feedContent: HTMLElement | null = null;
+let lastToolEntry: HTMLElement | null = null;
 let filterBar: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
 let scrollLockBtn: HTMLElement | null = null;
@@ -54,6 +56,11 @@ function onWsMessage(event: WsEvent): void {
 
   // In single-session mode, only show messages for selected session
   if (state.selectedSessionId && event.session.id !== state.selectedSessionId) return;
+
+  if (event.message.toolName && event.message.role === 'assistant') {
+    const toolInfo = event.message.toolName + (event.message.toolDetail ? ': ' + event.message.toolDetail.slice(0, 60) : '');
+    setLastTool(event.session.id, toolInfo);
+  }
 
   const sessionName = event.session.sessionName || event.session.projectName || event.session.id.slice(0, 8);
   const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
@@ -198,6 +205,16 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   const type = detectType(msg);
   const visible = state.feedTypeFilters[type] ?? true;
   if (!visible) entry.style.display = 'none';
+
+  if (type === 'tool_use') {
+    entry.classList.add('tool-group-start');
+    lastToolEntry = entry;
+  } else if (type === 'tool_result' && lastToolEntry) {
+    entry.classList.add('tool-group-end');
+    lastToolEntry = null;
+  } else {
+    lastToolEntry = null;
+  }
 
   feedContent.appendChild(entry);
 

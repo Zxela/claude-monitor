@@ -384,3 +384,17 @@
 }
 
 .scroll-lock-btn.visible { display: block; }
+
+.feed-entry.tool-group-start {
+  margin-bottom: 0;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+}
+.feed-entry.tool-group-end {
+  margin-top: 0;
+  padding-left: 28px;
+  border-radius: 0 0 3px 3px;
+  font-size: 11px;
+  opacity: 0.75;
+  border-left: 2px solid rgba(0,204,255,0.2);
+}
