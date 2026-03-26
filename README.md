@@ -16,6 +16,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="100%" />
+</p>
+
 ## Install
 
 ```bash
@@ -81,6 +85,16 @@ claude-monitor --swagger
 </td></tr>
 </table>
 
+<details>
+<summary><strong>Live Feed</strong> — click to expand</summary>
+<img src="docs/screenshots/feed.png" alt="Live Feed" width="100%" />
+</details>
+
+<details>
+<summary><strong>Search</strong> — click to expand</summary>
+<img src="docs/screenshots/search.png" alt="Search" width="100%" />
+</details>
+
 ### Views
 
 | View | Shortcut | Description |
@@ -91,6 +105,21 @@ claude-monitor --swagger
 | **History** | `h` | SQLite-backed table of completed sessions |
 | **Timeline** | click | Horizontal waterfall of events with zoom/pan |
 | **Replay** | click | Session replay with scrubber, speed control, SSE stream |
+
+<details>
+<summary><strong>Graph View</strong> — click to expand</summary>
+<img src="docs/screenshots/graph.png" alt="Graph View" width="100%" />
+</details>
+
+<details>
+<summary><strong>Table View</strong> — click to expand</summary>
+<img src="docs/screenshots/table.png" alt="Table View" width="100%" />
+</details>
+
+<details>
+<summary><strong>History View</strong> — click to expand</summary>
+<img src="docs/screenshots/history.png" alt="History View" width="100%" />
+</details>
 
 ### Keyboard Shortcuts
 
