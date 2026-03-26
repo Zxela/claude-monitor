@@ -152,9 +152,11 @@ function updateHeader(): void {
 
 function handleFilterClick(type: string, e: MouseEvent): void {
   if (type === 'all') {
+    // Toggle: if all on → all off, if any off → all on
+    const allOn = FILTER_TYPES.every(t => t === 'all' || state.feedTypeFilters[t]);
     const filters: Record<string, boolean> = {};
     for (const t of FILTER_TYPES) {
-      if (t !== 'all') filters[t] = true;
+      if (t !== 'all') filters[t] = !allOn;
     }
     update({ feedTypeFilters: filters });
   } else if (e.shiftKey) {

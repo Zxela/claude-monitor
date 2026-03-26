@@ -114,10 +114,12 @@ function renderFromState(): void {
     older: [],
   };
 
-  const ACTIVE_THRESHOLD = 30_000; // 30 seconds, matches Go backend
+  // Use 45s threshold (not 30s) to prevent flashing at the boundary.
+  // The backend uses 30s, but client-side re-renders can oscillate
+  // if a session is right at the edge. 45s adds hysteresis.
+  const ACTIVE_THRESHOLD = 45_000;
 
   for (const sess of state.sessions.values()) {
-    // Re-evaluate isActive client-side — the cached flag may be stale
     const lastActiveMs = new Date(sess.lastActive).getTime();
     const isActive = (now - lastActiveMs) < ACTIVE_THRESHOLD;
 
