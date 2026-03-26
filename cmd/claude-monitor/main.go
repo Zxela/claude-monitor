@@ -28,6 +28,9 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
 )
 
+// version is set by -ldflags at build time.
+var version = "dev"
+
 //go:embed static
 var staticFiles embed.FS
 
@@ -85,6 +88,12 @@ func main() {
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
+	// Handle --version before any other initialization.
+	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Printf("claude-monitor %s\n", version)
+		os.Exit(0)
+	}
+
 	flag.Parse()
 
 	// Auto-enable Docker discovery if the socket exists and --docker wasn't explicitly set.
