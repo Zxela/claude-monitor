@@ -66,8 +66,7 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +
     `<span class="fe-type ${type}">[${type}]</span>` +
-    `<span class="fe-content ${contentClass}">${escapeHtml(content)}</span>` +
-    (hasMore ? `<span class="fe-expand">+</span>` : '') +
+    `<span class="fe-content ${contentClass}">${escapeHtml(content)}${hasMore ? '<span class="fe-expand">+</span>' : ''}</span>` +
     (opts.showSessionId ? `<span class="fe-sid">${escapeHtml(opts.showSessionId.slice(0, 6))}</span>` : '');
 
   if (hasMore) {
