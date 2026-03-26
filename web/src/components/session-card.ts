@@ -2,6 +2,7 @@
 import type { Session } from '../types';
 import { state, update } from '../state';
 import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo } from '../utils';
+import { getLastTool } from '../tool-tracker';
 
 // Track which parent sessions have their children expanded
 export const expandedParents = new Set<string>();
@@ -47,6 +48,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
         <span>${timeAgo(session.lastActive)}</span>
         <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
       </div>
+      ${session.status === 'tool_use' ? `<div class="session-current-tool">${escapeHtml(getLastTool(session.id) || '')}</div>` : ''}
     </div>
   `;
 
@@ -74,6 +76,18 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   });
 
   container.appendChild(el);
+
+  // Error count click — filter feed to errors only
+  const errEl = el.querySelector('.session-error-count');
+  if (errEl) {
+    errEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      update({
+        selectedSessionId: session.id,
+        feedTypeFilters: { user: false, assistant: false, tool_use: false, tool_result: false, agent: false, hook: false, error: true },
+      });
+    });
+  }
 
   // Render children if expanded
   if (childCount > 0 && isExpanded && session.children) {

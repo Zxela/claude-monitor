@@ -344,3 +344,14 @@
 
 .session-card.focused { outline: 1px dashed var(--text-dim); outline-offset: -1px; }
 .session-card-compact.focused { outline: 1px dashed var(--text-dim); outline-offset: -1px; }
+
+.session-current-tool {
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+  margin-top: 2px;
+}
