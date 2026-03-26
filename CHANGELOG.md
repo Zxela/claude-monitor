@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/Zxela/claude-monitor/compare/v1.13.1...v1.13.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* search API returns [] not null when no results (fixes CI test) ([ef299e5](https://github.com/Zxela/claude-monitor/commit/ef299e5cd10ad6ff9ccad33528ce6a6e44042388))
+
 ## [1.13.1](https://github.com/Zxela/claude-monitor/compare/v1.13.0...v1.13.1) (2026-03-26)
 
 
