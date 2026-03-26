@@ -1,5 +1,5 @@
 import './styles/base.css';
-import { state, subscribe, update } from './state';
+import { state, subscribe, update, updateSession } from './state';
 import { connect } from './ws';
 import { fetchGroupedSessions, fetchVersion } from './api';
 import { render as renderTopbar } from './components/topbar';
@@ -77,6 +77,10 @@ async function init() {
       state.sessions.set(sess.id, sess);
     }
     update({ grouped });
+    // Notify subscribers about sessions so topbar stats update
+    if (allSessions.length > 0) {
+      updateSession(allSessions[allSessions.length - 1]);
+    }
   } catch (err) {
     console.error('Failed to load sessions:', err);
   }
