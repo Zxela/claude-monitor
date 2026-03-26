@@ -178,6 +178,7 @@ func main() {
 
 	port := flag.Int("port", 7700, "HTTP listen port")
 	bind := flag.String("bind", "127.0.0.1", "address to bind to (use 0.0.0.0 for all interfaces)")
+	broadcast := flag.Bool("broadcast", false, "listen on all interfaces (shorthand for --bind 0.0.0.0)")
 	var extraPaths repeatable
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
@@ -196,6 +197,11 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// --broadcast is shorthand for --bind 0.0.0.0
+	if *broadcast {
+		*bind = "0.0.0.0"
+	}
 
 	// Auto-enable Docker discovery if the socket exists and --docker wasn't explicitly set.
 	if !*dockerEnabled {
