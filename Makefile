@@ -1,4 +1,4 @@
-.PHONY: build dev clean test lint web
+.PHONY: build dev clean test lint web migrate migrate-status migrate-rollback migrate-create
 
 # Build frontend then Go binary
 build: web
@@ -38,3 +38,23 @@ clean:
 	rm -f claude-monitor
 	rm -rf cmd/claude-monitor/static/assets
 	rm -f cmd/claude-monitor/static/index.html
+
+# --- Migration commands ---
+
+migrate:
+	go run ./cmd/claude-monitor migrate
+
+migrate-status:
+	go run ./cmd/claude-monitor migrate status
+
+migrate-rollback:
+	go run ./cmd/claude-monitor migrate rollback
+
+# Usage: make migrate-create NAME=add_parent_id
+migrate-create:
+	@if [ -z "$(NAME)" ]; then echo "Usage: make migrate-create NAME=add_parent_id"; exit 1; fi
+	@NEXT=$$(ls internal/store/migrations/[0-9]*.go 2>/dev/null | wc -l | tr -d ' '); \
+	NEXT=$$((NEXT + 1)); \
+	FILE=$$(printf "internal/store/migrations/%03d_%s.go" $$NEXT "$(NAME)"); \
+	sed "s/{{.Version}}/$$NEXT/g; s/{{.Name}}/$(NAME)/g" internal/store/migrations/template.go.tmpl > "$$FILE"; \
+	echo "Created $$FILE"
