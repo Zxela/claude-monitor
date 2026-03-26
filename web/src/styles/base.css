@@ -17,6 +17,12 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Custom scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+
 body {
   font-family: var(--font-mono);
   background: var(--bg);

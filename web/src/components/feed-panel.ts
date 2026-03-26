@@ -14,7 +14,7 @@ let autoScroll = true;
 let currentLoadSessionId: string | null = null;
 const MAX_ENTRIES = 500;
 
-const FILTER_TYPES = ['all', 'user', 'assistant', 'tool', 'result', 'agent', 'hook', 'error'] as const;
+const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'hook', 'error'] as const;
 
 export function render(mount: HTMLElement): void {
   container = mount;

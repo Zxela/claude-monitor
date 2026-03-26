@@ -9,9 +9,6 @@
   flex-direction: column;
 }
 
-.sessions-panel::-webkit-scrollbar { width: 4px; }
-.sessions-panel::-webkit-scrollbar-track { background: transparent; }
-.sessions-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 /* Session filter bar (Active / Recent / All) */
 .session-filter-bar {
