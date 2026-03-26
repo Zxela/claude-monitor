@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/Zxela/claude-monitor/compare/v1.18.1...v1.19.0) (2026-03-26)
+
+
+### Features
+
+* add --broadcast flag as shorthand for --bind 0.0.0.0 ([52b869b](https://github.com/Zxela/claude-monitor/commit/52b869b55bacede756fc0ff9f93f69ecf7f7f90b))
+
 ## [1.18.1](https://github.com/Zxela/claude-monitor/compare/v1.18.0...v1.18.1) (2026-03-26)
 
 
