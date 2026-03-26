@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/Zxela/claude-monitor/compare/v1.17.3...v1.18.0) (2026-03-26)
+
+
+### Features
+
+* classify Agent tool calls as 'agent' type, add click-to-navigate to subagent ([04af71a](https://github.com/Zxela/claude-monitor/commit/04af71a4e54a6fa39e032f7e04615b9ed53b59ec))
+
 ## [1.17.3](https://github.com/Zxela/claude-monitor/compare/v1.17.2...v1.17.3) (2026-03-26)
 
 
