@@ -21,6 +21,10 @@ let autoScroll = true;
 let currentLoadSessionId: string | null = null;
 const MAX_ENTRIES = 500;
 
+// Maps toolUseId -> displayType so tool_result messages can inherit their
+// originating tool_use call's display type for consistent grouping/styling.
+const toolUseMap = new Map<string, string>(); // toolUseId -> displayType
+
 const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'hook', 'error'] as const;
 
 export function render(mount: HTMLElement): void {
@@ -212,8 +216,21 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   const empty = feedContent.querySelector('.feed-empty');
   if (empty) empty.remove();
 
+  // Track tool_use IDs for result linking so tool_result messages can
+  // inherit their display type from the originating tool_use call.
+  if (msg.toolName && msg.role === 'assistant' && msg.toolUseId) {
+    toolUseMap.set(msg.toolUseId, detectType(msg));
+  }
+
   const entry = renderFeedEntry(msg, opts);
-  const type = detectType(msg);
+  const msgType = detectType(msg);
+
+  // Tool results inherit type from originating call (clean up map entry).
+  if (msgType === 'tool_result' && msg.forToolUseId && toolUseMap.has(msg.forToolUseId)) {
+    toolUseMap.delete(msg.forToolUseId);
+  }
+
+  const type = msgType;
   const visible = state.feedTypeFilters[type] ?? true;
   if (!visible) entry.style.display = 'none';
 
