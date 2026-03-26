@@ -12,6 +12,7 @@ import { render as renderHistoryView } from './components/history-view';
 import { render as renderBudget } from './components/budget-popover';
 import { open as openReplay } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
+import { init as initHash } from './hash';
 
 // Mount components
 const topbarMount = document.getElementById('topbar-mount')!;
@@ -122,6 +123,7 @@ async function init() {
   }
 
   connect();
+  initHash();
 }
 
 init();
