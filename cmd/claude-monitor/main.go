@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -26,8 +27,10 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/replay"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store"
+	"github.com/zxela-claude/claude-monitor/internal/store/migrations"
 	"github.com/zxela-claude/claude-monitor/internal/update"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
+	_ "modernc.org/sqlite"
 )
 
 // version is set by -ldflags at build time.
@@ -50,6 +53,77 @@ func (r *repeatable) String() string { return fmt.Sprintf("%v", *r) }
 func (r *repeatable) Set(v string) error {
 	*r = append(*r, v)
 	return nil
+}
+
+func handleMigrate(args []string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("cannot determine home directory: %v", err)
+	}
+	dbPath := filepath.Join(homeDir, ".claude-monitor", "history.db")
+
+	// Ensure directory exists.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		log.Fatalf("cannot create data directory: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		log.Fatalf("cannot open database: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		log.Fatalf("cannot set WAL mode: %v", err)
+	}
+
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	switch sub {
+	case "", "up":
+		applied, err := migrations.RunUp(db)
+		if err != nil {
+			log.Fatalf("migration failed: %v", err)
+		}
+		if applied == 0 {
+			current, _, _, _ := migrations.Status(db)
+			fmt.Printf("Schema version: %d (up to date)\n", current)
+		} else {
+			current, _, _, _ := migrations.Status(db)
+			fmt.Printf("Applied %d migration(s). Schema version: %d (up to date)\n", applied, current)
+		}
+
+	case "status":
+		current, latest, pending, err := migrations.Status(db)
+		if err != nil {
+			log.Fatalf("cannot read status: %v", err)
+		}
+		fmt.Printf("Database: %s\n", dbPath)
+		fmt.Printf("Schema version: %d (latest: %d)\n", current, latest)
+		if len(pending) > 0 {
+			fmt.Println("Pending migrations:")
+			for _, name := range pending {
+				fmt.Printf("  - %s\n", name)
+			}
+		} else {
+			fmt.Println("No pending migrations.")
+		}
+
+	case "rollback":
+		name, err := migrations.RunDown(db)
+		if err != nil {
+			log.Fatalf("rollback failed: %v", err)
+		}
+		current, _, _, _ := migrations.Status(db)
+		fmt.Printf("Rolled back: %s\nSchema version: %d\n", name, current)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown migrate command: %s\nUsage: claude-monitor migrate [status|rollback]\n", sub)
+		os.Exit(1)
+	}
 }
 
 // parentSessionIDFromPath extracts the parent session ID from a subagent JSONL
@@ -113,6 +187,12 @@ func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Printf("claude-monitor %s\n", version)
 		os.Exit(0)
+	}
+
+	// Handle 'migrate' subcommand before flag.Parse().
+	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
+		handleMigrate(os.Args[2:])
+		return
 	}
 
 	flag.Parse()
