@@ -1,6 +1,7 @@
 // web/src/components/session-card.ts
 import type { Session } from '../types';
 import { state, update } from '../state';
+import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo } from '../utils';
 
 // Track which parent sessions have their children expanded
 export const expandedParents = new Set<string>();
@@ -57,7 +58,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
         expandedParents.add(session.id);
       }
       // Trigger re-render via state change
-      update({ selectedSessionId: state.selectedSessionId });
+      update({ renderVersion: state.renderVersion + 1 });
     });
   }
 
@@ -120,7 +121,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       } else {
         expandedParents.add(session.id);
       }
-      update({ selectedSessionId: state.selectedSessionId });
+      update({ renderVersion: state.renderVersion + 1 });
     });
   }
 
@@ -150,40 +151,10 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.substring(0, n) + '...' : s;
 }
 
-function timeAgo(ts: string): string {
-  if (!ts) return '';
-  const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (secs < 0) return 'now';
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
 function formatDuration(startedAt: string, lastActive: string): string {
   if (!startedAt) return '';
   const start = new Date(startedAt).getTime();
   const end = lastActive ? new Date(lastActive).getTime() : Date.now();
   const secs = Math.floor((end - start) / 1000);
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  return `${h}h${m}m`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-function escapeHtml(s: string): string {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return formatDurationSecs(secs);
 }

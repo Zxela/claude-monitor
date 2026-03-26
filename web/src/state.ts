@@ -25,6 +25,9 @@ export interface AppState {
   // Budget
   budgetThreshold: number | null;
   budgetDismissed: boolean;
+
+  // Render
+  renderVersion: number;  // bump to force re-renders
 }
 
 type Listener = (state: AppState, changedKeys: Set<string>) => void;
@@ -50,6 +53,7 @@ export const state: AppState = {
   replayPlaying: false,
   budgetThreshold: null,
   budgetDismissed: false,
+  renderVersion: 0,
 };
 
 export function subscribe(listener: Listener): () => void {

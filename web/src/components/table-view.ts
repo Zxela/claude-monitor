@@ -2,11 +2,13 @@
 import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
+import { formatDurationSecs, formatTokens } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
 let sortCol = 'totalCostUSD';
 let sortAsc = false;
+let lastRenderTime = 0;
 
 type Column = { key: string; label: string; cls?: string; fmt: (s: Session) => string };
 
@@ -15,8 +17,8 @@ const COLUMNS: Column[] = [
   { key: 'status', label: 'Status', cls: 'col-dim', fmt: s => s.status },
   { key: 'totalCostUSD', label: 'Cost', cls: 'col-cost', fmt: s => `$${s.totalCostUSD.toFixed(2)}` },
   { key: 'costRate', label: '$/min', cls: 'col-rate', fmt: s => s.costRate > 0 ? `$${s.costRate.toFixed(3)}` : '' },
-  { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: s => fmtDuration(s) },
-  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: s => fmtNum(s.inputTokens + s.outputTokens + s.cacheReadTokens) },
+  { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: s => formatDurationSecs(durationSecs(s)) },
+  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: s => formatTokens(s.inputTokens + s.outputTokens + s.cacheReadTokens) },
   { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: s => `${s.cacheHitPct.toFixed(0)}%` },
   { key: 'messageCount', label: 'Msgs', fmt: s => String(s.messageCount) },
   { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: s => s.errorCount > 0 ? String(s.errorCount) : '' },
@@ -30,11 +32,16 @@ export function render(mount: HTMLElement): void {
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('view') && state.view === 'table') show();
-  if (changed.has('sessions') && state.view === 'table') show();
+  if (changed.has('sessions') && state.view === 'table') {
+    const now = Date.now();
+    if (now - lastRenderTime < 500) return;
+    show();
+  }
 }
 
 function show(): void {
   if (!container) return;
+  lastRenderTime = Date.now();
   container.innerHTML = '';
 
   const wrapper = document.createElement('div');
@@ -99,16 +106,3 @@ function durationSecs(s: Session): number {
   return (end - start) / 1000;
 }
 
-function fmtDuration(s: Session): string {
-  const secs = durationSecs(s);
-  if (secs < 60) return `${Math.floor(secs)}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
-  return `${h}h${m}m`;
-}
-
-function fmtNum(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}

@@ -2,6 +2,7 @@
 import type { ParsedMessage } from '../types';
 import { state, update } from '../state';
 import { renderFeedEntry } from './render-message';
+import { escapeHtml } from '../utils';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -165,8 +166,3 @@ function updateProgress(): void {
   }
 }
 
-function escapeHtml(s: string): string {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
-}

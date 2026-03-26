@@ -30,7 +30,7 @@ export function render(container: HTMLElement): void {
       activeFilter = btn.dataset.filter as typeof activeFilter;
       filterBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      refresh();
+      renderFromState();
     });
   });
   el.appendChild(filterBar);
@@ -42,6 +42,7 @@ export function render(container: HTMLElement): void {
 
   container.appendChild(el);
 
+  // Initial HTTP fetch + periodic poll
   refresh();
   setInterval(refresh, 5000);
   subscribe(onStateChange);
@@ -49,9 +50,9 @@ export function render(container: HTMLElement): void {
   // Keyboard shortcuts 1/2/3 for filter
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.key === '1') { activeFilter = 'active'; refresh(); updateFilterBar(); }
-    if (e.key === '2') { activeFilter = 'recent'; refresh(); updateFilterBar(); }
-    if (e.key === '3') { activeFilter = 'all'; refresh(); updateFilterBar(); }
+    if (e.key === '1') { activeFilter = 'active'; renderFromState(); updateFilterBar(); }
+    if (e.key === '2') { activeFilter = 'recent'; renderFromState(); updateFilterBar(); }
+    if (e.key === '3') { activeFilter = 'all'; renderFromState(); updateFilterBar(); }
   });
 }
 
@@ -71,9 +72,50 @@ async function refresh(): Promise<void> {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('selectedSessionId') || changed.has('sessions') || changed.has('projectFilter')) {
-    refresh();
+  if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
+    renderFromState();
   }
+}
+
+/** Build time groups from state.sessions locally (no HTTP) */
+function renderFromState(): void {
+  const now = Date.now();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - 7);
+
+  const grouped: GroupedSessions = {
+    active: [],
+    lastHour: [],
+    today: [],
+    yesterday: [],
+    thisWeek: [],
+    older: [],
+  };
+
+  for (const sess of state.sessions.values()) {
+    if (sess.isActive) {
+      grouped.active.push(sess);
+      continue;
+    }
+    const lastActiveMs = new Date(sess.lastActive).getTime();
+    if (now - lastActiveMs < 3600_000) {
+      grouped.lastHour.push(sess);
+    } else if (lastActiveMs >= todayStart.getTime()) {
+      grouped.today.push(sess);
+    } else if (lastActiveMs >= yesterdayStart.getTime()) {
+      grouped.yesterday.push(sess);
+    } else if (lastActiveMs >= weekStart.getTime()) {
+      grouped.thisWeek.push(sess);
+    } else {
+      grouped.older.push(sess);
+    }
+  }
+
+  renderGrouped(grouped);
 }
 
 function renderGrouped(grouped: GroupedSessions): void {
@@ -102,13 +144,12 @@ function renderGrouped(grouped: GroupedSessions): void {
   };
 
   // Apply active filter
-  const showActive = true; // always show active
   const showTimeline = activeFilter !== 'active';
   const recentOnly = activeFilter === 'recent';
 
   // Active Now section
   const activeSessions = filterTopLevel(grouped.active);
-  if (activeSessions.length > 0 && showActive) {
+  if (activeSessions.length > 0) {
     const header = document.createElement('div');
     header.className = 'active-section-header';
     header.textContent = `ACTIVE NOW (${activeSessions.length})`;
@@ -185,7 +226,7 @@ function renderGrouped(grouped: GroupedSessions): void {
       showAll.addEventListener('click', (e) => {
         e.stopPropagation();
         expandedGroups.add(key);
-        refresh();
+        renderFromState();
       });
       items.appendChild(showAll);
     }

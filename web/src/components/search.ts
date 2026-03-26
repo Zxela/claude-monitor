@@ -2,6 +2,7 @@ import type { SearchResult } from '../types';
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { fetchSearch } from '../api';
+import { escapeHtml } from '../utils';
 import '../styles/feed.css';
 
 let dropdown: HTMLElement | null = null;
@@ -87,7 +88,7 @@ function renderResults(): void {
         <div class="search-result-header">
           <span class="search-result-session">${escapeHtml(group.name)}</span>
           <span class="search-result-project">${escapeHtml(group.project)}</span>
-          <span class="search-type-badge ${badgeClass(result)}">${badgeLabel(result)}</span>
+          <span class="search-type-badge ${badgeType(result)}">${badgeType(result)}</span>
           <span class="search-result-time">${formatTime(result.timestamp)}</span>
         </div>
         <div class="search-result-body">${highlightMatch(result.contentText, state.searchQuery)}</div>
@@ -109,13 +110,7 @@ function renderResults(): void {
   }
 }
 
-function badgeClass(r: SearchResult): string {
-  if (r.isError) return 'error';
-  if (r.toolName) return 'tool';
-  return r.role || 'assistant';
-}
-
-function badgeLabel(r: SearchResult): string {
+function badgeType(r: SearchResult): string {
   if (r.isError) return 'error';
   if (r.toolName) return 'tool';
   return r.role || 'assistant';
@@ -133,12 +128,6 @@ function highlightMatch(text: string, query: string): string {
   const escaped = escapeHtml(truncated);
   const re = new RegExp(`(${escapeRegex(query)})`, 'gi');
   return escaped.replace(re, '<mark>$1</mark>');
-}
-
-function escapeHtml(s: string): string {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
 }
 
 function escapeRegex(s: string): string {

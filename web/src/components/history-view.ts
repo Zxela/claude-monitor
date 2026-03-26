@@ -3,6 +3,7 @@ import type { HistoryRow } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchHistory } from '../api';
+import { formatDurationSecs, formatTokens } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
@@ -17,8 +18,8 @@ const COLUMNS: Column[] = [
   { key: 'endedAt', label: 'Date', cls: 'col-dim', fmt: r => r.endedAt ? new Date(r.endedAt).toLocaleString() : '' },
   { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.projectName || r.id },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
-  { key: 'durationSeconds', label: 'Duration', cls: 'col-dim', fmt: r => fmtDuration(r.durationSeconds) },
-  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => fmtNum(r.inputTokens + r.outputTokens + r.cacheReadTokens) },
+  { key: 'durationSeconds', label: 'Duration', cls: 'col-dim', fmt: r => formatDurationSecs(r.durationSeconds) },
+  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens) },
   { key: 'messageCount', label: 'Msgs', fmt: r => String(r.messageCount) },
   { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: r => r.errorCount > 0 ? String(r.errorCount) : '' },
   { key: 'model', label: 'Model', cls: 'col-model', fmt: r => (r.model || '').replace('claude-', '') },
@@ -110,15 +111,3 @@ function sortData(rows: HistoryRow[]): HistoryRow[] {
   });
 }
 
-function fmtDuration(secs: number): string {
-  if (secs < 60) return `${Math.floor(secs)}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
-  return `${h}h${m}m`;
-}
-
-function fmtNum(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}

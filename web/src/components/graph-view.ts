@@ -2,6 +2,7 @@
 import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
+import { escapeHtml } from '../utils';
 import '../styles/views.css';
 
 interface GraphNode {
@@ -27,10 +28,14 @@ let tooltip: HTMLElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
 let nodes: GraphNode[] = [];
 let edges: GraphEdge[] = [];
+let nodeMap = new Map<string, GraphNode>();
 let animFrame: number | null = null;
 let dragging: GraphNode | null = null;
 let hovering: GraphNode | null = null;
 let prevNodeIds = '';
+let settledFrames = 0;
+const SETTLE_THRESHOLD = 0.1;
+const SETTLE_FRAMES = 30;
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -143,11 +148,20 @@ function rebuildNodes(): void {
     };
   });
 
+  // Rebuild cached nodeMap
+  nodeMap = new Map(nodes.map(n => [n.id, n]));
+
   edges = [];
   for (const sess of visibleSessions) {
     if (sess.parentId && visibleIds.has(sess.parentId)) {
       edges.push({ source: sess.parentId, target: sess.id });
     }
+  }
+
+  // Reset idle detection and restart animation
+  settledFrames = 0;
+  if (animFrame === null && state.view === 'graph') {
+    startAnimation();
   }
 }
 
@@ -169,8 +183,7 @@ function simulate(): void {
     }
   }
 
-  // Attraction along edges
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  // Attraction along edges (use cached nodeMap)
   for (const edge of edges) {
     const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
     if (!a || !b) continue;
@@ -196,14 +209,21 @@ function simulate(): void {
     n.x = Math.max(n.radius, Math.min(w - n.radius, n.x));
     n.y = Math.max(n.radius, Math.min(h - n.radius, n.y));
   }
+
+  // Idle detection: check if all velocities are below threshold
+  const allSettled = nodes.every(n => Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD);
+  if (allSettled) {
+    settledFrames++;
+  } else {
+    settledFrames = 0;
+  }
 }
 
 function draw(): void {
   if (!ctx || !canvas) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Edges
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  // Edges (use cached nodeMap)
   ctx.strokeStyle = 'rgba(100,100,140,0.3)';
   ctx.lineWidth = 1;
   for (const edge of edges) {
@@ -255,6 +275,13 @@ function getNodeAt(x: number, y: number): GraphNode | null {
 function onMouseDown(e: MouseEvent): void {
   const rect = canvas!.getBoundingClientRect();
   dragging = getNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+  if (dragging) {
+    // Restart animation on drag
+    settledFrames = 0;
+    if (animFrame === null) {
+      startAnimation();
+    }
+  }
 }
 
 function onMouseMove(e: MouseEvent): void {
@@ -303,6 +330,11 @@ function startAnimation(): void {
   function loop() {
     simulate();
     draw();
+    // Stop if settled for enough frames
+    if (settledFrames >= SETTLE_FRAMES) {
+      animFrame = null;
+      return;
+    }
     animFrame = requestAnimationFrame(loop);
   }
   animFrame = requestAnimationFrame(loop);
@@ -313,10 +345,4 @@ function stopAnimation(): void {
     cancelAnimationFrame(animFrame);
     animFrame = null;
   }
-}
-
-function escapeHtml(s: string): string {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
 }

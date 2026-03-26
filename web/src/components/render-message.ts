@@ -1,4 +1,5 @@
 import type { ParsedMessage } from '../types';
+import { escapeHtml } from '../utils';
 
 export interface RenderOptions {
   showSessionId?: string;
@@ -90,8 +91,3 @@ function formatTime(ts: string): string {
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function escapeHtml(s: string): string {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
-}

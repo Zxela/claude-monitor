@@ -11,6 +11,7 @@ let container: HTMLElement | null = null;
 let feedContent: HTMLElement | null = null;
 let filterBar: HTMLElement | null = null;
 let autoScroll = true;
+let currentLoadSessionId: string | null = null;
 const MAX_ENTRIES = 500;
 
 const FILTER_TYPES = ['all', 'user', 'assistant', 'tool', 'result', 'agent', 'hook', 'error'] as const;
@@ -24,16 +25,11 @@ export function render(mount: HTMLElement): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('selectedSessionId')) {
-    if (state.selectedSessionId && state.view === 'list') {
-      renderFeedPanel();
-      loadRecentMessages(state.selectedSessionId);
-    } else if (!state.selectedSessionId && state.view === 'list') {
-      renderEmpty();
-    }
-  }
-  if (changed.has('view')) {
-    // Feed panel only shows in list view with a session selected
+  const sessionChanged = changed.has('selectedSessionId');
+  const viewChanged = changed.has('view');
+
+  // Handle both changing at once, or either individually
+  if (sessionChanged || viewChanged) {
     if (state.view === 'list' && state.selectedSessionId) {
       renderFeedPanel();
       loadRecentMessages(state.selectedSessionId);
@@ -133,15 +129,21 @@ function applyFilters(): void {
 
 async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
+  if (currentLoadSessionId === sessionId) return; // prevent concurrent loads for same session
+  currentLoadSessionId = sessionId;
   feedContent.innerHTML = '';
 
   try {
     const messages = await fetchRecentMessages(sessionId);
+    // Guard: if session changed while loading, discard results
+    if (currentLoadSessionId !== sessionId) return;
     for (const msg of messages) {
       appendMessage(msg as ParsedMessage);
     }
   } catch (err) {
-    feedContent.innerHTML = `<div class="feed-empty">Failed to load messages</div>`;
+    if (currentLoadSessionId === sessionId) {
+      feedContent.innerHTML = `<div class="feed-empty">Failed to load messages</div>`;
+    }
   }
 }
 
