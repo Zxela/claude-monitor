@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.1](https://github.com/Zxela/claude-monitor/compare/v1.16.0...v1.16.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* remove card slide-in animation — caused flashing on every re-render ([98d2ce8](https://github.com/Zxela/claude-monitor/commit/98d2ce869d2a826ea8a6de357c1b666ec1aba94a))
+
 ## [1.16.0](https://github.com/Zxela/claude-monitor/compare/v1.15.0...v1.16.0) (2026-03-26)
 
 
