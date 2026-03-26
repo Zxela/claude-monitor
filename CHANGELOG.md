@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/Zxela/claude-monitor/compare/v1.19.0...v1.20.0) (2026-03-26)
+
+
+### Features
+
+* rename toggle to Minimize all, default subagents collapsed ([90e037f](https://github.com/Zxela/claude-monitor/commit/90e037fea2fce9d8f1fd7b59c58fcaf8ee9f1aa7))
+
 ## [1.19.0](https://github.com/Zxela/claude-monitor/compare/v1.18.1...v1.19.0) (2026-03-26)
 
 
