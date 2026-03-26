@@ -2,6 +2,7 @@
 .sessions-panel {
   width: 270px;
   min-width: 270px;
+  height: 100%;
   border-right: 1px solid var(--border);
   overflow-y: auto;
   display: flex;
