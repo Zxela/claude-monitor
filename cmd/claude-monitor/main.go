@@ -335,10 +335,27 @@ func main() {
 		}
 	}
 
-	// Periodic goroutine: persist history on inactivity transitions.
-	// Also saves any inactive session that hasn't been persisted yet
-	// (handles server restarts where prevActive is lost).
+	// Immediately persist all inactive sessions from bootstrap to history DB.
 	savedToHistory := make(map[string]bool)
+	{
+		saved := 0
+		for _, sess := range sessionStore.All() {
+			if !sess.IsActive && sess.MessageCount > 0 {
+				if err := historyDB.SaveSession(sess); err != nil {
+					log.Printf("history save error for %s: %v", sess.ID, err)
+				} else {
+					saved++
+				}
+				savedToHistory[sess.ID] = true
+			}
+			prevActive[sess.ID] = sess.IsActive
+		}
+		if saved > 0 {
+			log.Printf("persisted %d sessions to history on startup", saved)
+		}
+	}
+
+	// Periodic goroutine: persist history on inactivity transitions.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
