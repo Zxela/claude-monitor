@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/Zxela/claude-monitor/compare/v1.13.0...v1.13.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* run go mod tidy — fix CI lint failure ([c0b100a](https://github.com/Zxela/claude-monitor/commit/c0b100af972ea4bc66dcdabf5bd1504fd480cbe0))
+
 ## [1.13.0](https://github.com/Zxela/claude-monitor/compare/v1.12.2...v1.13.0) (2026-03-26)
 
 
