@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.2](https://github.com/Zxela/claude-monitor/compare/v1.10.1...v1.10.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* address code review — shared utils, perf, broken chevron ([7a20448](https://github.com/Zxela/claude-monitor/commit/7a20448821fbb8ad24c1edc6f850182175ef3041))
+
 ## [1.10.1](https://github.com/Zxela/claude-monitor/compare/v1.10.0...v1.10.1) (2026-03-26)
 
 
