@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.0](https://github.com/Zxela/claude-monitor/compare/v1.15.0...v1.16.0) (2026-03-26)
+
+
+### Features
+
+* cost breakdown popover with donut chart, token bars, top sessions ([d831fa1](https://github.com/Zxela/claude-monitor/commit/d831fa1f5cdb0f7fb5be98a6348af4d9d8b1ee59))
+* responsive layout for mobile/tablet, first-time onboarding tooltip ([9b55e6e](https://github.com/Zxela/claude-monitor/commit/9b55e6e69a903a86966a52b5d26d3dc3eb179ecf))
+
 ## [1.15.0](https://github.com/Zxela/claude-monitor/compare/v1.14.3...v1.15.0) (2026-03-26)
 
 
