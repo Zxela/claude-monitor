@@ -16,6 +16,13 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install and build frontend
+        run: cd web && npm ci && npm run build
+
       - name: Build
         run: go build ./...
 
@@ -38,14 +45,6 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
-
-      - name: Check embedded HTML in sync
-        run: |
-          diff static/index.html cmd/claude-monitor/static/index.html || {
-            echo "ERROR: static/index.html and cmd/claude-monitor/static/index.html are out of sync"
-            echo "Run: cp static/index.html cmd/claude-monitor/static/index.html"
-            exit 1
-          }
 
       - name: Check no debug code
         run: |
