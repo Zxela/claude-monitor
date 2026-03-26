@@ -26,6 +26,7 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/replay"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store"
+	"github.com/zxela-claude/claude-monitor/internal/update"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
 )
 
@@ -316,6 +317,29 @@ func main() {
 
 	// Start hub and watcher.
 	go h.Run()
+
+	// Check for updates in the background (non-blocking).
+	if os.Getenv("CLAUDE_MONITOR_NO_UPDATE_CHECK") != "1" && os.Getenv("CLAUDE_MONITOR_NO_UPDATE_CHECK") != "true" {
+		go func() {
+			rel, err := update.CheckLatest(version)
+			if err != nil {
+				log.Printf("update check: %v", err)
+				return
+			}
+			if rel != nil {
+				log.Printf("update available: %s (current: %s) — %s", rel.Version, version, rel.URL)
+				payload, err := json.Marshal(map[string]string{
+					"event":   "update_available",
+					"version": rel.Version,
+					"url":     rel.URL,
+				})
+				if err == nil {
+					h.Broadcast(payload)
+				}
+			}
+		}()
+	}
+
 	events := w.Start(ctx)
 
 	var dc *docker.Client
