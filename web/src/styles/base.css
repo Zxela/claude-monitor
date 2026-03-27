@@ -95,6 +95,11 @@ body {
   display: contents;
 }
 
+/* Sidebar collapse transition */
+#sessions-mount {
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
 /* Responsive: half-screen / narrow window (~960px) */
 @media (max-width: 1100px) {
   .topbar {
