@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/Zxela/claude-monitor/compare/v1.24.0...v1.24.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* correct cache hit % in history view ([583ece1](https://github.com/Zxela/claude-monitor/commit/583ece19d328c8bc05f38f37f7079635bf006803))
+
 ## [1.24.0](https://github.com/Zxela/claude-monitor/compare/v1.23.0...v1.24.0) (2026-03-27)
 
 
