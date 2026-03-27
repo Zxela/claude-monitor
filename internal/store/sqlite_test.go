@@ -248,3 +248,205 @@ func TestSaveSession_ParentID(t *testing.T) {
 		t.Errorf("Parent's ParentID should be empty, got %q", parentRow.ParentID)
 	}
 }
+
+func TestAggregateStats_All(t *testing.T) {
+	t.Parallel()
+	db, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+
+	// Two top-level sessions
+	s1 := &session.Session{
+		ID:              "top-1",
+		TotalCost:       1.00,
+		InputTokens:     100,
+		OutputTokens:    50,
+		CacheReadTokens: 20,
+		CacheCreationTokens: 10,
+		StartedAt:       now.Add(-10 * time.Minute),
+		LastActive:      now,
+		Model:           "claude-sonnet-4-6",
+	}
+	s2 := &session.Session{
+		ID:              "top-2",
+		TotalCost:       2.00,
+		InputTokens:     200,
+		OutputTokens:    100,
+		CacheReadTokens: 40,
+		CacheCreationTokens: 20,
+		StartedAt:       now.Add(-5 * time.Minute),
+		LastActive:      now,
+		Model:           "claude-opus-4-6",
+	}
+	// One child session — should be excluded from aggregates
+	child := &session.Session{
+		ID:              "child-1",
+		ParentID:        "top-1",
+		TotalCost:       0.50,
+		InputTokens:     50,
+		OutputTokens:    25,
+		CacheReadTokens: 10,
+		StartedAt:       now.Add(-3 * time.Minute),
+		LastActive:      now,
+		Model:           "claude-sonnet-4-6",
+	}
+
+	for _, s := range []*session.Session{s1, s2, child} {
+		if err := db.SaveSession(s); err != nil {
+			t.Fatalf("SaveSession %s failed: %v", s.ID, err)
+		}
+	}
+
+	agg, err := db.AggregateStats(time.Time{})
+	if err != nil {
+		t.Fatalf("AggregateStats failed: %v", err)
+	}
+
+	if agg.SessionCount != 2 {
+		t.Errorf("SessionCount: got %d, want 2", agg.SessionCount)
+	}
+	if agg.TotalCost != 3.00 {
+		t.Errorf("TotalCost: got %f, want 3.00", agg.TotalCost)
+	}
+	if agg.InputTokens != 300 {
+		t.Errorf("InputTokens: got %d, want 300", agg.InputTokens)
+	}
+	if agg.OutputTokens != 150 {
+		t.Errorf("OutputTokens: got %d, want 150", agg.OutputTokens)
+	}
+	if agg.CacheReadTokens != 60 {
+		t.Errorf("CacheReadTokens: got %d, want 60", agg.CacheReadTokens)
+	}
+	if agg.CacheCreationTokens != 30 {
+		t.Errorf("CacheCreationTokens: got %d, want 30", agg.CacheCreationTokens)
+	}
+	if len(agg.CostByModel) != 2 {
+		t.Errorf("CostByModel: got %d models, want 2", len(agg.CostByModel))
+	}
+	if agg.CostByModel["claude-sonnet-4-6"] != 1.00 {
+		t.Errorf("CostByModel[sonnet]: got %f, want 1.00", agg.CostByModel["claude-sonnet-4-6"])
+	}
+	if agg.CostByModel["claude-opus-4-6"] != 2.00 {
+		t.Errorf("CostByModel[opus]: got %f, want 2.00", agg.CostByModel["claude-opus-4-6"])
+	}
+}
+
+func TestAggregateStats_Window(t *testing.T) {
+	t.Parallel()
+	db, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+
+	// Old session (2 hours ago)
+	old := &session.Session{
+		ID:          "old-1",
+		TotalCost:   5.00,
+		InputTokens: 500,
+		StartedAt:   now.Add(-2 * time.Hour),
+		LastActive:  now.Add(-1 * time.Hour),
+		Model:       "claude-sonnet-4-6",
+	}
+	// Recent session (5 minutes ago)
+	recent := &session.Session{
+		ID:          "recent-1",
+		TotalCost:   1.00,
+		InputTokens: 100,
+		StartedAt:   now.Add(-5 * time.Minute),
+		LastActive:  now,
+		Model:       "claude-sonnet-4-6",
+	}
+
+	for _, s := range []*session.Session{old, recent} {
+		if err := db.SaveSession(s); err != nil {
+			t.Fatalf("SaveSession %s failed: %v", s.ID, err)
+		}
+	}
+
+	// Query with window that only includes recent session
+	since := now.Add(-30 * time.Minute)
+	agg, err := db.AggregateStats(since)
+	if err != nil {
+		t.Fatalf("AggregateStats failed: %v", err)
+	}
+
+	if agg.SessionCount != 1 {
+		t.Errorf("SessionCount: got %d, want 1", agg.SessionCount)
+	}
+	if agg.TotalCost != 1.00 {
+		t.Errorf("TotalCost: got %f, want 1.00", agg.TotalCost)
+	}
+	if agg.InputTokens != 100 {
+		t.Errorf("InputTokens: got %d, want 100", agg.InputTokens)
+	}
+}
+
+func TestGetSessionSnapshots(t *testing.T) {
+	t.Parallel()
+	db, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	sess := &session.Session{
+		ID:                  "snap-1",
+		TotalCost:           2.50,
+		InputTokens:         300,
+		OutputTokens:        150,
+		CacheReadTokens:     60,
+		CacheCreationTokens: 30,
+		StartedAt:           now.Add(-10 * time.Minute),
+		LastActive:          now,
+	}
+	if err := db.SaveSession(sess); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+
+	snaps, err := db.GetSessionSnapshots([]string{"snap-1", "nonexistent"})
+	if err != nil {
+		t.Fatalf("GetSessionSnapshots failed: %v", err)
+	}
+
+	snap, ok := snaps["snap-1"]
+	if !ok {
+		t.Fatal("expected snap-1 in result")
+	}
+	if snap.TotalCost != 2.50 {
+		t.Errorf("TotalCost: got %f, want 2.50", snap.TotalCost)
+	}
+	if snap.InputTokens != 300 {
+		t.Errorf("InputTokens: got %d, want 300", snap.InputTokens)
+	}
+	if snap.OutputTokens != 150 {
+		t.Errorf("OutputTokens: got %d, want 150", snap.OutputTokens)
+	}
+	if snap.CacheReadTokens != 60 {
+		t.Errorf("CacheReadTokens: got %d, want 60", snap.CacheReadTokens)
+	}
+	if snap.CacheCreationTokens != 30 {
+		t.Errorf("CacheCreationTokens: got %d, want 30", snap.CacheCreationTokens)
+	}
+
+	// Nonexistent ID should not be in the map
+	if _, ok := snaps["nonexistent"]; ok {
+		t.Error("nonexistent ID should not be in result")
+	}
+
+	// Empty IDs should return empty map
+	empty, err := db.GetSessionSnapshots([]string{})
+	if err != nil {
+		t.Fatalf("GetSessionSnapshots empty failed: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(empty))
+	}
+}
