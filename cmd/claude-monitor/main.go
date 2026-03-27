@@ -680,11 +680,15 @@ Examples:
 		for _, sess := range activeSessions {
 			if snap, ok := snapshots[sess.ID]; ok {
 				// Session is in SQLite — add only the delta (live - saved).
-				resp.TotalCost += sess.TotalCost - snap.TotalCost
+				delta := sess.TotalCost - snap.TotalCost
+				resp.TotalCost += delta
 				resp.InputTokens += sess.InputTokens - snap.InputTokens
 				resp.OutputTokens += sess.OutputTokens - snap.OutputTokens
 				resp.CacheReadTokens += sess.CacheReadTokens - snap.CacheReadTokens
 				resp.CacheCreationTokens += sess.CacheCreationTokens - snap.CacheCreationTokens
+				if delta != 0 && sess.Model != "" {
+					resp.CostByModel[sess.Model] += delta
+				}
 			} else {
 				// Session not in SQLite — add full live values.
 				resp.TotalCost += sess.TotalCost
