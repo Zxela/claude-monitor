@@ -450,3 +450,40 @@ func TestGetSessionSnapshots(t *testing.T) {
 		t.Errorf("expected empty map, got %d entries", len(empty))
 	}
 }
+
+func TestListHistory_CacheHitPctBackfill(t *testing.T) {
+	t.Parallel()
+	db, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	sess := &session.Session{
+		ID:                  "backfill-test",
+		InputTokens:         1000,
+		OutputTokens:        500,
+		CacheReadTokens:     3000,
+		CacheCreationTokens: 500,
+		StartedAt:           now.Add(-10 * time.Minute),
+		LastActive:          now,
+	}
+	if err := db.SaveSession(sess); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+
+	rows, err := db.ListHistory(10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory failed: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+
+	// cache_hit_pct = 3000 / (1000 + 3000 + 500) * 100 = 66.67
+	expected := 3000.0 / 4500.0 * 100
+	if rows[0].CacheHitPct < expected-0.1 || rows[0].CacheHitPct > expected+0.1 {
+		t.Errorf("CacheHitPct: got %f, want ~%f", rows[0].CacheHitPct, expected)
+	}
+}
