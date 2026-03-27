@@ -84,6 +84,10 @@ function show(): void {
 
   if (graphMode === 'graph') {
     canvas = document.createElement('canvas');
+    const visibleCount = Array.from(state.sessions.values())
+      .filter(s => s.isActive || (Date.now() - new Date(s.lastActive).getTime()) < 120_000).length;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `Session graph: ${visibleCount} sessions displayed`);
     wrapper.appendChild(canvas);
 
     tooltip = document.createElement('div');

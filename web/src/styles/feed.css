@@ -222,6 +222,8 @@
   line-height: 14px;
   vertical-align: middle;
   user-select: none;
+  background: none;
+  font-family: inherit;
 }
 
 .fe-expand:hover { background: rgba(0,204,255,0.1); }
