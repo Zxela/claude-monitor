@@ -128,7 +128,7 @@ function renderFeedPanel(): void {
         scrollLockBtn?.classList.remove('visible');
       }
     });
-    document.body.appendChild(scrollLockBtn);
+    container.appendChild(scrollLockBtn);
   }
 }
 
