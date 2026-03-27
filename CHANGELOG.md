@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/Zxela/claude-monitor/compare/v1.21.0...v1.21.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* WebSocket CORS, search index perf, race conditions, error masking ([9add626](https://github.com/Zxela/claude-monitor/commit/9add626aa681ffc857f3dba52c2971490382769b))
+
 ## [1.21.0](https://github.com/Zxela/claude-monitor/compare/v1.20.1...v1.21.0) (2026-03-27)
 
 
