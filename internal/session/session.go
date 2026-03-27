@@ -36,7 +36,7 @@ type Session struct {
 	ProjectName  string    `json:"projectName"`
 	SessionName  string    `json:"sessionName,omitempty"`
 	FilePath     string    `json:"filePath"`
-	TotalCost    float64   `json:"totalCostUSD"`
+	TotalCost    float64   `json:"totalCost"`
 	InputTokens  int64     `json:"inputTokens"`
 	OutputTokens int64     `json:"outputTokens"`
 	CacheReadTokens     int64   `json:"cacheReadTokens"`
