@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/Zxela/claude-monitor/compare/v1.23.0...v1.24.0) (2026-03-27)
+
+
+### Features
+
+* add cache hit % column to history view ([a3aae7e](https://github.com/Zxela/claude-monitor/commit/a3aae7ec828c40ccdacd2ea2708d1926db425a28))
+
 ## [1.23.0](https://github.com/Zxela/claude-monitor/compare/v1.22.0...v1.23.0) (2026-03-27)
 
 
