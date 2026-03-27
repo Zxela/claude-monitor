@@ -370,13 +370,21 @@ Examples:
 			log.Printf("docker discovery: %v (continuing without Docker)", err)
 		} else {
 			go func() {
-				for ev := range dockerCh {
-					if ev.Added {
-						log.Printf("docker: watching %s (%s)", ev.HostPath, ev.ContainerName)
-						w.Add(ev.HostPath, ev.ContainerName)
-					} else {
-						log.Printf("docker: stopped watching %s (%s)", ev.HostPath, ev.ContainerName)
-						w.Remove(ev.HostPath)
+				for {
+					select {
+					case ev, ok := <-dockerCh:
+						if !ok {
+							return
+						}
+						if ev.Added {
+							log.Printf("docker: watching %s (%s)", ev.HostPath, ev.ContainerName)
+							w.Add(ev.HostPath, ev.ContainerName)
+						} else {
+							log.Printf("docker: stopped watching %s (%s)", ev.HostPath, ev.ContainerName)
+							w.Remove(ev.HostPath)
+						}
+					case <-ctx.Done():
+						return
 					}
 				}
 			}()
@@ -434,6 +442,11 @@ Examples:
 						savedToHistory[sess.ID] = true
 					}
 					prevActive[sess.ID] = nowActive
+				}
+				// Prevent unbounded growth: clear the map when it gets too large.
+				// Sessions will simply be re-saved (idempotent upsert) on the next tick.
+				if len(savedToHistory) > 1000 {
+					savedToHistory = make(map[string]bool)
 				}
 				mu.Unlock()
 			}

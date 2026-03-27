@@ -16,6 +16,15 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

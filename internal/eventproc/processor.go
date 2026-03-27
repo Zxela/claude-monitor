@@ -14,6 +14,10 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
 )
 
+// maxMetaCacheSize is the maximum number of entries in the metaCache before
+// it is cleared to prevent unbounded memory growth.
+const maxMetaCacheSize = 500
+
 // agentMeta caches subagent metadata read from .meta.json files.
 type agentMeta struct {
 	AgentType   string `json:"agentType"`
@@ -64,6 +68,9 @@ func (p *Processor) Process(ev watcher.Event) Result {
 					p.metaCache[ev.SessionID] = &meta
 				}
 			}
+		}
+		if len(p.metaCache) > maxMetaCacheSize {
+			p.metaCache = make(map[string]*agentMeta)
 		}
 		p.metaMu.Unlock()
 	}
@@ -299,5 +306,8 @@ func (p *Processor) resolveTeamLead(teamName, sessionID string) string {
 		return ""
 	}
 	p.metaCache[cacheKey] = &agentMeta{Description: cfg.LeadSessionID}
+	if len(p.metaCache) > maxMetaCacheSize {
+		p.metaCache = make(map[string]*agentMeta)
+	}
 	return cfg.LeadSessionID
 }

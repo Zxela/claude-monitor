@@ -52,7 +52,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       <div class="session-row1">
         <span class="session-dot ${dotClass}" aria-label="${dotLabel}" role="img"></span>
         <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
-        ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+        ${childCount > 0 ? `<button type="button" class="subagent-chevron" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</button>` : ''}
         ${session.model ? `<span class="model">${escapeHtml(session.model.replace('claude-', '').replace('-4-6', ''))}</span>` : ''}
         ${session.status !== 'idle'
           ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
@@ -165,10 +165,9 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
 
     // Show toggle for idle subagents if there are any
     if (idleChildren.length > 0) {
-      const toggle = document.createElement('div');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
       toggle.className = 'idle-toggle';
-      toggle.setAttribute('role', 'button');
-      toggle.setAttribute('tabindex', '0');
       toggle.textContent = showIdle
         ? `Hide ${idleChildren.length} idle`
         : `Show ${idleChildren.length} idle`;
@@ -182,12 +181,6 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
         update({ renderVersion: state.renderVersion + 1 });
       };
       toggle.addEventListener('click', toggleIdle);
-      toggle.addEventListener('keydown', (e) => {
-        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
-          e.preventDefault();
-          toggleIdle(e);
-        }
-      });
       container.appendChild(toggle);
     }
   }
@@ -223,7 +216,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     <div class="compact-row">
       <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
       <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
-      ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+      ${childCount > 0 ? `<button type="button" class="subagent-chevron" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</button>` : ''}
       ${session.model ? `<span class="model">${escapeHtml(session.model.replace('claude-', '').replace('-4-6', ''))}</span>` : ''}
       ${session.status !== 'idle'
         ? `<span class="session-status-badge ${compactStatusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
@@ -298,10 +291,9 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     }
 
     if (idleChildren.length > 0) {
-      const toggle = document.createElement('div');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
       toggle.className = 'idle-toggle';
-      toggle.setAttribute('role', 'button');
-      toggle.setAttribute('tabindex', '0');
       toggle.textContent = showIdle
         ? `Hide ${idleChildren.length} idle`
         : `Show ${idleChildren.length} idle`;
@@ -315,12 +307,6 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
         update({ renderVersion: state.renderVersion + 1 });
       };
       toggle.addEventListener('click', toggleIdle);
-      toggle.addEventListener('keydown', (e) => {
-        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
-          e.preventDefault();
-          toggleIdle(e);
-        }
-      });
       container.appendChild(toggle);
     }
   }
@@ -329,14 +315,13 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
 }
 
 export function renderDot(session: Session): HTMLElement {
-  const dot = document.createElement('div');
+  const dot = document.createElement('button');
+  dot.type = 'button';
   dot.className = 'sidebar-dot';
   dot.dataset.sessionId = session.id;
   dot.classList.add(getDotClass(session));
 
   dot.title = session.sessionName || session.projectName || session.id;
-  dot.setAttribute('role', 'button');
-  dot.setAttribute('tabindex', '0');
 
   dot.addEventListener('click', () => {
     const updates: Record<string, unknown> = { selectedSessionId: session.id };
