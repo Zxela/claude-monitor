@@ -13,6 +13,23 @@
   --orange: #f0883e;
   --font-mono: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Surface variants (consolidating ~8 hardcoded dark backgrounds) */
+  --bg-deep: #0f0f1a;
+  --bg-elevated: #1a1a2e;
+
+  /* Status colors for canvas */
+  --status-thinking: var(--yellow);
+  --status-tool: var(--cyan);
+  --status-active: var(--green);
+  --status-idle: #44445a;
+
+  /* Type scale */
+  --text-xs: 9px;
+  --text-sm: 10px;
+  --text-base: 11px;
+  --text-md: 12px;
+  --text-lg: 13px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

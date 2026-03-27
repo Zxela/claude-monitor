@@ -54,7 +54,7 @@
 .topbar-stat .val {
   color: var(--text);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--text-base);
 }
 
 .topbar-stat .val.green { color: var(--green); }

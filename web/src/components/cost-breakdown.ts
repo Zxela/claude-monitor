@@ -1,5 +1,6 @@
 import { state } from '../state';
 import { escapeHtml } from '../utils';
+import { COLORS } from '../colors';
 import '../styles/views.css';
 
 let popover: HTMLElement | null = null;
@@ -52,10 +53,10 @@ export function toggle(anchor: HTMLElement): void {
   const canvas = popover.querySelector<HTMLCanvasElement>('.cb-chart')!;
   const ctx = canvas.getContext('2d')!;
   const colors: Record<string, string> = {
-    'claude-opus-4-6': '#bc8cff',
-    'claude-sonnet-4-6': '#58a6ff',
-    'claude-haiku-4-5-20251001': '#3fb950',
-    'unknown': '#666',
+    'claude-opus-4-6': COLORS.purple,
+    'claude-sonnet-4-6': COLORS.cyan,
+    'claude-haiku-4-5-20251001': COLORS.green,
+    'unknown': COLORS.statusIdle,
   };
   const cx = 60, cy = 60, r = 45, inner = 25;
   let angle = -Math.PI / 2;
@@ -81,12 +82,12 @@ export function toggle(anchor: HTMLElement): void {
     </div>`;
   }
   // Cut out inner circle for donut
-  ctx.fillStyle = '#0f0f1a';
+  ctx.fillStyle = COLORS.bgDeep;
   ctx.beginPath();
   ctx.arc(cx, cy, inner, 0, Math.PI * 2);
   ctx.fill();
   // Center text
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = COLORS.text;
   ctx.font = 'bold 12px monospace';
   ctx.textAlign = 'center';
   ctx.fillText(`$${totalCost.toFixed(0)}`, cx, cy + 4);
@@ -97,11 +98,11 @@ export function toggle(anchor: HTMLElement): void {
   const vals = popover.querySelectorAll<HTMLElement>('.cb-bar-val');
   if (totalTok > 0) {
     bars[0].style.width = `${(totalInput / totalTok * 100).toFixed(0)}%`;
-    bars[0].style.background = '#5588ff';
+    bars[0].style.background = COLORS.user;
     bars[1].style.width = `${(totalOutput / totalTok * 100).toFixed(0)}%`;
-    bars[1].style.background = '#dd8844';
+    bars[1].style.background = COLORS.orange;
     bars[2].style.width = `${(totalCache / totalTok * 100).toFixed(0)}%`;
-    bars[2].style.background = '#3fb950';
+    bars[2].style.background = COLORS.green;
   }
   const fmt = (n: number) => n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}k` : String(n);
   vals[0].textContent = fmt(totalInput);
