@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.21.0](https://github.com/Zxela/claude-monitor/compare/v1.20.1...v1.21.0) (2026-03-27)
+
+
+### Features
+
+* accessibility pass — focus rings, reduced motion, semantic HTML ([9baa262](https://github.com/Zxela/claude-monitor/commit/9baa26270e7c2386fa085fa931768b6a14bbe421))
+* collapsible sidebar with toggle button ([5c60a3d](https://github.com/Zxela/claude-monitor/commit/5c60a3da736772f3d70a94b6066b94ab5749e8a8))
+* consolidate typography and color system ([3b1ee45](https://github.com/Zxela/claude-monitor/commit/3b1ee4535e9da1fbeb369ad99a34d17120dec7c8))
+* differentiate status animations and improve scroll-lock positioning ([1255085](https://github.com/Zxela/claude-monitor/commit/1255085122665e4d9fa1b1f3f17ebc8353e776b1))
+* link team agents to team lead session as children ([ba0a65d](https://github.com/Zxela/claude-monitor/commit/ba0a65de03c3f9ac0a46d5b46a56d5d16b02335b))
+* production readiness overhaul — security, performance, UX, and architecture ([6887256](https://github.com/Zxela/claude-monitor/commit/688725631501baab656b456e8cc4fd6eb09d1f2c))
+* replace force-directed graph with horizontal DAG pipeline view ([fff2377](https://github.com/Zxela/claude-monitor/commit/fff237752351d97a6516e39573339275504d6c62))
+* replace horizontal canvas Gantt chart with vertical HTML timeline ([c91c9b7](https://github.com/Zxela/claude-monitor/commit/c91c9b7a271ec26956b8430a0d421f4482bb066c))
+* session card progressive disclosure, cost tiers, and breakdown filter ([1e01816](https://github.com/Zxela/claude-monitor/commit/1e01816df9e3190b4f8cc01b2320cf5cd45496fd))
+
+
+### Bug Fixes
+
+* cost calculation — deduplicate streaming chunks, update pricing, fix replay ([ade45a9](https://github.com/Zxela/claude-monitor/commit/ade45a963edfdffe377dd443ae8cd344a80d0650))
+
 ## [1.20.1](https://github.com/Zxela/claude-monitor/compare/v1.20.0...v1.20.1) (2026-03-27)
 
 
