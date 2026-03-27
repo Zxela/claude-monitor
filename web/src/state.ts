@@ -9,6 +9,7 @@ export interface AppState {
   searchQuery: string;
   searchResults: SearchResult[];
   searchLoading: boolean;
+  searchError: boolean;
   searchOpen: boolean;
   connected: boolean;
   eventCount: number;
@@ -55,6 +56,7 @@ export const state: AppState = {
   searchQuery: '',
   searchResults: [],
   searchLoading: false,
+  searchError: false,
   searchOpen: false,
   connected: false,
   eventCount: 0,

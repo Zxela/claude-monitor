@@ -22,3 +22,4 @@ web/dist/
 # Vite build output (generated at build time, not committed)
 cmd/claude-monitor/static/
 docs/superpowers/
+.remember/

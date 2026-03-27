@@ -26,7 +26,7 @@ type indexedEntry struct {
 // Index is a concurrency-safe in-memory search index for session messages.
 type Index struct {
 	mu      sync.RWMutex
-	entries []indexedEntry // all indexed entries, newest first
+	entries []indexedEntry // chronological order (oldest first), searched in reverse
 }
 
 // New creates a new empty search index.
@@ -35,7 +35,7 @@ func New() *Index {
 }
 
 // Add indexes a message for a session. Only messages with searchable content
-// (non-empty ContentText, ToolDetail, or ToolName) are stored.
+// (non-empty ContentText, ToolDetail, or ToolName) are stored. O(1) amortized.
 func (idx *Index) Add(sessionID, sessionName, projectName string, msg parser.ParsedMessage) {
 	searchable := msg.ContentText + " " + msg.ToolDetail + " " + msg.ToolName
 	// Skip messages with no meaningful searchable content.
@@ -54,15 +54,12 @@ func (idx *Index) Add(sessionID, sessionName, projectName string, msg parser.Par
 	}
 
 	idx.mu.Lock()
-	// Prepend so newest entries are first.
-	idx.entries = append(idx.entries, indexedEntry{})
-	copy(idx.entries[1:], idx.entries[:len(idx.entries)-1])
-	idx.entries[0] = ie
+	idx.entries = append(idx.entries, ie) // O(1) amortized append
 	idx.mu.Unlock()
 }
 
 // Search returns up to limit entries matching the query (case-insensitive substring).
-// An empty query returns an empty result set.
+// Results are returned newest-first by iterating in reverse.
 func (idx *Index) Search(query string, limit int) []Entry {
 	if query == "" || limit <= 0 {
 		return nil
@@ -73,9 +70,10 @@ func (idx *Index) Search(query string, limit int) []Entry {
 	defer idx.mu.RUnlock()
 
 	results := make([]Entry, 0, limit)
-	for _, ie := range idx.entries {
-		if strings.Contains(ie.searchStr, queryLower) {
-			results = append(results, ie.entry)
+	// Iterate in reverse for newest-first results.
+	for i := len(idx.entries) - 1; i >= 0; i-- {
+		if strings.Contains(idx.entries[i].searchStr, queryLower) {
+			results = append(results, idx.entries[i].entry)
 			if len(results) >= limit {
 				break
 			}

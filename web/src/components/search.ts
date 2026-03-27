@@ -29,9 +29,10 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     debounceTimer = setTimeout(async () => {
       try {
         const results = await fetchSearch(state.searchQuery);
-        update({ searchResults: results, searchLoading: false });
-      } catch {
-        update({ searchResults: [], searchLoading: false });
+        update({ searchResults: results, searchLoading: false, searchError: false });
+      } catch (err) {
+        console.error('Search failed:', err);
+        update({ searchResults: [], searchLoading: false, searchError: true });
       }
     }, 300);
   }
@@ -58,6 +59,11 @@ function renderResults(): void {
 
   if (state.searchLoading) {
     dropdown.innerHTML = '<div class="search-status">Searching...</div>';
+    return;
+  }
+
+  if (state.searchError) {
+    dropdown.innerHTML = `<div class="search-status" style="color:var(--red)">Search failed — check server connection</div>`;
     return;
   }
 

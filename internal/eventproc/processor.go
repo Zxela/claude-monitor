@@ -257,6 +257,8 @@ type teamConfig struct {
 // Results are cached in metaCache (keyed by "team:" + teamName).
 func (p *Processor) resolveTeamLead(teamName, sessionID string) string {
 	cacheKey := "team:" + teamName
+
+	// Check cache first.
 	p.metaMu.Lock()
 	if cached, ok := p.metaCache[cacheKey]; ok {
 		p.metaMu.Unlock()
@@ -267,34 +269,35 @@ func (p *Processor) resolveTeamLead(teamName, sessionID string) string {
 	}
 	p.metaMu.Unlock()
 
+	// Read team config outside the lock (file I/O).
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	configPath := filepath.Join(homeDir, ".claude", "teams", teamName, "config.json")
 	data, err := os.ReadFile(configPath)
+
+	// Cache the result atomically.
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+
+	// Re-check: another goroutine may have populated the cache while we did I/O.
+	if cached, ok := p.metaCache[cacheKey]; ok {
+		if cached != nil {
+			return cached.Description
+		}
+		return ""
+	}
+
 	if err != nil {
-		p.metaMu.Lock()
-		p.metaCache[cacheKey] = nil // cache the miss
-		p.metaMu.Unlock()
+		p.metaCache[cacheKey] = nil
 		return ""
 	}
 	var cfg teamConfig
-	if err := json.Unmarshal(data, &cfg); err != nil || cfg.LeadSessionID == "" {
-		p.metaMu.Lock()
+	if err := json.Unmarshal(data, &cfg); err != nil || cfg.LeadSessionID == "" || cfg.LeadSessionID == sessionID {
 		p.metaCache[cacheKey] = nil
-		p.metaMu.Unlock()
 		return ""
 	}
-	// Don't link the team lead to itself.
-	if cfg.LeadSessionID == sessionID {
-		p.metaMu.Lock()
-		p.metaCache[cacheKey] = nil
-		p.metaMu.Unlock()
-		return ""
-	}
-	p.metaMu.Lock()
 	p.metaCache[cacheKey] = &agentMeta{Description: cfg.LeadSessionID}
-	p.metaMu.Unlock()
 	return cfg.LeadSessionID
 }
