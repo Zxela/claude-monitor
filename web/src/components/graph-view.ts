@@ -134,7 +134,7 @@ function renderSequence(wrapper: HTMLElement): void {
 
     const time = sess.startedAt ? new Date(sess.startedAt).toLocaleTimeString() : '';
     const name = sess.sessionName || sess.projectName || sess.id.slice(0, 8);
-    const cost = `$${sess.totalCostUSD.toFixed(2)}`;
+    const cost = `$${sess.totalCost.toFixed(2)}`;
     const statusClass = sess.isActive
       ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
       : 'idle';
@@ -215,7 +215,7 @@ function rebuildNodes(): void {
 
   nodes = visibleSessions.map(sess => {
     const old = oldNodes.get(sess.id);
-    const radius = Math.min(30, Math.max(8, Math.log(sess.totalCostUSD + 1) * 5 + 8));
+    const radius = Math.min(30, Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8));
     const color = sess.isActive
       ? (sess.status === 'thinking' ? '#ffcc00' : sess.status === 'tool_use' ? '#4488ff' : '#00ff88')
       : '#44445a';
@@ -339,10 +339,10 @@ function draw(): void {
     ctx.fillText(n.label, n.x, n.y + n.radius + 14);
 
     // Cost
-    if (n.session.totalCostUSD > 0.01) {
+    if (n.session.totalCost > 0.01) {
       ctx.fillStyle = '#888';
       ctx.font = '8px monospace';
-      ctx.fillText(`$${n.session.totalCostUSD.toFixed(2)}`, n.x, n.y + n.radius + 24);
+      ctx.fillText(`$${n.session.totalCost.toFixed(2)}`, n.x, n.y + n.radius + 24);
     }
   }
 }
@@ -386,7 +386,7 @@ function onMouseMove(e: MouseEvent): void {
 
   if (node) {
     tooltip.innerHTML = `<div><b>${escapeHtml(node.label)}</b></div>
-      <div>$${node.session.totalCostUSD.toFixed(2)} · ${node.session.messageCount} msgs</div>
+      <div>$${node.session.totalCost.toFixed(2)} · ${node.session.messageCount} msgs</div>
       <div>${node.session.status} · ${node.session.model || '?'}</div>`;
     tooltip.style.left = `${mx + 15}px`;
     tooltip.style.top = `${my + 15}px`;

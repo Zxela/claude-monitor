@@ -4,31 +4,25 @@ import { COLORS } from '../colors';
 import '../styles/views.css';
 
 let popover: HTMLElement | null = null;
-let cbFilter: 'all' | 'today' = 'all';
 
 export function toggle(anchor: HTMLElement): void {
   if (popover) { popover.remove(); popover = null; return; }
 
-  const allSessions = Array.from(state.sessions.values());
-  const todayStr = new Date().toDateString();
-  const sessions = cbFilter === 'today'
-    ? allSessions.filter(s => new Date(s.startedAt).toDateString() === todayStr)
-    : allSessions;
+  const stats = state.stats;
+  if (!stats) return;
 
-  // Aggregate by model
   const byModel = new Map<string, number>();
-  let totalInput = 0, totalOutput = 0, totalCache = 0;
-  for (const s of sessions) {
-    const model = s.model || 'unknown';
-    byModel.set(model, (byModel.get(model) || 0) + s.totalCostUSD);
-    totalInput += s.inputTokens;
-    totalOutput += s.outputTokens;
-    totalCache += s.cacheReadTokens;
+  for (const [model, cost] of Object.entries(stats.costByModel)) {
+    byModel.set(model, cost);
   }
 
-  // Top 5 costliest
-  const top5 = [...sessions].sort((a, b) => b.totalCostUSD - a.totalCostUSD).slice(0, 5);
-  const totalCost = sessions.reduce((s, x) => s + x.totalCostUSD, 0);
+  const totalInput = stats.inputTokens;
+  const totalOutput = stats.outputTokens;
+  const totalCache = stats.cacheReadTokens;
+  const totalCost = stats.totalCost;
+
+  const allSessions = Array.from(state.sessions.values());
+  const top5 = [...allSessions].sort((a, b) => b.totalCost - a.totalCost).slice(0, 5);
 
   popover = document.createElement('div');
   popover.className = 'cost-breakdown';
@@ -40,10 +34,6 @@ export function toggle(anchor: HTMLElement): void {
   // Build content
   popover.innerHTML = `
     <div class="cb-header">Cost Breakdown</div>
-    <div class="cb-filter" style="display:flex;gap:4px;padding:0 8px 6px">
-      <button class="cb-filter-btn${cbFilter === 'all' ? ' active' : ''}" data-filter="all" style="font-family:var(--font-mono);font-size:9px;padding:2px 8px;background:none;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;border-radius:2px">ALL</button>
-      <button class="cb-filter-btn${cbFilter === 'today' ? ' active' : ''}" data-filter="today" style="font-family:var(--font-mono);font-size:9px;padding:2px 8px;background:none;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;border-radius:2px">TODAY</button>
-    </div>
     <div class="cb-row">
       <canvas class="cb-chart" width="120" height="120" role="img" aria-label="Cost by model donut chart"></canvas>
       <div class="cb-legend"></div>
@@ -124,27 +114,9 @@ export function toggle(anchor: HTMLElement): void {
     const name = s.sessionName || s.projectName || s.id.slice(0, 12);
     top5El.innerHTML += `<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0">
       <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">${escapeHtml(name)}</span>
-      <span style="color:var(--yellow)">$${s.totalCostUSD.toFixed(2)}</span>
+      <span style="color:var(--yellow)">$${s.totalCost.toFixed(2)}</span>
     </div>`;
   }
-
-  // Filter button click handlers
-  popover.querySelectorAll<HTMLButtonElement>('.cb-filter-btn').forEach(btn => {
-    if (btn.dataset.filter === cbFilter) {
-      btn.style.borderColor = 'var(--cyan)';
-      btn.style.color = 'var(--text)';
-    }
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const newFilter = btn.dataset.filter as 'all' | 'today';
-      if (newFilter === cbFilter) return;
-      cbFilter = newFilter;
-      // Re-render: close and reopen
-      popover?.remove();
-      popover = null;
-      toggle(anchor);
-    });
-  });
 
   // Position below the anchor
   anchor.parentElement!.style.position = 'relative';

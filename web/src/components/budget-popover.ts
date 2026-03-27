@@ -44,7 +44,7 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('sessions') || changed.has('budgetThreshold') || changed.has('budgetDismissed')) {
+  if (changed.has('stats') || changed.has('budgetThreshold') || changed.has('budgetDismissed')) {
     checkBudget();
   }
 }
@@ -111,8 +111,7 @@ function togglePopover(anchor: HTMLElement): void {
 function checkBudget(): void {
   if (!state.budgetThreshold || !costStatEl || !banner) return;
 
-  const sessions = Array.from(state.sessions.values());
-  const total = sessions.reduce((sum, s) => sum + s.totalCostUSD, 0);
+  const total = state.stats?.totalCost ?? 0;
 
   if (total >= state.budgetThreshold) {
     costStatEl.classList.add('over-budget');

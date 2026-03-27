@@ -62,12 +62,12 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       </div>
       <div class="session-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription || '', 80))}</div>
       <div class="session-stats">
-        <span class="cost ${getCostTier(session.totalCostUSD)}">$${session.totalCostUSD.toFixed(2)}</span>
+        <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
         ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
       </div>
       <div class="session-card-details">
         <div class="session-stats">
-          <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens)} tok</span>
+          <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens + session.cacheCreationTokens)} tok</span>
           <span class="cache">${session.cacheHitPct.toFixed(0)}%</span>
           ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
         </div>
@@ -224,7 +224,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     </div>
     ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription, 60))}</div>` : ''}
     <div class="compact-meta">
-      <span class="cost ${getCostTier(session.totalCostUSD)}">$${session.totalCostUSD.toFixed(2)}</span>
+      <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
       <span class="duration">${timeAgo(session.lastActive)}</span>
       <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
       ${session.errorCount > 0 ? `<span class="compact-stat-err">${session.errorCount} err</span>` : ''}

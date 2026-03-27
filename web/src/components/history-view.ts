@@ -19,8 +19,8 @@ const COLUMNS: Column[] = [
   { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.projectName || r.id },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
   { key: 'durationSeconds', label: 'Duration', cls: 'col-dim', fmt: r => formatDurationSecs(r.durationSeconds) },
-  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens) },
-  { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: r => { if (!r.cacheCreationTokens && r.cacheReadTokens > 0) return '—'; const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return total > 0 ? `${Math.round(r.cacheReadTokens / total * 100)}%` : ''; } },
+  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0)) },
+  { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: r => r.cacheHitPct > 0 ? `${Math.round(r.cacheHitPct)}%` : '' },
   { key: 'messageCount', label: 'Msgs', fmt: r => String(r.messageCount) },
   { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: r => r.errorCount > 0 ? String(r.errorCount) : '' },
   { key: 'model', label: 'Model', cls: 'col-model', fmt: r => (r.model || '').replace('claude-', '') },
@@ -279,7 +279,7 @@ function sortData(rows: HistoryRow[]): HistoryRow[] {
   return rows.sort((a, b) => {
     let va: number | string, vb: number | string;
     switch (sortCol) {
-      case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens; vb = b.inputTokens + b.outputTokens + b.cacheReadTokens; break;
+      case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0); vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0); break;
       case 'projectName': va = (a.sessionName || a.projectName || '').toLowerCase(); vb = (b.sessionName || b.projectName || '').toLowerCase(); break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
       case 'endedAt': va = a.endedAt || ''; vb = b.endedAt || ''; break;
@@ -289,7 +289,7 @@ function sortData(rows: HistoryRow[]): HistoryRow[] {
           durationSeconds: r => r.durationSeconds,
           messageCount: r => r.messageCount,
           errorCount: r => r.errorCount,
-          cacheHitPct: r => { const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return t > 0 ? r.cacheReadTokens / t * 100 : 0; },
+          cacheHitPct: r => r.cacheHitPct,
         };
         const accessor = numericAccessors[sortCol];
         va = accessor ? accessor(a) : 0;

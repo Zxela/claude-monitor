@@ -1,6 +1,7 @@
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
-import { isSessionActive } from '../utils';
+import { fetchStats } from '../api';
+import type { StatsWindow } from '../api';
 import { toggle as toggleCostBreakdown } from './cost-breakdown';
 import '../styles/topbar.css';
 
@@ -10,7 +11,6 @@ let renderAbort: AbortController | null = null;
 
 let statActive: HTMLElement | null = null;
 let statCost: HTMLElement | null = null;
-let statWorking: HTMLElement | null = null;
 let statCache: HTMLElement | null = null;
 let statRate: HTMLElement | null = null;
 
@@ -28,8 +28,14 @@ export function render(container: HTMLElement): void {
       CLAUDE MONITOR
     </div>
     <div class="topbar-stat"><span>ACTIVE</span> <span class="val green" data-stat="active">0</span></div>
-    <div class="topbar-stat" title="Lifetime cost across all discovered sessions"><span>TOTAL SPEND</span> <span class="budget-gear" role="button" tabindex="0" aria-label="Open budget and notification settings">⚙</span> <span class="val yellow" data-stat="cost">$0</span></div>
-    <div class="topbar-stat"><span>WORKING</span> <span class="val cyan" data-stat="working">0</span></div>
+    <div class="topbar-stat" title="Total cost across all sessions"><span>TOTAL SPEND</span> <span class="budget-gear" role="button" tabindex="0" aria-label="Open budget and notification settings">⚙</span> <span class="val yellow" data-stat="cost">$0</span>
+      <div class="window-toggle">
+        <button class="win-btn" data-window="today">TODAY</button>
+        <button class="win-btn" data-window="week">WEEK</button>
+        <button class="win-btn" data-window="month">MONTH</button>
+        <button class="win-btn" data-window="all">ALL</button>
+      </div>
+    </div>
     <div class="topbar-stat" title="Weighted cache read percentage across all sessions"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
     <div class="topbar-stat" title="Aggregate cost velocity across all active sessions"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
     <div class="search-box">
@@ -81,7 +87,6 @@ export function render(container: HTMLElement): void {
 
   statActive = el.querySelector('[data-stat="active"]');
   statCost = el.querySelector('[data-stat="cost"]');
-  statWorking = el.querySelector('[data-stat="working"]');
   statCache = el.querySelector('[data-stat="cache"]');
   statRate = el.querySelector('[data-stat="rate"]');
   searchInput = el.querySelector('[data-search]');
@@ -92,6 +97,16 @@ export function render(container: HTMLElement): void {
       update({ view });
     });
   });
+
+  el.querySelectorAll<HTMLButtonElement>('.win-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const win = btn.dataset.window as StatsWindow;
+      localStorage.setItem('claude-monitor-stats-window', win);
+      update({ statsWindow: win });
+      refreshStats();
+    });
+  });
+  updateWindowButtons();
 
   searchInput!.addEventListener('input', () => {
     update({ searchQuery: searchInput!.value, searchOpen: searchInput!.value.length > 0 });
@@ -133,11 +148,29 @@ export function render(container: HTMLElement): void {
       }
     });
   }
+
+  refreshStats();
+  setInterval(refreshStats, 5000);
+}
+
+function refreshStats(): void {
+  fetchStats(state.statsWindow).then(stats => {
+    update({ stats });
+  }).catch(() => {});
+}
+
+function updateWindowButtons(): void {
+  el?.querySelectorAll<HTMLButtonElement>('.win-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.window === state.statsWindow);
+  });
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('sessions')) {
+  if (changed.has('stats')) {
     updateStats();
+  }
+  if (changed.has('statsWindow')) {
+    updateWindowButtons();
   }
   if (changed.has('view')) {
     el?.querySelectorAll<HTMLButtonElement>('.view-btn').forEach(btn => {
@@ -158,22 +191,12 @@ function setVal(el: HTMLElement | null, text: string): void {
 }
 
 function updateStats(): void {
-  const sessions = Array.from(state.sessions.values());
-  const topLevel = sessions.filter(s => !s.isSubagent);
-  const active = topLevel.filter(s => isSessionActive(s.lastActive));
-  const working = active.filter(s => s.status === 'thinking' || s.status === 'tool_use');
-  const totalCost = topLevel.reduce((sum, s) => sum + s.totalCostUSD, 0);
-  const totalRate = active.reduce((sum, s) => sum + s.costRate, 0);
-
-  const totalInput = topLevel.reduce((sum, s) => sum + s.inputTokens + s.cacheReadTokens + s.cacheCreationTokens, 0);
-  const totalCacheRead = topLevel.reduce((sum, s) => sum + s.cacheReadTokens, 0);
-  const cacheHit = totalInput > 0 ? (totalCacheRead / totalInput * 100) : 0;
-
-  setVal(statActive, String(active.length));
-  setVal(statCost, `$${totalCost.toFixed(0)}`);
-  setVal(statWorking, String(working.length));
-  setVal(statCache, cacheHit > 0 ? `${cacheHit.toFixed(0)}%` : '—');
-  setVal(statRate, totalRate > 0 ? `$${totalRate.toFixed(3)}/m` : '—');
+  const stats = state.stats;
+  if (!stats) return;
+  setVal(statActive, String(stats.activeSessions));
+  setVal(statCost, `$${stats.totalCost.toFixed(0)}`);
+  setVal(statCache, stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—');
+  setVal(statRate, stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/m` : '—');
 }
 
 export function focusSearch(): void {
