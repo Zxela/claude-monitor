@@ -57,6 +57,7 @@ export interface HistoryRow {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  cacheCreationTokens?: number;
   messageCount: number;
   errorCount: number;
   startedAt: string;

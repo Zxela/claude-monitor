@@ -19,8 +19,9 @@ type HistoryRow struct {
 	TotalCost       float64 `json:"totalCost"`
 	InputTokens     int64   `json:"inputTokens"`
 	OutputTokens    int64   `json:"outputTokens"`
-	CacheReadTokens int64   `json:"cacheReadTokens"`
-	MessageCount    int     `json:"messageCount"`
+	CacheReadTokens     int64   `json:"cacheReadTokens"`
+	CacheCreationTokens int64   `json:"cacheCreationTokens"`
+	MessageCount        int     `json:"messageCount"`
 	ErrorCount      int     `json:"errorCount"`
 	StartedAt       string  `json:"startedAt"`
 	EndedAt         string  `json:"endedAt"`
@@ -82,9 +83,9 @@ func (d *DB) SaveSession(s *session.Session) error {
 
 	_, err := d.db.Exec(`INSERT INTO session_history
 		(id, project_name, session_name, total_cost, input_tokens, output_tokens,
-		 cache_read_tokens, message_count, error_count, started_at, ended_at,
+		 cache_read_tokens, cache_creation_tokens, message_count, error_count, started_at, ended_at,
 		 duration_seconds, model, cwd, git_branch, task_description, parent_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 project_name=excluded.project_name,
 		 session_name=excluded.session_name,
@@ -92,6 +93,7 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 input_tokens=excluded.input_tokens,
 		 output_tokens=excluded.output_tokens,
 		 cache_read_tokens=excluded.cache_read_tokens,
+		 cache_creation_tokens=excluded.cache_creation_tokens,
 		 message_count=excluded.message_count,
 		 error_count=excluded.error_count,
 		 started_at=excluded.started_at,
@@ -103,7 +105,7 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 task_description=excluded.task_description,
 		 parent_id=excluded.parent_id`,
 		s.ID, s.ProjectName, s.SessionName, s.TotalCost,
-		s.InputTokens, s.OutputTokens, s.CacheReadTokens,
+		s.InputTokens, s.OutputTokens, s.CacheReadTokens, s.CacheCreationTokens,
 		s.MessageCount, s.ErrorCount,
 		startedAt, endedAt, duration,
 		s.Model, s.CWD, s.GitBranch, s.TaskDescription, s.ParentID,
@@ -121,8 +123,9 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 	}
 	rows, err := d.db.Query(`SELECT
 		id, project_name, session_name, total_cost, input_tokens, output_tokens,
-		cache_read_tokens, message_count, error_count, started_at, ended_at,
-		duration_seconds, model, cwd, git_branch, task_description, parent_id
+		cache_read_tokens, COALESCE(cache_creation_tokens, 0), message_count, error_count,
+		started_at, ended_at, duration_seconds, model, cwd, git_branch,
+		task_description, parent_id
 		FROM session_history
 		ORDER BY ended_at DESC
 		LIMIT ? OFFSET ?`, limit, offset)
@@ -137,7 +140,7 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 		if err := rows.Scan(
 			&r.ID, &r.ProjectName, &r.SessionName, &r.TotalCost,
 			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
-			&r.MessageCount, &r.ErrorCount,
+			&r.CacheCreationTokens, &r.MessageCount, &r.ErrorCount,
 			&r.StartedAt, &r.EndedAt,
 			&r.DurationSeconds, &r.Model, &r.CWD, &r.GitBranch,
 			&r.TaskDescription, &r.ParentID,
