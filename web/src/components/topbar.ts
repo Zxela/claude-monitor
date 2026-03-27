@@ -164,7 +164,8 @@ function updateStats(): void {
   const cacheHit = totalInput > 0 ? (totalCacheRead / totalInput * 100) : 0;
 
   setVal(statActive, String(active.length));
-  setVal(statCost, `$${totalCost.toFixed(0)}`);
+  const costFmt = totalCost < 10 ? `$${totalCost.toFixed(1)}` : `$${totalCost.toFixed(0)}`;
+  setVal(statCost, costFmt);
   setVal(statWorking, String(working.length));
   setVal(statCache, cacheHit > 0 ? `${cacheHit.toFixed(0)}%` : '—');
   setVal(statRate, totalRate > 0 ? `$${totalRate.toFixed(3)}/m` : '—');

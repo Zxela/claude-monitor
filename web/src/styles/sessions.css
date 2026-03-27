@@ -380,3 +380,19 @@
   max-width: 220px;
   margin-top: 2px;
 }
+
+/* Progressive disclosure — details hidden by default, shown on hover */
+.session-card-details {
+  display: none;
+  margin-top: 2px;
+}
+.session-card:hover .session-card-details,
+.session-card.selected .session-card-details {
+  display: block;
+}
+
+/* Cost tier color grading */
+.cost-tier-low { color: var(--green) !important; }
+.cost-tier-mid { color: var(--yellow) !important; }
+.cost-tier-high { color: var(--orange) !important; }
+.cost-tier-extreme { color: var(--red) !important; }
