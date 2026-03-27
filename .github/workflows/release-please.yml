@@ -40,7 +40,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           PR_NUMBER=${{ fromJSON(steps.release.outputs.prs)[0].number }}
-          TAG_NAME="${{ fromJSON(steps.release.outputs.prs)[0].tagName }}"
+          # PR objects don't have tagName; extract version from the PR title
+          # which release-please formats as "chore(main): release X.Y.Z"
+          PR_TITLE="${{ fromJSON(steps.release.outputs.prs)[0].title }}"
+          VERSION=$(echo "${PR_TITLE}" | grep -oP '\d+\.\d+\.\d+')
+          TAG_NAME="v${VERSION}"
 
           # Wait for merge to propagate
           sleep 3
