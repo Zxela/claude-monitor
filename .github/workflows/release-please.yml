@@ -12,15 +12,15 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.release.outputs.release_created || steps.create-release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name || steps.create-release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           release-type: go
 
-      # Auto-merge the release PR so releases ship without manual intervention
+      # Auto-merge the release PR so releases ship without manual intervention.
       - name: Auto-merge release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
@@ -29,6 +29,43 @@ jobs:
           gh pr merge --repo ${{ github.repository }} --merge \
             ${{ fromJSON(steps.release.outputs.prs)[0].number }}
 
+      # github.token merges don't trigger downstream workflows, so the normal
+      # second-pass (where release-please detects its own merged PR and creates
+      # the GitHub release) never fires. We create the tag and release directly
+      # in this same run instead.
+      - name: Create release after merge
+        id: create-release
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=${{ fromJSON(steps.release.outputs.prs)[0].number }}
+          TAG_NAME="${{ fromJSON(steps.release.outputs.prs)[0].tagName }}"
+
+          # Wait for merge to propagate
+          sleep 3
+
+          # Get the merge commit SHA from the PR
+          MERGE_SHA=$(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER} --jq '.merge_commit_sha')
+
+          # Create the tag pointing at the merge commit
+          gh api repos/${{ github.repository }}/git/refs \
+            -f ref="refs/tags/${TAG_NAME}" \
+            -f sha="${MERGE_SHA}"
+
+          # Extract release notes from the PR body (strip the bot preamble)
+          gh pr view ${PR_NUMBER} --repo ${{ github.repository }} --json body --jq '.body' > /tmp/release-notes.md
+
+          # Create the GitHub release
+          gh release create "${TAG_NAME}" \
+            --repo ${{ github.repository }} \
+            --title "${TAG_NAME}" \
+            --notes-file /tmp/release-notes.md \
+            --target "${MERGE_SHA}"
+
+          echo "release_created=true" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
   # Build and attach binaries when a release is created
   build-binaries:
     needs: release-please
@@ -36,6 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: actions/setup-go@v5
         with:
