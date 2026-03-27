@@ -4,7 +4,7 @@ export interface Session {
   projectName: string;
   sessionName?: string;
   filePath: string;
-  totalCostUSD: number;
+  totalCost: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -58,6 +58,7 @@ export interface HistoryRow {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens?: number;
+  cacheHitPct: number;
   messageCount: number;
   errorCount: number;
   startedAt: string;
@@ -68,6 +69,19 @@ export interface HistoryRow {
   gitBranch: string;
   taskDescription: string;
   parentId?: string;
+}
+
+export interface Stats {
+  totalCost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  sessionCount: number;
+  activeSessions: number;
+  cacheHitPct: number;
+  costRate: number;
+  costByModel: Record<string, number>;
 }
 
 export interface WsEvent {

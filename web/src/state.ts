@@ -1,4 +1,5 @@
-import type { Session, GroupedSessions, SearchResult } from './types';
+import type { Session, GroupedSessions, SearchResult, Stats } from './types';
+import type { StatsWindow } from './api';
 
 export interface AppState {
   sessions: Map<string, Session>;
@@ -39,6 +40,10 @@ export interface AppState {
   // History grouping
   historyShowSubagents: boolean;
 
+  // Stats
+  stats: Stats | null;
+  statsWindow: StatsWindow;
+
   // Sidebar
   sidebarCollapsed: boolean;
 }
@@ -72,6 +77,8 @@ export const state: AppState = {
   updateUrl: null,
   updateDismissed: false,
   historyShowSubagents: false,
+  stats: null,
+  statsWindow: (localStorage.getItem('claude-monitor-stats-window') as StatsWindow) || 'today',
   sidebarCollapsed: false,
 };
 

@@ -1,4 +1,4 @@
-import type { GroupedSessions, SearchResult, HistoryRow, ParsedMessage } from './types';
+import type { GroupedSessions, SearchResult, HistoryRow, ParsedMessage, Stats } from './types';
 
 const BASE = '';
 
@@ -24,6 +24,12 @@ export async function fetchHistory(limit = 50, offset = 0): Promise<HistoryRow[]
 
 export async function fetchRecentMessages(sessionId: string): Promise<ParsedMessage[]> {
   return request<ParsedMessage[]>(`${BASE}/api/sessions/${sessionId}/recent`);
+}
+
+export type StatsWindow = 'all' | 'today' | 'week' | 'month';
+
+export async function fetchStats(window: StatsWindow = 'today'): Promise<Stats> {
+  return request<Stats>(`${BASE}/api/stats?window=${window}`);
 }
 
 export async function fetchVersion(): Promise<string> {
