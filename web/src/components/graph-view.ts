@@ -5,63 +5,38 @@ import { state, subscribe, update } from '../state';
 import { escapeHtml } from '../utils';
 import '../styles/views.css';
 
-function sessionDisplayName(sess: Session): string {
-  return sess.sessionName || sess.projectName || sess.id.slice(0, 8);
-}
-
-interface DagNode {
+interface GraphNode {
   id: string;
   x: number;
   y: number;
-  width: number;
-  height: number;
+  vx: number;
+  vy: number;
+  radius: number;
   color: string;
   label: string;
-  costLabel: string;
   session: Session;
-  isActive: boolean;
 }
 
-interface DagEdge {
+interface GraphEdge {
   source: string;
   target: string;
 }
 
-// Canvas state
 let container: HTMLElement | null = null;
 let canvas: HTMLCanvasElement | null = null;
 let tooltip: HTMLElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
-let nodes: DagNode[] = [];
-let edges: DagEdge[] = [];
-let nodeMap = new Map<string, DagNode>();
-let prevNodeIds = '';
-let graphMode: 'graph' | 'sequence' = 'graph';
-
-// Viewport transform (pan & zoom)
-let panX = 0;
-let panY = 0;
-let zoom = 1;
-let isPanning = false;
-let panStartX = 0;
-let panStartY = 0;
-let panStartPanX = 0;
-let panStartPanY = 0;
-
-// Hover state
-let hoveredNode: DagNode | null = null;
-
-// Animation
+let nodes: GraphNode[] = [];
+let edges: GraphEdge[] = [];
+let nodeMap = new Map<string, GraphNode>();
 let animFrame: number | null = null;
-
-// Layout constants
-const NODE_HEIGHT = 32;
-const MIN_NODE_WIDTH = 60;
-const MAX_NODE_WIDTH = 200;
-const ROW_GAP = 12;
-const PIXELS_PER_SECOND = 3;
-const LEFT_PADDING = 40;
-const TOP_PADDING = 40;
+let dragging: GraphNode | null = null;
+let hovering: GraphNode | null = null;
+let prevNodeIds = '';
+let settledFrames = 0;
+let graphMode: 'graph' | 'sequence' = 'graph';
+const SETTLE_THRESHOLD = 0.1;
+const SETTLE_FRAMES = 30;
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -78,8 +53,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   }
   if (changed.has('sessions') && state.view === 'graph') {
     if (graphMode === 'graph') {
-      rebuildDag();
-      drawFrame();
+      rebuildNodes();
     } else {
       show(); // re-render sequence list
     }
@@ -110,10 +84,6 @@ function show(): void {
 
   if (graphMode === 'graph') {
     canvas = document.createElement('canvas');
-    const visibleCount = Array.from(state.sessions.values())
-      .filter(s => s.isActive || (Date.now() - new Date(s.lastActive).getTime()) < 120_000).length;
-    canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', `Session graph: ${visibleCount} sessions displayed`);
     wrapper.appendChild(canvas);
 
     tooltip = document.createElement('div');
@@ -123,22 +93,15 @@ function show(): void {
     container.appendChild(wrapper);
 
     resizeCanvas();
+    window.removeEventListener('resize', resizeCanvas);
     window.addEventListener('resize', resizeCanvas);
     canvas.addEventListener('mousedown', onMouseDown);
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseup', onMouseUp);
-    canvas.addEventListener('mouseleave', onMouseLeave);
     canvas.addEventListener('click', onClick);
-    canvas.addEventListener('wheel', onWheel, { passive: false });
 
-    // Reset viewport
-    panX = 0;
-    panY = 0;
-    zoom = 1;
-    prevNodeIds = '';
-
-    rebuildDag();
-    drawFrame();
+    rebuildNodes();
+    startAnimation();
   } else {
     container.appendChild(wrapper);
     renderSequence(wrapper);
@@ -170,7 +133,7 @@ function renderSequence(wrapper: HTMLElement): void {
     entry.style.paddingLeft = `${12 + depth * 24}px`;
 
     const time = sess.startedAt ? new Date(sess.startedAt).toLocaleTimeString() : '';
-    const name = sessionDisplayName(sess);
+    const name = sess.sessionName || sess.projectName || sess.id.slice(0, 8);
     const cost = `$${sess.totalCostUSD.toFixed(2)}`;
     const statusClass = sess.isActive
       ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
@@ -206,62 +169,71 @@ function hide(): void {
 
 function resizeCanvas(): void {
   if (!canvas || !container) return;
-  canvas.width = container.clientWidth;
-  canvas.height = container.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
   ctx = canvas.getContext('2d');
-  drawFrame();
+  if (ctx) ctx.scale(dpr, dpr);
 }
 
-function getVisibleSessions(): Session[] {
+function rebuildNodes(): void {
+  if (!canvas) return;
   const now = Date.now();
-  const threshold = 120_000;
+  const threshold = 120_000; // 120 seconds
 
-  const visible: Session[] = [];
+  const visibleSessions: Session[] = [];
   for (const sess of state.sessions.values()) {
     const lastActive = new Date(sess.lastActive).getTime();
     if (sess.isActive || (now - lastActive) < threshold) {
-      visible.push(sess);
+      visibleSessions.push(sess);
     }
   }
 
   // Include parents of visible nodes
-  const visibleIds = new Set(visible.map(s => s.id));
-  for (const sess of visible) {
+  const visibleIds = new Set(visibleSessions.map(s => s.id));
+  for (const sess of visibleSessions) {
     if (sess.parentId && !visibleIds.has(sess.parentId)) {
       const parent = state.sessions.get(sess.parentId);
       if (parent) {
-        visible.push(parent);
+        visibleSessions.push(parent);
         visibleIds.add(parent.id);
       }
     }
   }
 
-  return visible;
-}
-
-function statusColor(sess: Session): string {
-  if (!sess.isActive) return '#44445a';
-  if (sess.status === 'thinking') return '#d29922';
-  if (sess.status === 'tool_use') return '#58a6ff';
-  return '#3fb950';
-}
-
-function rebuildDag(): void {
-  const visibleSessions = getVisibleSessions();
-  const visibleIds = new Set(visibleSessions.map(s => s.id));
-
   const nodeIds = [...visibleIds].sort().join(',');
   if (nodeIds === prevNodeIds) return;
   prevNodeIds = nodeIds;
 
-  if (visibleSessions.length === 0) {
-    nodes = [];
-    edges = [];
-    nodeMap = new Map();
-    return;
-  }
+  const oldNodes = new Map(nodes.map(n => [n.id, n]));
+  const cx = (canvas?.width ?? 800) / 2;
+  const cy = (canvas?.height ?? 600) / 2;
 
-  // Build edges
+  nodes = visibleSessions.map(sess => {
+    const old = oldNodes.get(sess.id);
+    const radius = Math.min(30, Math.max(8, Math.log(sess.totalCostUSD + 1) * 5 + 8));
+    const color = sess.isActive
+      ? (sess.status === 'thinking' ? '#ffcc00' : sess.status === 'tool_use' ? '#4488ff' : '#00ff88')
+      : '#44445a';
+    const label = (sess.sessionName || sess.projectName || sess.id).substring(0, 16);
+
+    return {
+      id: sess.id,
+      x: old?.x ?? cx + (Math.random() - 0.5) * 200,
+      y: old?.y ?? cy + (Math.random() - 0.5) * 200,
+      vx: old?.vx ?? 0,
+      vy: old?.vy ?? 0,
+      radius, color, label, session: sess,
+    };
+  });
+
+  // Rebuild cached nodeMap
+  nodeMap = new Map(nodes.map(n => [n.id, n]));
+
   edges = [];
   for (const sess of visibleSessions) {
     if (sess.parentId && visibleIds.has(sess.parentId)) {
@@ -269,275 +241,153 @@ function rebuildDag(): void {
     }
   }
 
-  // Find the global time range
-  const timestamps = visibleSessions.map(s => new Date(s.startedAt).getTime());
-  const minTime = Math.min(...timestamps);
-
-  // Build children map
-  const childrenMap = new Map<string, Session[]>();
-  for (const sess of visibleSessions) {
-    if (sess.parentId && visibleIds.has(sess.parentId)) {
-      const children = childrenMap.get(sess.parentId) || [];
-      children.push(sess);
-      childrenMap.set(sess.parentId, children);
-    }
+  // Reset idle detection and restart animation
+  settledFrames = 0;
+  if (animFrame === null && state.view === 'graph') {
+    startAnimation();
   }
-
-  // Find roots (no parentId or parent not in visible set)
-  const roots = visibleSessions
-    .filter(s => !s.parentId || !visibleIds.has(s.parentId))
-    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
-
-  // Layout: assign X from timestamp, Y from row assignment
-  // Use a simple greedy row packing algorithm
-  nodes = [];
-
-  // Track which rows are occupied at each time range (for stacking siblings)
-  const rowEndTimes: number[] = []; // rowEndTimes[row] = the rightmost X end for that row
-
-  function assignRow(startX: number, width: number): number {
-    // Find the first row where this node fits
-    for (let r = 0; r < rowEndTimes.length; r++) {
-      if (startX >= rowEndTimes[r] + ROW_GAP) {
-        rowEndTimes[r] = startX + width;
-        return r;
-      }
-    }
-    // New row
-    const r = rowEndTimes.length;
-    rowEndTimes.push(startX + width);
-    return r;
-  }
-
-  function layoutSession(sess: Session): void {
-    const startMs = new Date(sess.startedAt).getTime();
-    const endMs = new Date(sess.lastActive).getTime();
-    const durationSec = Math.max(0, (endMs - startMs) / 1000);
-
-    const x = LEFT_PADDING + ((startMs - minTime) / 1000) * PIXELS_PER_SECOND;
-    const rawWidth = durationSec * PIXELS_PER_SECOND;
-    const width = Math.max(MIN_NODE_WIDTH, Math.min(MAX_NODE_WIDTH, rawWidth));
-
-    const row = assignRow(x, width);
-
-    const y = TOP_PADDING + row * (NODE_HEIGHT + ROW_GAP);
-    const name = sessionDisplayName(sess);
-    const label = name.substring(0, Math.floor(width / 6)); // ~6px per char at 10px monospace
-    const costLabel = `$${sess.totalCostUSD.toFixed(2)}`;
-
-    const node: DagNode = {
-      id: sess.id,
-      x, y, width, height: NODE_HEIGHT,
-      color: statusColor(sess),
-      label,
-      costLabel,
-      session: sess,
-      isActive: sess.isActive,
-    };
-    nodes.push(node);
-
-    // Layout children
-    const children = childrenMap.get(sess.id);
-    if (children) {
-      children
-        .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())
-        .forEach(child => layoutSession(child));
-    }
-  }
-
-  for (const root of roots) {
-    layoutSession(root);
-  }
-
-  // Rebuild cached nodeMap
-  nodeMap = new Map(nodes.map(n => [n.id, n]));
 }
 
-function drawFrame(): void {
+function simulate(): void {
+  if (!canvas) return;
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Repulsion
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const force = 2000 / (dist * dist);
+      const fx = (dx / dist) * force, fy = (dy / dist) * force;
+      a.vx -= fx; a.vy -= fy;
+      b.vx += fx; b.vy += fy;
+    }
+  }
+
+  // Attraction along edges (use cached nodeMap)
+  for (const edge of edges) {
+    const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
+    if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const force = (dist - 100) * 0.01;
+    const fx = (dx / dist) * force, fy = (dy / dist) * force;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  }
+
+  // Center gravity + damping + bounds
+  const cx = w / 2, cy = h / 2;
+  for (const n of nodes) {
+    n.vx += (cx - n.x) * 0.001;
+    n.vy += (cy - n.y) * 0.001;
+    n.vx *= 0.9;
+    n.vy *= 0.9;
+    if (n !== dragging) {
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+    n.x = Math.max(n.radius, Math.min(w - n.radius, n.x));
+    n.y = Math.max(n.radius, Math.min(h - n.radius, n.y));
+  }
+
+  // Idle detection: check if all velocities are below threshold
+  const allSettled = nodes.every(n => Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD);
+  if (allSettled) {
+    settledFrames++;
+  } else {
+    settledFrames = 0;
+  }
+}
+
+function draw(): void {
   if (!ctx || !canvas) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  ctx.save();
-  ctx.translate(panX, panY);
-  ctx.scale(zoom, zoom);
-
-  drawEdges();
-  drawNodes();
-
-  ctx.restore();
-}
-
-function drawEdges(): void {
-  if (!ctx) return;
-
-  ctx.lineWidth = 1.5 / zoom;
-
+  // Edges (use cached nodeMap)
+  ctx.strokeStyle = 'rgba(100,100,140,0.3)';
+  ctx.lineWidth = 1;
   for (const edge of edges) {
-    const src = nodeMap.get(edge.source);
-    const tgt = nodeMap.get(edge.target);
-    if (!src || !tgt) continue;
-
-    const x1 = src.x + src.width;
-    const y1 = src.y + src.height / 2;
-    const x2 = tgt.x;
-    const y2 = tgt.y + tgt.height / 2;
-
-    // Bezier curve
-    const cpOffset = Math.min(Math.abs(x2 - x1) * 0.4, 60);
-    ctx.strokeStyle = 'rgba(100,100,140,0.4)';
+    const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
+    if (!a || !b) continue;
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.bezierCurveTo(x1 + cpOffset, y1, x2 - cpOffset, y2, x2, y2);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
     ctx.stroke();
-
-    // Arrowhead: compute tangent angle at the target end of the bezier
-    const arrowSize = 5 / zoom;
-    const angle = Math.atan2(y2 - y1, cpOffset);
-
-    ctx.fillStyle = 'rgba(100,100,140,0.4)';
-    ctx.beginPath();
-    ctx.moveTo(x2, y2);
-    ctx.lineTo(x2 - arrowSize * Math.cos(angle - 0.4), y2 - arrowSize * Math.sin(angle - 0.4));
-    ctx.lineTo(x2 - arrowSize * Math.cos(angle + 0.4), y2 - arrowSize * Math.sin(angle + 0.4));
-    ctx.closePath();
-    ctx.fill();
   }
-}
 
-function drawNodes(): void {
-  if (!ctx) return;
-
+  // Nodes
   for (const n of nodes) {
-    const isHovered = n === hoveredNode;
-
-    // Glow for active nodes
-    if (n.isActive) {
-      ctx.shadowColor = n.color;
-      ctx.shadowBlur = isHovered ? 12 : 6;
-    }
-
-    // Rounded rectangle
-    const r = 6;
+    ctx.globalAlpha = n === hovering ? 1.0 : 0.7;
     ctx.fillStyle = n.color;
-    ctx.globalAlpha = isHovered ? 1.0 : 0.8;
     ctx.beginPath();
-    ctx.moveTo(n.x + r, n.y);
-    ctx.lineTo(n.x + n.width - r, n.y);
-    ctx.arcTo(n.x + n.width, n.y, n.x + n.width, n.y + r, r);
-    ctx.lineTo(n.x + n.width, n.y + n.height - r);
-    ctx.arcTo(n.x + n.width, n.y + n.height, n.x + n.width - r, n.y + n.height, r);
-    ctx.lineTo(n.x + r, n.y + n.height);
-    ctx.arcTo(n.x, n.y + n.height, n.x, n.y + n.height - r, r);
-    ctx.lineTo(n.x, n.y + r);
-    ctx.arcTo(n.x, n.y, n.x + r, n.y, r);
-    ctx.closePath();
+    ctx.arc(n.x, n.y, n.radius + (n === hovering ? 2 : 0), 0, Math.PI * 2);
     ctx.fill();
-
-    // Reset shadow
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1.0;
-
-    // Hover border
-    if (isHovered) {
+    if (n === hovering) {
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5 / zoom;
+      ctx.lineWidth = 2;
       ctx.stroke();
     }
+    ctx.globalAlpha = 1.0;
 
-    // Label text inside node
-    ctx.fillStyle = '#fff';
+    // Label
+    ctx.fillStyle = '#aaa';
     ctx.font = '10px monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText(n.label, n.x, n.y + n.radius + 14);
 
-    const textX = n.x + 6;
-    const textY = n.y + n.height / 2;
-    const maxTextWidth = n.width - 12;
-
-    // Combine label + cost if there's room
-    const combined = n.label + ' ' + n.costLabel;
-    if (ctx.measureText(combined).width <= maxTextWidth) {
-      ctx.fillText(n.label, textX, textY);
-      // Cost in dimmer color
-      const labelWidth = ctx.measureText(n.label + ' ').width;
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.fillText(n.costLabel, textX + labelWidth, textY);
-    } else {
-      // Just the label, truncated
-      ctx.fillText(n.label, textX, textY, maxTextWidth);
+    // Cost
+    if (n.session.totalCostUSD > 0.01) {
+      ctx.fillStyle = '#888';
+      ctx.font = '8px monospace';
+      ctx.fillText(`$${n.session.totalCostUSD.toFixed(2)}`, n.x, n.y + n.radius + 24);
     }
   }
 }
 
-// --- Hit testing ---
-
-function screenToWorld(sx: number, sy: number): { x: number; y: number } {
-  return {
-    x: (sx - panX) / zoom,
-    y: (sy - panY) / zoom,
-  };
-}
-
-function getNodeAt(sx: number, sy: number): DagNode | null {
-  const { x, y } = screenToWorld(sx, sy);
-  // Iterate in reverse so top-drawn nodes are picked first
-  for (let i = nodes.length - 1; i >= 0; i--) {
-    const n = nodes[i];
-    if (x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height) {
-      return n;
-    }
+function getNodeAt(x: number, y: number): GraphNode | null {
+  for (const n of nodes) {
+    const dx = x - n.x, dy = y - n.y;
+    if (dx * dx + dy * dy < (n.radius + 4) * (n.radius + 4)) return n;
   }
   return null;
 }
 
-// --- Event handlers ---
-
 function onMouseDown(e: MouseEvent): void {
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  const node = getNodeAt(mx, my);
-  if (!node) {
-    // Start panning
-    isPanning = true;
-    panStartX = e.clientX;
-    panStartY = e.clientY;
-    panStartPanX = panX;
-    panStartPanY = panY;
-    canvas.style.cursor = 'grabbing';
+  const rect = canvas!.getBoundingClientRect();
+  dragging = getNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+  if (dragging) {
+    // Restart animation on drag
+    settledFrames = 0;
+    if (animFrame === null) {
+      startAnimation();
+    }
   }
 }
 
 function onMouseMove(e: MouseEvent): void {
   if (!canvas || !tooltip) return;
   const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
 
-  if (isPanning) {
-    panX = panStartPanX + (e.clientX - panStartX);
-    panY = panStartPanY + (e.clientY - panStartY);
-    drawFrame();
+  if (dragging) {
+    dragging.x = mx;
+    dragging.y = my;
+    dragging.vx = 0;
+    dragging.vy = 0;
     return;
   }
 
   const node = getNodeAt(mx, my);
-  if (node !== hoveredNode) {
-    hoveredNode = node;
-    drawFrame();
-  }
-
-  canvas.style.cursor = node ? 'pointer' : 'grab';
+  hovering = node;
+  canvas.style.cursor = node ? 'pointer' : 'default';
 
   if (node) {
-    const sess = node.session;
-    const name = sessionDisplayName(sess);
-    tooltip.innerHTML = `<div><b>${escapeHtml(name)}</b></div>
-      <div>$${sess.totalCostUSD.toFixed(2)} · ${sess.messageCount} msgs</div>
-      <div>${sess.status} · ${sess.model || '?'}</div>`;
+    tooltip.innerHTML = `<div><b>${escapeHtml(node.label)}</b></div>
+      <div>$${node.session.totalCostUSD.toFixed(2)} · ${node.session.messageCount} msgs</div>
+      <div>${node.session.status} · ${node.session.model || '?'}</div>`;
     tooltip.style.left = `${mx + 15}px`;
     tooltip.style.top = `${my + 15}px`;
     tooltip.classList.add('visible');
@@ -547,15 +397,7 @@ function onMouseMove(e: MouseEvent): void {
 }
 
 function onMouseUp(): void {
-  isPanning = false;
-  if (canvas) canvas.style.cursor = 'grab';
-}
-
-function onMouseLeave(): void {
-  isPanning = false;
-  hoveredNode = null;
-  if (tooltip) tooltip.classList.remove('visible');
-  drawFrame();
+  dragging = null;
 }
 
 function onClick(e: MouseEvent): void {
@@ -567,29 +409,18 @@ function onClick(e: MouseEvent): void {
   }
 }
 
-function onWheel(e: WheelEvent): void {
-  e.preventDefault();
-  if (!canvas) return;
-
-  if (e.ctrlKey || e.metaKey) {
-    // Zoom
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.max(0.2, Math.min(5, zoom * zoomFactor));
-
-    // Zoom toward cursor
-    panX = mx - (mx - panX) * (newZoom / zoom);
-    panY = my - (my - panY) * (newZoom / zoom);
-    zoom = newZoom;
-  } else {
-    // Horizontal scroll
-    panX -= e.deltaX || e.deltaY;
+function startAnimation(): void {
+  function loop() {
+    simulate();
+    draw();
+    // Stop if settled for enough frames
+    if (settledFrames >= SETTLE_FRAMES) {
+      animFrame = null;
+      return;
+    }
+    animFrame = requestAnimationFrame(loop);
   }
-
-  drawFrame();
+  animFrame = requestAnimationFrame(loop);
 }
 
 function stopAnimation(): void {

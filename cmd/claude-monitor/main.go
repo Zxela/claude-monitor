@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,9 +23,11 @@ import (
 	"time"
 
 	"github.com/zxela-claude/claude-monitor/internal/docker"
+	"github.com/zxela-claude/claude-monitor/internal/eventproc"
 	"github.com/zxela-claude/claude-monitor/internal/hub"
 	"github.com/zxela-claude/claude-monitor/internal/parser"
 	"github.com/zxela-claude/claude-monitor/internal/replay"
+	"github.com/zxela-claude/claude-monitor/internal/search"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store"
 	"github.com/zxela-claude/claude-monitor/internal/store/migrations"
@@ -35,6 +38,18 @@ import (
 
 // version is set by -ldflags at build time.
 var version = "dev"
+
+// validContainerName matches safe Docker container names (alphanumeric, dash, underscore, dot).
+var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// writeJSONError writes a JSON error response with the given message and status code.
+func writeJSONError(w http.ResponseWriter, msg string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
+		log.Printf("json encode error response: %v", err)
+	}
+}
 
 //go:embed static
 var staticFiles embed.FS
@@ -126,33 +141,64 @@ func handleMigrate(args []string) {
 	}
 }
 
-// parentSessionIDFromPath extracts the parent session ID from a subagent JSONL
-// file path. Subagent files live at:
-//   .../projects/<hash>/<parent-session-id>/subagents/agent-<id>.jsonl
-func parentSessionIDFromPath(filePath string) string {
-	dir := filepath.Dir(filePath)   // .../subagents/
-	dirName := filepath.Base(dir)
-	if dirName == "subagents" {
-		parentDir := filepath.Dir(dir) // .../<parent-session-id>/
-		return filepath.Base(parentDir)
-	}
-	return ""
+
+// sessionFinder can locate JSONL files for sessions not in the live store.
+var sessionFinder interface {
+	FindSessionFile(sessionID string) string
 }
 
 // requireSession looks up a session by path parameter "id", validates it has a
-// file path, and writes an HTTP error if not. Returns the session and true on success.
+// file path, and writes an HTTP error if not. Falls back to searching watched
+// paths for historical sessions not in the live store.
 func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
 	id := r.PathValue("id")
 	sess, ok := store.Get(id)
 	if !ok {
-		http.NotFound(w, r)
+		// Try to find the JSONL file on disk for historical sessions.
+		if sessionFinder != nil {
+			if filePath := sessionFinder.FindSessionFile(id); filePath != "" {
+				// Create a minimal session with enough info to serve replay/recent.
+				sess = store.Upsert(id, func(s *session.Session) {
+					s.FilePath = filePath
+				})
+				return sess, true
+			}
+		}
+		writeJSONError(w, "session not found", http.StatusNotFound)
 		return nil, false
 	}
 	if sess.FilePath == "" {
-		http.Error(w, "session file not available", http.StatusBadRequest)
+		writeJSONError(w, "session file not available", http.StatusBadRequest)
 		return nil, false
 	}
 	return sess, true
+}
+
+// statusRecorder wraps http.ResponseWriter to capture the status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// loggingMiddleware logs method, path, status code, and duration for each request.
+// Long-lived connections (WebSocket and SSE) are passed through without logging.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/ws") || (strings.HasPrefix(r.URL.Path, "/api/sessions/") && strings.HasSuffix(r.URL.Path, "/replay/stream")) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rec, r)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+	})
 }
 
 const swaggerHTML = `<!DOCTYPE html>
@@ -196,6 +242,31 @@ func main() {
 		return
 	}
 
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `claude-monitor — real-time observability dashboard for Claude Code sessions.
+
+Usage:
+  claude-monitor [flags]
+  claude-monitor migrate [status|rollback]
+  claude-monitor --version
+
+Flags:
+`)
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Environment:
+  CLAUDE_MONITOR_NO_UPDATE_CHECK=1   Disable startup update check
+
+Data:
+  Session history is stored in ~/.claude-monitor/history.db
+
+Examples:
+  claude-monitor                                  # Start with defaults (localhost:7700)
+  claude-monitor --port 8080 --watch /extra/path  # Custom port + extra watch dir
+  claude-monitor --broadcast --swagger            # All interfaces + Swagger UI
+`)
+	}
+
 	flag.Parse()
 
 	// --broadcast is shorthand for --bind 0.0.0.0
@@ -212,6 +283,7 @@ func main() {
 	}
 
 	sessionStore := session.NewStore()
+	searchIdx := search.New()
 	h := hub.NewHub()
 
 	// Open SQLite history database.
@@ -239,188 +311,25 @@ func main() {
 		log.Fatalf("failed to create watcher: %v", err)
 	}
 
-	// processEvent parses a watcher event and updates the session store.
-	// Returns the parsed message, session, and whether it's a new session.
-	// agentMeta caches subagent metadata read from .meta.json files.
-	type agentMeta struct {
-		AgentType   string `json:"agentType"`
-		Description string `json:"description"`
-		Name        string `json:"name"`
-	}
-	agentMetaCache := make(map[string]*agentMeta) // sessionID -> meta
+	proc := eventproc.New(sessionStore)
+	sessionFinder = w // allow requireSession to find historical JSONL files
 
-	processEvent := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
-		msg, err := parser.ParseLine(ev.Line)
-		if err != nil {
-			return nil, nil, false
+	// processAndIndex runs the event processor and feeds the search index.
+	processAndIndex := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
+		res := proc.Process(ev)
+		if res.Message != nil && res.Session != nil {
+			displayName := res.Session.ProjectName
+			if res.Session.SessionName != "" {
+				displayName = res.Session.SessionName
+			}
+			searchIdx.Add(ev.SessionID, displayName, res.Session.ProjectName, *res.Message)
 		}
-		_, exists := sessionStore.Get(ev.SessionID)
-		isNew := !exists
-
-		// Pre-read subagent meta.json outside the store lock (only once per session).
-		if isNew {
-			if _, cached := agentMetaCache[ev.SessionID]; !cached {
-				metaPath := strings.TrimSuffix(ev.FilePath, ".jsonl") + ".meta.json"
-				if metaData, err := os.ReadFile(metaPath); err == nil {
-					var meta agentMeta
-					if json.Unmarshal(metaData, &meta) == nil {
-						agentMetaCache[ev.SessionID] = &meta
-					}
-				}
-			}
-		}
-
-		sess := sessionStore.Upsert(ev.SessionID, func(s *session.Session) {
-			s.FilePath = ev.FilePath
-			s.ProjectDir = ev.ProjectDir
-			if ev.Label != "" {
-				s.ProjectName = ev.Label + " / " + ev.ProjectDir
-			} else if s.ProjectName == "" {
-				s.ProjectName = ev.ProjectDir
-			}
-			if msg.CWD != "" {
-				s.CWD = msg.CWD
-				// Derive a cleaner project name from CWD if we only have
-				// the raw dir hash (e.g. "-root-claude-monitor").
-				if s.SessionName == "" && strings.HasPrefix(s.ProjectName, "-") {
-					s.ProjectName = filepath.Base(msg.CWD)
-				}
-			}
-			if msg.GitBranch != "" {
-				s.GitBranch = msg.GitBranch
-			}
-			if msg.Model != "" {
-				s.Model = msg.Model
-			}
-			if msg.Type == "custom-title" && msg.ContentText != "" {
-				s.SessionName = msg.ContentText
-			} else if msg.Type == "agent-name" && msg.ContentText != "" && s.SessionName == "" {
-				s.SessionName = msg.ContentText
-			}
-			if s.SessionName != "" {
-				s.ProjectName = s.SessionName
-			}
-			if msg.IsSidechain || msg.ParentUUID != "" {
-				if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
-					if s.ParentID == "" {
-						s.ParentID = parentSID
-						s.IsSubagent = true
-
-						// Apply cached meta.json for agent name/type.
-						if meta := agentMetaCache[ev.SessionID]; meta != nil {
-							name := meta.Name
-							if name == "" {
-								name = meta.AgentType
-							}
-							if name != "" && s.SessionName == "" {
-								s.SessionName = name
-								s.ProjectName = name
-							}
-						}
-					}
-				}
-			}
-			if msg.IsError && msg.MessageID != "" {
-				if s.SeenMessageIDs == nil {
-					s.SeenMessageIDs = make(map[string]bool)
-				}
-				errKey := "err:" + msg.MessageID
-				if !s.SeenMessageIDs[errKey] {
-					s.SeenMessageIDs[errKey] = true
-					s.ErrorCount++
-				}
-			} else if msg.IsError {
-				s.ErrorCount++
-			}
-			// Deduplicate cost/token accumulation by message ID.
-			// Multiple JSONL lines share the same message ID (streaming chunks)
-			// with cumulative token counts — only count the delta vs last seen.
-			if msg.MessageID != "" && (msg.CostUSD > 0 || msg.InputTokens > 0 || msg.OutputTokens > 0) {
-				if s.SeenMessageCosts == nil {
-					s.SeenMessageCosts = make(map[string]session.MessageCosts)
-				}
-				prev := s.SeenMessageCosts[msg.MessageID]
-				s.TotalCost += msg.CostUSD - prev.CostUSD
-				s.InputTokens += msg.InputTokens - prev.InputTokens
-				s.OutputTokens += msg.OutputTokens - prev.OutputTokens
-				s.CacheReadTokens += msg.CacheReadTokens - prev.CacheReadTokens
-				s.CacheCreationTokens += msg.CacheCreationTokens - prev.CacheCreationTokens
-				s.SeenMessageCosts[msg.MessageID] = session.MessageCosts{
-					CostUSD:             msg.CostUSD,
-					InputTokens:         msg.InputTokens,
-					OutputTokens:        msg.OutputTokens,
-					CacheReadTokens:     msg.CacheReadTokens,
-					CacheCreationTokens: msg.CacheCreationTokens,
-				}
-			}
-			if msg.IsConversationMessage() {
-				if s.SeenMessageIDs == nil {
-					s.SeenMessageIDs = make(map[string]bool)
-				}
-				if msg.MessageID != "" {
-					if !s.SeenMessageIDs[msg.MessageID] {
-						s.SeenMessageIDs[msg.MessageID] = true
-						s.MessageCount++
-					}
-				} else {
-					s.MessageCount++
-				}
-			}
-			if !msg.Timestamp.IsZero() {
-				s.LastActive = msg.Timestamp
-				if s.StartedAt.IsZero() || msg.Timestamp.Before(s.StartedAt) {
-					s.StartedAt = msg.Timestamp
-				}
-			} else if !ev.Bootstrap {
-				s.LastActive = time.Now()
-			}
-
-			// Determine new status
-			if msg.StopReason == "end_turn" {
-				s.Status = "waiting"
-			} else if msg.StopReason == "tool_use" {
-				s.Status = "tool_use"
-			} else if msg.ToolName != "" {
-				s.Status = "tool_use"
-			} else if msg.Role == "assistant" {
-				s.Status = "thinking"
-			} else if msg.Role == "user" {
-				s.Status = "thinking"
-			}
-
-			// Capture task description from first user message.
-			if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" {
-				desc := msg.ContentText
-				if len([]rune(desc)) > 200 {
-					runes := []rune(desc)
-					desc = string(runes[:200])
-				}
-				s.TaskDescription = desc
-
-				// Fallback for subagents without meta.json: use short agent ID.
-				if s.IsSubagent && s.SessionName == "" && s.ProjectName == "subagents" {
-					aid := s.ID
-					if strings.HasPrefix(aid, "agent-") {
-						aid = aid[6:]
-					}
-					if len(aid) > 8 {
-						aid = aid[:8]
-					}
-					s.ProjectName = "agent " + aid
-				}
-			}
-		})
-
-		if sess.IsSubagent && sess.ParentID != "" {
-			sessionStore.LinkChild(sess.ParentID, ev.SessionID)
-		}
-
-		return msg, sess, isNew
+		return res.Message, res.Session, res.IsNew
 	}
 
 	// Bootstrap callback: process historical lines for stats only (no broadcast).
 	w.SetBootstrapCallback(func(ev watcher.Event) {
-		processEvent(ev)
+		processAndIndex(ev)
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -534,7 +443,7 @@ func main() {
 	// Process watcher events: parse, update store, broadcast.
 	go func() {
 		for ev := range events {
-			msg, sess, isNew := processEvent(ev)
+			msg, sess, isNew := processAndIndex(ev)
 			if msg == nil {
 				continue
 			}
@@ -584,12 +493,12 @@ func main() {
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	// WebSocket endpoint.
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWs(h, w, r)
 	})
 
 	// History REST API.
-	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) {
 		limitStr := r.URL.Query().Get("limit")
 		limit := 50
 		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 500 {
@@ -602,18 +511,21 @@ func main() {
 		}
 		rows, err := historyDB.ListHistory(limit, offset)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("history list error: %v", err)
+			writeJSONError(w, "failed to retrieve history", http.StatusInternalServerError)
 			return
 		}
 		if rows == nil {
 			rows = []store.HistoryRow{}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rows)
+		if err := json.NewEncoder(w).Encode(rows); err != nil {
+			log.Printf("json encode: %v", err)
+		}
 	})
 
 	// Sessions REST API.
-	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		sessions := sessionStore.All()
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(sessions); err != nil {
@@ -622,7 +534,7 @@ func main() {
 	})
 
 	// Time-bucketed sessions for the new navigation UI.
-	mux.HandleFunc("/api/sessions/grouped", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/sessions/grouped", func(w http.ResponseWriter, r *http.Request) {
 		sessions := sessionStore.All()
 		now := time.Now()
 		hourAgo := now.Add(-1 * time.Hour)
@@ -668,11 +580,13 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(g)
+		if err := json.NewEncoder(w).Encode(g); err != nil {
+			log.Printf("json encode: %v", err)
+		}
 	})
 
 	// Distinct project names with session counts.
-	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
 		sessions := sessionStore.All()
 		counts := make(map[string]int)
 		for _, s := range sessions {
@@ -693,11 +607,14 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			log.Printf("json encode: %v", err)
+		}
 	})
 
-	// Cross-session search — searches ContentText and ToolDetail across all sessions.
-	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+	// Cross-session search — uses the in-memory search index instead of
+	// reading every JSONL file from disk.
+	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("q")
 		if query == "" {
 			w.Header().Set("Content-Type", "application/json")
@@ -710,73 +627,27 @@ func main() {
 			limit = n
 		}
 
-		// Bound search time to prevent DoS from scanning hundreds of files.
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		queryLower := strings.ToLower(query)
-
-		type searchResult struct {
-			SessionID   string `json:"sessionId"`
-			SessionName string `json:"sessionName"`
-			ProjectName string `json:"projectName"`
-			parser.ParsedMessage
-		}
-
-		results := make([]searchResult, 0)
-		for _, sess := range sessionStore.All() {
-			// Check timeout between sessions.
-			select {
-			case <-ctx.Done():
-				break
-			default:
-			}
-			if ctx.Err() != nil {
-				break
-			}
-			if sess.FilePath == "" {
-				continue
-			}
-			events, err := replay.ReadFile(sess.FilePath)
-			if err != nil && len(events) == 0 {
-				continue
-			}
-			displayName := sess.ProjectName
-			if sess.SessionName != "" {
-				displayName = sess.SessionName
-			}
-			for _, ev := range events {
-				if len(results) >= limit {
-					break
-				}
-				text := strings.ToLower(ev.ContentText + " " + ev.ToolDetail + " " + ev.ToolName)
-				if strings.Contains(text, queryLower) {
-					results = append(results, searchResult{
-						SessionID:     sess.ID,
-						SessionName:   displayName,
-						ProjectName:   sess.ProjectName,
-						ParsedMessage: ev.ParsedMessage,
-					})
-				}
-			}
-			if len(results) >= limit {
-				break
-			}
+		results := searchIdx.Search(query, limit)
+		if results == nil {
+			results = []search.Entry{}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
+		if err := json.NewEncoder(w).Encode(results); err != nil {
+			log.Printf("json encode: %v", err)
+		}
 	})
 
 	// Recent messages for a session — returns last N parsed messages for feed population.
-	mux.HandleFunc("/api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
 			return
 		}
 		events, err := replay.ReadFile(sess.FilePath)
 		if err != nil && len(events) == 0 {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("read session file %s: %v", sess.FilePath, err)
+			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
 			return
 		}
 
@@ -804,18 +675,21 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(filtered)
+		if err := json.NewEncoder(w).Encode(filtered); err != nil {
+			log.Printf("json encode: %v", err)
+		}
 	})
 
 	// Replay SSE stream route — registered BEFORE the manifest route.
-	mux.HandleFunc("/api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
 			return
 		}
 		events, err := replay.ReadFile(sess.FilePath)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("read session file %s: %v", sess.FilePath, err)
+			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
 			return
 		}
 		from, _ := strconv.Atoi(r.URL.Query().Get("from"))
@@ -824,7 +698,7 @@ func main() {
 	})
 
 	// Replay manifest — returns all events with timestamps for the scrubber.
-	mux.HandleFunc("/api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireSession(sessionStore, w, r)
 		if !ok {
 			return
@@ -841,7 +715,8 @@ func main() {
 
 		events, scanErr := replay.ReadFile(sess.FilePath)
 		if scanErr != nil && len(events) == 0 {
-			http.Error(w, scanErr.Error(), http.StatusInternalServerError)
+			log.Printf("read session file %s: %v", sess.FilePath, scanErr)
+			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
 			return
 		}
 
@@ -871,7 +746,8 @@ func main() {
 			"events":    out,
 		})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("json marshal replay manifest: %v", err)
+			writeJSONError(w, "failed to encode replay data", http.StatusInternalServerError)
 			return
 		}
 		// Only cache if the file was fully read (no scanner errors).
@@ -886,7 +762,7 @@ func main() {
 		id := r.PathValue("id")
 		sess, ok := sessionStore.Get(id)
 		if !ok {
-			http.NotFound(w, r)
+			writeJSONError(w, "session not found", http.StatusNotFound)
 			return
 		}
 		// Extract container name from projectName (format: "container / project")
@@ -895,14 +771,19 @@ func main() {
 			containerName = parts[0]
 		}
 		if containerName == "" || dc == nil {
-			http.Error(w, "not a Docker session or Docker not available", http.StatusBadRequest)
+			writeJSONError(w, "not a Docker session or Docker not available", http.StatusBadRequest)
+			return
+		}
+		// Validate container name contains only safe characters.
+		if !validContainerName.MatchString(containerName) {
+			writeJSONError(w, "invalid container name", http.StatusBadRequest)
 			return
 		}
 		stopCtx, stopCancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer stopCancel()
 		if err := dc.StopContainer(stopCtx, containerName); err != nil {
 			log.Printf("stop container %s: %v", containerName, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, "failed to stop container", http.StatusInternalServerError)
 			return
 		}
 		log.Printf("stopped container %s for session %s", containerName, id)
@@ -911,23 +792,30 @@ func main() {
 	})
 
 	// Health check.
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true}`))
+		if err := historyDB.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "db": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "db": "ok"})
 	})
 
 	// Version endpoint.
-	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"version": version})
+		if err := json.NewEncoder(w).Encode(map[string]string{"version": version}); err != nil {
+			log.Printf("json encode: %v", err)
+		}
 	})
 
 	// Swagger UI (opt-in via --swagger flag).
 	if *swaggerEnabled {
-		mux.HandleFunc("/swagger/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("GET /swagger/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFile(w, r, "api/openapi.yaml")
 		})
-		mux.HandleFunc("/swagger", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("GET /swagger", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			w.Write([]byte(swaggerHTML))
 		})
@@ -937,7 +825,7 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{
 		Addr:        addr,
-		Handler:     mux,
+		Handler:     loggingMiddleware(mux),
 		ReadTimeout: 15 * time.Second,
 		IdleTimeout: 60 * time.Second,
 		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE
@@ -952,6 +840,24 @@ func main() {
 		sig := <-quit
 		log.Printf("received signal %s, shutting down", sig)
 		cancel()
+
+		// Flush unsaved sessions to history before shutting down.
+		mu.Lock()
+		flushed := 0
+		for _, sess := range sessionStore.All() {
+			if !savedToHistory[sess.ID] && sess.MessageCount > 0 {
+				if err := historyDB.SaveSession(sess); err != nil {
+					log.Printf("shutdown history save error for %s: %v", sess.ID, err)
+				} else {
+					flushed++
+				}
+				savedToHistory[sess.ID] = true
+			}
+		}
+		mu.Unlock()
+		if flushed > 0 {
+			log.Printf("flushed %d sessions to history on shutdown", flushed)
+		}
 
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutCancel()

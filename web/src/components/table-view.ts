@@ -92,7 +92,18 @@ function sortSessions(sessions: Session[]): Session[] {
       case 'projectName': va = (a.sessionName || a.projectName || '').toLowerCase(); vb = (b.sessionName || b.projectName || '').toLowerCase(); break;
       case 'status': va = a.status; vb = b.status; break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
-      default: va = (a as any)[sortCol] ?? 0; vb = (b as any)[sortCol] ?? 0;
+      default: {
+        const numericAccessors: Record<string, (s: Session) => number> = {
+          totalCostUSD: s => s.totalCostUSD,
+          costRate: s => s.costRate,
+          cacheHitPct: s => s.cacheHitPct,
+          messageCount: s => s.messageCount,
+          errorCount: s => s.errorCount,
+        };
+        const accessor = numericAccessors[sortCol];
+        va = accessor ? accessor(a) : 0;
+        vb = accessor ? accessor(b) : 0;
+      }
     }
     const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
     return sortAsc ? cmp : -cmp;

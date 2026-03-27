@@ -25,7 +25,7 @@ const MAX_ENTRIES = 500;
 // originating tool_use call's display type for consistent grouping/styling.
 const toolUseMap = new Map<string, string>(); // toolUseId -> displayType
 
-const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'hook', 'error'] as const;
+const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'command', 'hook', 'error'] as const;
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -107,7 +107,7 @@ function renderFeedPanel(): void {
   feedContent.setAttribute('aria-live', 'polite');
   const sess = state.selectedSessionId ? state.sessions.get(state.selectedSessionId) : null;
   feedContent.setAttribute('aria-label', sess?.isActive !== false ? 'Live event feed' : 'Session history');
-  feedContent.innerHTML = '<div class="feed-empty">WAITING FOR EVENTS...</div>';
+  feedContent.innerHTML = '<div class="feed-empty">No events yet — start a Claude Code session and activity will appear here automatically</div>';
   feedContent.addEventListener('scroll', () => {
     if (!feedContent) return;
     const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
@@ -116,20 +116,22 @@ function renderFeedPanel(): void {
   });
   container.appendChild(feedContent);
 
-  // Scroll lock button
-  if (!scrollLockBtn) {
-    scrollLockBtn = document.createElement('button');
-    scrollLockBtn.className = 'scroll-lock-btn';
-    scrollLockBtn.textContent = '▼ RESUME SCROLL';
-    scrollLockBtn.addEventListener('click', () => {
-      if (feedContent) {
-        feedContent.scrollTop = feedContent.scrollHeight;
-        autoScroll = true;
-        scrollLockBtn?.classList.remove('visible');
-      }
-    });
-    container.appendChild(scrollLockBtn);
+  // Scroll lock button — recreate on each render since container.innerHTML
+  // clearing detaches any previously appended button from the DOM.
+  if (scrollLockBtn && scrollLockBtn.parentNode) {
+    scrollLockBtn.parentNode.removeChild(scrollLockBtn);
   }
+  scrollLockBtn = document.createElement('button');
+  scrollLockBtn.className = 'scroll-lock-btn';
+  scrollLockBtn.textContent = '▼ RESUME SCROLL';
+  scrollLockBtn.addEventListener('click', () => {
+    if (feedContent) {
+      feedContent.scrollTop = feedContent.scrollHeight;
+      autoScroll = true;
+      scrollLockBtn?.classList.remove('visible');
+    }
+  });
+  document.body.appendChild(scrollLockBtn);
 }
 
 function updateHeader(): void {
@@ -139,11 +141,11 @@ function updateHeader(): void {
     const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
-    headerEl.innerHTML = `<span class="feed-header-label">${label}</span>
-      <span class="feed-header-name">${escapeHtml(name)}</span>
-      <span class="timeline-btn feed-header-btn timeline" role="button" tabindex="0" aria-label="Open timeline view">TIMELINE</span>
-      ${!isLive ? '<span class="replay-btn feed-header-btn replay" role="button" tabindex="0" aria-label="Replay session">&#9654; REPLAY</span>' : ''}
-      <span class="back-to-feed feed-header-btn back" role="button" tabindex="0" aria-label="Back to all sessions">&larr; all</span>`;
+    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
+      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
+      <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
+      ${!isLive ? '<span class="replay-btn" role="button" tabindex="0" aria-label="Replay session" style="margin-left:4px;color:var(--purple,#a855f7);font-size:9px;cursor:pointer;border:1px solid rgba(168,85,247,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">▶ REPLAY</span>' : ''}
+      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
     backBtn?.addEventListener('keydown', (e) => {
@@ -179,8 +181,8 @@ function updateHeader(): void {
       });
     }
   } else {
-    headerEl.innerHTML = `<span class="feed-header-label">LIVE FEED</span>
-      <span class="feed-header-name">all sessions</span>`;
+    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
+      <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
   }
 }
 
@@ -202,6 +204,10 @@ function handleFilterClick(type: string, e: MouseEvent): void {
   } else {
     const filters = { ...state.feedTypeFilters };
     filters[type] = !filters[type];
+    // Disabling tool_use also disables tool_result (but not the reverse)
+    if (type === 'tool_use' && !filters[type]) {
+      filters['tool_result'] = false;
+    }
     update({ feedTypeFilters: filters });
   }
   updateFilterButtons();
@@ -219,18 +225,33 @@ function updateFilterButtons(): void {
 
 function applyFilters(): void {
   if (!feedContent) return;
+  let visibleCount = 0;
   feedContent.querySelectorAll<HTMLElement>('.feed-entry').forEach(entry => {
     const type = entry.dataset.type || 'system';
     const visible = state.feedTypeFilters[type] ?? true;
     entry.style.display = visible ? '' : 'none';
+    if (visible) visibleCount++;
   });
+
+  // Remove any existing filter-empty message
+  const existing = feedContent.querySelector('.feed-filter-empty');
+  if (existing) existing.remove();
+
+  // Show message when filters are active but nothing matches
+  const hasEntries = feedContent.querySelectorAll('.feed-entry').length > 0;
+  if (hasEntries && visibleCount === 0) {
+    const msg = document.createElement('div');
+    msg.className = 'feed-empty feed-filter-empty';
+    msg.textContent = 'No messages match the current filters';
+    feedContent.appendChild(msg);
+  }
 }
 
 async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
   currentLoadSessionId = sessionId;
-  feedContent.innerHTML = '';
+  feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
     const messages = await fetchRecentMessages(sessionId);

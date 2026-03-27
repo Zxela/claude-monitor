@@ -25,7 +25,7 @@ export function open(sessionId: string): void {
   loadManifest(sessionId);
 }
 
-export function close(): void {
+function close(): void {
   stopStream();
   update({ replaySessionId: null, replayPlaying: false });
 }
@@ -131,7 +131,13 @@ function startStream(): void {
   es = new EventSource(url);
 
   es.addEventListener('message', (e) => {
-    const data = JSON.parse(e.data);
+    let data: { message?: unknown; index?: number };
+    try {
+      data = JSON.parse(e.data);
+    } catch {
+      console.warn('replay: failed to parse SSE message', e.data);
+      return;
+    }
     if (data.message) {
       const entry = renderFeedEntry(data.message as ParsedMessage);
       feedEl?.appendChild(entry);

@@ -60,6 +60,11 @@ func (d *DB) Close() error {
 	return d.db.Close()
 }
 
+// Ping verifies the database connection is alive.
+func (d *DB) Ping() error {
+	return d.db.Ping()
+}
+
 // SaveSession upserts a session into the history table.
 func (d *DB) SaveSession(s *session.Session) error {
 	var endedAt string
@@ -78,8 +83,8 @@ func (d *DB) SaveSession(s *session.Session) error {
 	_, err := d.db.Exec(`INSERT INTO session_history
 		(id, project_name, session_name, total_cost, input_tokens, output_tokens,
 		 cache_read_tokens, message_count, error_count, started_at, ended_at,
-		 duration_seconds, outcome, model, cwd, git_branch, task_description, parent_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 duration_seconds, model, cwd, git_branch, task_description, parent_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 project_name=excluded.project_name,
 		 session_name=excluded.session_name,
@@ -92,7 +97,6 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 started_at=excluded.started_at,
 		 ended_at=excluded.ended_at,
 		 duration_seconds=excluded.duration_seconds,
-		 outcome=excluded.outcome,
 		 model=excluded.model,
 		 cwd=excluded.cwd,
 		 git_branch=excluded.git_branch,
@@ -102,7 +106,7 @@ func (d *DB) SaveSession(s *session.Session) error {
 		s.InputTokens, s.OutputTokens, s.CacheReadTokens,
 		s.MessageCount, s.ErrorCount,
 		startedAt, endedAt, duration,
-		"", s.Model, s.CWD, s.GitBranch, s.TaskDescription, s.ParentID,
+		s.Model, s.CWD, s.GitBranch, s.TaskDescription, s.ParentID,
 	)
 	return err
 }
@@ -118,7 +122,7 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 	rows, err := d.db.Query(`SELECT
 		id, project_name, session_name, total_cost, input_tokens, output_tokens,
 		cache_read_tokens, message_count, error_count, started_at, ended_at,
-		duration_seconds, outcome, model, cwd, git_branch, task_description, parent_id
+		duration_seconds, model, cwd, git_branch, task_description, parent_id
 		FROM session_history
 		ORDER BY ended_at DESC
 		LIMIT ? OFFSET ?`, limit, offset)
@@ -130,13 +134,12 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 	var result []HistoryRow
 	for rows.Next() {
 		var r HistoryRow
-		var outcome string // column still in DB but no longer used
 		if err := rows.Scan(
 			&r.ID, &r.ProjectName, &r.SessionName, &r.TotalCost,
 			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
 			&r.MessageCount, &r.ErrorCount,
 			&r.StartedAt, &r.EndedAt,
-			&r.DurationSeconds, &outcome, &r.Model, &r.CWD, &r.GitBranch,
+			&r.DurationSeconds, &r.Model, &r.CWD, &r.GitBranch,
 			&r.TaskDescription, &r.ParentID,
 		); err != nil {
 			return result, err

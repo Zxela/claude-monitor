@@ -37,6 +37,7 @@ type Hub struct {
 	broadcast  chan []byte
 	register   chan *Client
 	unregister chan *Client
+	done       chan struct{}
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -46,13 +47,18 @@ func NewHub() *Hub {
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		done:       make(chan struct{}),
 	}
 }
 
 // Run processes register/unregister/broadcast events. Call in a goroutine.
+// It returns when Stop is called.
 func (h *Hub) Run() {
 	for {
 		select {
+		case <-h.done:
+			return
+
 		case client := <-h.register:
 			h.clients[client] = true
 
@@ -74,6 +80,11 @@ func (h *Hub) Run() {
 			}
 		}
 	}
+}
+
+// Stop signals the hub to stop processing events and return from Run.
+func (h *Hub) Stop() {
+	close(h.done)
 }
 
 // Broadcast enqueues msg for delivery to all connected clients.

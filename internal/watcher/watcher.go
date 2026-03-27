@@ -14,6 +14,21 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// bufPool reuses read buffers to avoid allocating 64KB on every readNewLines call.
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 64*1024)
+		return &b
+	},
+}
+
+// homeDir caches the result of os.UserHomeDir so it is only called once.
+var (
+	homeDirOnce sync.Once
+	homeDirVal  string
+	homeDirErr  error
+)
+
 const pollInterval = 5 * time.Second
 
 // defaultBasePaths are the well-known locations Claude Code writes session files.
@@ -144,6 +159,43 @@ func (w *Watcher) Remove(path string) {
 			_ = w.fsw.Remove(dir)
 		}
 	}
+}
+
+// FindSessionFile searches all watched base paths for a JSONL file belonging
+// to the given session ID. Returns the file path or "" if not found.
+func (w *Watcher) FindSessionFile(sessionID string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Check already-tracked files first.
+	for filePath := range w.states {
+		base := filepath.Base(filePath)
+		name := strings.TrimSuffix(base, ".jsonl")
+		if name == sessionID {
+			return filePath
+		}
+	}
+
+	// Walk base paths for an untracked file.
+	target := sessionID + ".jsonl"
+	for _, base := range w.basePaths {
+		expanded := expandHome(base)
+		var found string
+		_ = filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if filepath.Base(path) == target {
+				found = path
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if found != "" {
+			return found
+		}
+	}
+	return ""
 }
 
 // Start begins watching and returns a channel of Events. It runs until ctx
@@ -313,7 +365,9 @@ func (w *Watcher) readNewLines(path string) {
 		return
 	}
 
-	buf := make([]byte, 64*1024)
+	bufp := bufPool.Get().(*[]byte)
+	buf := *bufp
+	defer bufPool.Put(bufp)
 	var partial []byte
 
 	for {
@@ -398,13 +452,16 @@ func projectDirFromPath(path string) string {
 }
 
 // expandHome replaces a leading "~/" with the actual home directory.
+// The home directory is resolved once and cached for the lifetime of the process.
 func expandHome(path string) string {
 	if !strings.HasPrefix(path, "~/") {
 		return path
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	homeDirOnce.Do(func() {
+		homeDirVal, homeDirErr = os.UserHomeDir()
+	})
+	if homeDirErr != nil {
 		return path
 	}
-	return filepath.Join(home, path[2:])
+	return filepath.Join(homeDirVal, path[2:])
 }

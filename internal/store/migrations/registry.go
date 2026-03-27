@@ -10,8 +10,8 @@ import (
 // Migration defines a schema change with Up (apply) and Down (rollback) functions.
 type Migration struct {
 	Name string
-	Up   func(*sql.DB) error
-	Down func(*sql.DB) error
+	Up   func(*sql.Tx) error
+	Down func(*sql.Tx) error
 }
 
 // registry holds all registered migrations, keyed by version number.
@@ -42,8 +42,8 @@ func GetVersion(db *sql.DB) (int, error) {
 	return v, err
 }
 
-func setVersion(db *sql.DB, v int) error {
-	_, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", v))
+func setVersionTx(tx *sql.Tx, v int) error {
+	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", v))
 	return err
 }
 
@@ -65,17 +65,18 @@ func RunUp(db *sql.DB) (int, error) {
 			return applied, fmt.Errorf("begin transaction for migration %d (%s): %w", rm.Version, rm.Migration.Name, err)
 		}
 
-		if err := rm.Migration.Up(db); err != nil {
+		if err := rm.Migration.Up(tx); err != nil {
 			tx.Rollback()
 			return applied, fmt.Errorf("migration %d (%s) failed: %w", rm.Version, rm.Migration.Name, err)
 		}
 
-		if err := tx.Commit(); err != nil {
-			return applied, fmt.Errorf("commit migration %d (%s): %w", rm.Version, rm.Migration.Name, err)
+		if err := setVersionTx(tx, rm.Version); err != nil {
+			tx.Rollback()
+			return applied, fmt.Errorf("set version in migration %d: %w", rm.Version, err)
 		}
 
-		if err := setVersion(db, rm.Version); err != nil {
-			return applied, fmt.Errorf("set version after migration %d: %w", rm.Version, err)
+		if err := tx.Commit(); err != nil {
+			return applied, fmt.Errorf("commit migration %d (%s): %w", rm.Version, rm.Migration.Name, err)
 		}
 
 		applied++
@@ -102,17 +103,18 @@ func RunDown(db *sql.DB) (string, error) {
 				return "", fmt.Errorf("begin rollback transaction: %w", err)
 			}
 
-			if err := rm.Migration.Down(db); err != nil {
+			if err := rm.Migration.Down(tx); err != nil {
 				tx.Rollback()
 				return "", fmt.Errorf("rollback migration %d (%s) failed: %w", rm.Version, rm.Migration.Name, err)
 			}
 
-			if err := tx.Commit(); err != nil {
-				return "", fmt.Errorf("commit rollback %d (%s): %w", rm.Version, rm.Migration.Name, err)
+			if err := setVersionTx(tx, rm.Version-1); err != nil {
+				tx.Rollback()
+				return "", fmt.Errorf("set version in rollback: %w", err)
 			}
 
-			if err := setVersion(db, rm.Version-1); err != nil {
-				return "", fmt.Errorf("set version after rollback: %w", err)
+			if err := tx.Commit(); err != nil {
+				return "", fmt.Errorf("commit rollback %d (%s): %w", rm.Version, rm.Migration.Name, err)
 			}
 
 			return rm.Migration.Name, nil

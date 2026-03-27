@@ -12,24 +12,6 @@
   --purple: #bc8cff;
   --orange: #f0883e;
   --font-mono: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-
-  /* Surface variants (consolidating ~8 hardcoded dark backgrounds) */
-  --bg-deep: #0f0f1a;
-  --bg-elevated: #1a1a2e;
-
-  /* Status colors for canvas */
-  --status-thinking: var(--yellow);
-  --status-tool: var(--cyan);
-  --status-active: var(--green);
-  --status-idle: #44445a;
-
-  /* Type scale */
-  --text-xs: 9px;
-  --text-sm: 10px;
-  --text-base: 11px;
-  --text-md: 12px;
-  --text-lg: 13px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -110,11 +92,6 @@ body {
 
 .topbar-collapsible {
   display: contents;
-}
-
-/* Sidebar collapse transition */
-#sessions-mount {
-  transition: width 0.2s ease, min-width 0.2s ease;
 }
 
 /* Responsive: half-screen / narrow window (~960px) */
@@ -330,26 +307,4 @@ body {
   color: var(--fg-muted, #8b949e);
   margin-left: 8px;
   font-style: italic;
-}
-
-/* Global focus indicator */
-:focus-visible {
-  outline: 2px solid var(--cyan);
-  outline-offset: 2px;
-}
-
-/* Remove default focus outline since we use :focus-visible */
-:focus:not(:focus-visible) {
-  outline: none;
-}
-
-/* Respect user's motion preferences */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }

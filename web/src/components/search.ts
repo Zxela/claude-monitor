@@ -119,7 +119,12 @@ function badgeType(r: SearchResult): string {
 function formatTime(ts: string): string {
   if (!ts) return '';
   const d = new Date(ts);
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return time;
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${date} ${time}`;
 }
 
 function highlightMatch(text: string, query: string): string {

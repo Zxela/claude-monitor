@@ -85,8 +85,8 @@ export function toggle(anchor: HTMLElement): void {
     const shortName = model.replace('claude-', '').replace('-4-6', '').replace('-4-5-20251001', '');
     const pct = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(0) : '0';
     legend.innerHTML += `<div style="font-size:10px;display:flex;align-items:center;gap:4px;margin:2px 0">
-      <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span>
-      <span style="color:var(--text)">${shortName}</span>
+      <span style="width:8px;height:8px;border-radius:50%;background:${escapeHtml(color)};display:inline-block"></span>
+      <span style="color:var(--text)">${escapeHtml(shortName)}</span>
       <span style="color:var(--text-dim);margin-left:auto">$${cost.toFixed(0)} (${pct}%)</span>
     </div>`;
   }

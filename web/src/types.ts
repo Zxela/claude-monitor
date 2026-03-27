@@ -35,11 +35,6 @@ export interface GroupedSessions {
   older: Session[];
 }
 
-export interface ProjectEntry {
-  name: string;
-  count: number;
-}
-
 export interface SearchResult {
   sessionId: string;
   sessionName: string;

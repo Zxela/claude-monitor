@@ -6,19 +6,41 @@ export interface RenderOptions {
   showSessionId?: string;
 }
 
-type MessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'agent' | 'hook' | 'error' | 'system';
+type MessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'agent' | 'hook' | 'error' | 'command' | 'system';
+
+// Detect slash commands in user messages by looking for command XML tags.
+const COMMAND_RE = /<command-name>\s*\/?([^<]+)<\/command-name>/;
+const COMMAND_MSG_RE = /<command-message>([^<]*)<\/command-message>/;
+const COMMAND_CAVEAT_RE = /<local-command-caveat>[\s\S]*?<\/local-command-caveat>\s*/;
 
 export function detectType(msg: ParsedMessage): MessageType {
   if (msg.isError) return 'error';
   if (msg.hookEvent) return 'hook';
+  if (msg.role === 'user' && msg.contentText && COMMAND_RE.test(msg.contentText)) return 'command';
+  // Caveat-only messages (preceding actual command) are also commands
+  if (msg.role === 'user' && msg.contentText && msg.contentText.includes('<local-command-caveat>') && !COMMAND_RE.test(msg.contentText)) return 'command';
   // Agent tool calls show as 'agent' type, not 'tool_use'
   if (msg.isAgent && msg.role === 'assistant') return 'agent';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
-  if (msg.toolName && msg.role === 'tool') return 'tool_result';
+  if (msg.forToolUseId) return 'tool_result';
   if (msg.type === 'agent' || msg.type === 'agent-name') return 'agent';
   if (msg.role === 'user') return 'user';
   if (msg.role === 'assistant') return 'assistant';
   return 'system';
+}
+
+/** Extract a clean display string from a command message's raw XML content. */
+function formatCommand(raw: string): string {
+  // Strip the caveat boilerplate
+  let text = raw.replace(COMMAND_CAVEAT_RE, '').trim();
+  const nameMatch = text.match(COMMAND_RE);
+  const msgMatch = text.match(COMMAND_MSG_RE);
+  const name = nameMatch ? nameMatch[1].trim() : '';
+  const body = msgMatch ? msgMatch[1].trim() : '';
+  if (name && body && body !== name && !name.endsWith(body)) {
+    return `/${name} ${body}`;
+  }
+  return name ? `/${name}` : text;
 }
 
 export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): HTMLElement {
@@ -42,7 +64,11 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   let contentClass = '';
   let fullContent = fullText || detail;
 
-  if (type === 'hook') {
+  if (type === 'command') {
+    content = formatCommand(fullText || rawText);
+    contentClass = 'command';
+    fullContent = ''; // no expand needed — command is fully shown
+  } else if (type === 'hook') {
     content = rawText || msg.hookEvent || '';
     contentClass = 'hook';
   } else if (type === 'agent') {

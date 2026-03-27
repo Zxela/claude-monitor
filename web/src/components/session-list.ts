@@ -1,8 +1,8 @@
 // web/src/components/session-list.ts
 import type { Session } from '../types';
 import type { AppState } from '../state';
-import { state, subscribe, update } from '../state';
-import { renderExpanded, renderCompact, renderDot } from './session-card';
+import { state, subscribe } from '../state';
+import { renderExpanded, renderCompact } from './session-card';
 import { isSessionActive } from '../utils';
 import '../styles/sessions.css';
 
@@ -13,6 +13,8 @@ const MAX_VISIBLE = 15;
 const showAllGroups = new Set<string>();
 const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
 let activeFilter: 'active' | 'recent' | 'all' = 'recent';
+let refreshInterval: ReturnType<typeof setInterval> | null = null;
+let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
 export function render(container: HTMLElement): void {
   el = document.createElement('div');
@@ -41,28 +43,24 @@ export function render(container: HTMLElement): void {
   listEl.style.cssText = 'flex:1; overflow-y:auto;';
   el.appendChild(listEl);
 
-  // Toggle button
-  const toggleBtn = document.createElement('button');
-  toggleBtn.className = 'sidebar-toggle';
-  toggleBtn.setAttribute('aria-label', 'Toggle sidebar');
-  toggleBtn.textContent = '\u00AB';
-  toggleBtn.addEventListener('click', () => {
-    update({ sidebarCollapsed: !state.sidebarCollapsed });
-  });
-  el.appendChild(toggleBtn);
-
   container.appendChild(el);
 
   renderList();
-  setInterval(renderList, 5000);
+
+  // Clear previous interval/listener to prevent accumulation on re-render
+  if (refreshInterval !== null) clearInterval(refreshInterval);
+  refreshInterval = setInterval(renderList, 5000);
+
   subscribe(onStateChange);
 
-  document.addEventListener('keydown', (e) => {
+  if (keydownHandler) document.removeEventListener('keydown', keydownHandler);
+  keydownHandler = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.key === '1') { activeFilter = 'active'; renderList(); updateFilterBar(); }
     if (e.key === '2') { activeFilter = 'recent'; renderList(); updateFilterBar(); }
     if (e.key === '3') { activeFilter = 'all'; renderList(); updateFilterBar(); }
-  });
+  };
+  document.addEventListener('keydown', keydownHandler);
 }
 
 function updateFilterBar(): void {
@@ -72,12 +70,6 @@ function updateFilterBar(): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('sidebarCollapsed') && el) {
-    el.classList.toggle('collapsed', _state.sidebarCollapsed);
-    const toggleBtn = el.querySelector('.sidebar-toggle');
-    if (toggleBtn) toggleBtn.textContent = _state.sidebarCollapsed ? '\u00BB' : '\u00AB';
-    renderList();
-  }
   if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
     renderList();
   }
@@ -100,19 +92,25 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 function renderList(): void {
   if (!listEl) return;
 
-  // Collapsed mode: render dots only
-  if (state.sidebarCollapsed) {
-    listEl.innerHTML = '';
-    const allSessions = [...state.sessions.values()]
-      .filter(s => !s.isSubagent)
-      .sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
-    for (const sess of allSessions) {
-      listEl.appendChild(renderDot(sess));
+  const now = Date.now();
+
+  // Locally transition stale sessions to idle so subagents don't linger as "waiting".
+  // Exception: parents with active children stay as "waiting" — work is still happening.
+  for (const sess of state.sessions.values()) {
+    if (sess.isActive && !isSessionActive(sess.lastActive)) {
+      const hasActiveChild = (sess.children ?? []).some(id => {
+        const child = state.sessions.get(id);
+        return child && isSessionActive(child.lastActive);
+      });
+      if (hasActiveChild) {
+        sess.status = 'waiting';
+      } else {
+        sess.isActive = false;
+        sess.status = 'idle';
+      }
     }
-    return;
   }
 
-  const now = Date.now();
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
   const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 7);

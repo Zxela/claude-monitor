@@ -1,8 +1,11 @@
 import type { WsEvent } from './types';
 import { state, update, updateSession } from './state';
+import { fetchGroupedSessions } from './api';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectDelay = 2000;
+const MAX_RECONNECT_DELAY = 30000;
 
 type MessageHandler = (event: WsEvent) => void;
 const handlers: MessageHandler[] = [];
@@ -19,13 +22,31 @@ export function connect(): void {
 
   ws.onopen = () => {
     update({ connected: true });
+    reconnectDelay = 2000; // Reset backoff on successful connection
+
+    // Re-fetch sessions to reconcile state missed during disconnect
+    fetchGroupedSessions().then(grouped => {
+      const allSessions = [
+        ...grouped.active,
+        ...grouped.lastHour,
+        ...grouped.today,
+        ...grouped.yesterday,
+        ...grouped.thisWeek,
+        ...grouped.older,
+      ];
+      for (const sess of allSessions) {
+        updateSession(sess);
+      }
+      update({ grouped });
+    }).catch(() => { /* ignore — WS is connected, sessions will arrive via events */ });
   };
 
   ws.onclose = () => {
     update({ connected: false });
     ws = null;
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, 2000);
+    reconnectTimer = setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
   };
 
   ws.onerror = () => {

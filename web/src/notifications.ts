@@ -23,12 +23,12 @@ export function getSettings(): NotifSettings {
   return { ...settings };
 }
 
-export function notify(type: 'budget' | 'error', title: string, body: string): void {
+export async function notify(type: 'budget' | 'error', title: string, body: string): Promise<void> {
   if (type === 'budget' && !settings.budget) return;
   if (type === 'error' && !settings.error) return;
   if (Notification.permission === 'default') {
-    Notification.requestPermission();
-    return;
+    const result = await Notification.requestPermission();
+    if (result !== 'granted') return;
   }
   if (Notification.permission !== 'granted') return;
   new Notification(title, { body });

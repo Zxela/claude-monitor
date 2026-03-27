@@ -5,7 +5,7 @@ export default defineConfig({
   root: '.',
   build: {
     outDir: path.resolve(__dirname, '../cmd/claude-monitor/static'),
-    emptyDir: true,
+    emptyOutDir: true,
   },
   server: {
     port: 5173,

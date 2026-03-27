@@ -8,13 +8,17 @@ build: web
 dev:
 	@echo "Starting Go backend on :7700..."
 	@go build -o /tmp/claude-monitor-dev ./cmd/claude-monitor && \
-		/tmp/claude-monitor-dev -port 7700 &
-	@echo "Starting Vite dev server on :5173..."
-	@cd web && npm run dev
+		/tmp/claude-monitor-dev -port 7700 & \
+		GO_PID=$$!; \
+		trap "kill $$GO_PID 2>/dev/null; exit" INT TERM EXIT; \
+		echo "Starting Vite dev server on :5173..."; \
+		cd web && npm run dev; \
+		kill $$GO_PID 2>/dev/null
 
-# Build frontend only (clean stale assets first)
+# Build frontend only (clean stale assets first, install deps if needed)
 web:
 	rm -rf cmd/claude-monitor/static/assets
+	@test -d web/node_modules || (echo "Installing frontend dependencies..." && cd web && npm ci)
 	cd web && npm run build
 
 # Install frontend dependencies

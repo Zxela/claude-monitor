@@ -5,8 +5,8 @@ import "database/sql"
 func init() {
 	Register(1, Migration{
 		Name: "initial_schema",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`CREATE TABLE IF NOT EXISTS session_history (
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS session_history (
 				id TEXT PRIMARY KEY,
 				project_name TEXT,
 				session_name TEXT,
@@ -28,8 +28,8 @@ func init() {
 			CREATE INDEX IF NOT EXISTS idx_session_history_ended_at ON session_history(ended_at DESC)`)
 			return err
 		},
-		Down: func(db *sql.DB) error {
-			_, err := db.Exec(`DROP TABLE IF EXISTS session_history`)
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`DROP TABLE IF EXISTS session_history`)
 			return err
 		},
 	})

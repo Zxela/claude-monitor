@@ -76,7 +76,11 @@ func Stream(w http.ResponseWriter, r *http.Request, events []Event, params Strea
 			}
 		}
 
-		data, err := json.Marshal(ev)
+		payload := struct {
+			Message Event `json:"message"`
+			Index   int   `json:"index"`
+		}{Message: ev, Index: ev.Index}
+		data, err := json.Marshal(payload)
 		if err != nil {
 			log.Printf("replay: marshal error for event %d: %v", ev.Index, err)
 			continue

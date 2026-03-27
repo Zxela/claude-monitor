@@ -188,6 +188,14 @@ async function init() {
     }
   } catch (err) {
     console.error('Failed to load sessions:', err);
+    const feedArea = document.getElementById('feed-mount');
+    if (feedArea) {
+      const banner = document.createElement('div');
+      banner.className = 'error-banner';
+      banner.style.cssText = 'background:rgba(255,60,60,0.15);color:#ff6b6b;padding:8px 12px;font-size:12px;border:1px solid rgba(255,60,60,0.3);border-radius:4px;margin:8px;';
+      banner.textContent = 'Failed to load sessions. Check that the server is running and try refreshing.';
+      feedArea.prepend(banner);
+    }
   }
 
   connect();

@@ -36,7 +36,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
 
   const displayName = session.sessionName || session.projectName || session.id;
   const statusClass = `status-${session.status}`;
-  const childCount = session.children?.length ?? 0;
+  const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
 
   const dotLabel = session.isActive
@@ -53,8 +53,9 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
         <span class="session-dot ${dotClass}" aria-label="${dotLabel}" role="img"></span>
         <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
         ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+        ${session.model ? `<span class="model">${escapeHtml(session.model.replace('claude-', '').replace('-4-6', ''))}</span>` : ''}
         ${session.status !== 'idle'
-          ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : session.status.toUpperCase()}</span>`
+          ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
           : session.isActive
             ? '<span class="session-status-badge status-live">LIVE</span>'
             : ''}
@@ -71,7 +72,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
           ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
         </div>
         <div class="session-meta">
-          <span class="model">${(session.model || '').replace('claude-', '').replace('-4-6', '')}</span>
+          <span class="model">${escapeHtml((session.model || '').replace('claude-', '').replace('-4-6', ''))}</span>
           <span>${timeAgo(session.lastActive)}</span>
           <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
         </div>
@@ -107,7 +108,9 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
     if (childCount > 0 && !expandedParents.has(session.id)) {
       expandedParents.add(session.id);
     }
-    update({ selectedSessionId: session.id === state.selectedSessionId ? null : session.id });
+    const updates: Record<string, unknown> = { selectedSessionId: session.id === state.selectedSessionId ? null : session.id };
+    if (state.view !== 'list') updates.view = 'list';
+    update(updates);
   };
   el.addEventListener('click', selectSession);
   el.addEventListener('keydown', (e) => {
@@ -145,7 +148,8 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
     const showIdle = showIdleChildren.has(session.id);
     const children = session.children
       .map(id => state.sessions.get(id))
-      .filter((c): c is Session => !!c);
+      .filter((c): c is Session => !!c)
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
     const activeChildren = children.filter(c => c.status !== 'idle');
     const idleChildren = children.filter(c => c.status === 'idle');
 
@@ -202,7 +206,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   const dotClass = getDotClass(session);
 
   const displayName = session.sessionName || session.projectName || session.id;
-  const childCount = session.children?.length ?? 0;
+  const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
 
   const compactDotLabel = session.isActive
@@ -213,15 +217,24 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   el.setAttribute('tabindex', '0');
   el.setAttribute('aria-label', `Session: ${displayName}`);
 
+  const compactStatusClass = `status-${session.status}`;
+
   el.innerHTML = `
     <div class="compact-row">
       <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
       <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
       ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
+      ${session.model ? `<span class="model">${escapeHtml(session.model.replace('claude-', '').replace('-4-6', ''))}</span>` : ''}
+      ${session.status !== 'idle'
+        ? `<span class="session-status-badge ${compactStatusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
+        : ''}
+    </div>
+    ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription, 60))}</div>` : ''}
+    <div class="compact-meta">
       <span class="cost ${getCostTier(session.totalCostUSD)}">$${session.totalCostUSD.toFixed(2)}</span>
       <span class="duration">${timeAgo(session.lastActive)}</span>
       <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
-      ${session.model ? `<span class="model">${session.model.replace('claude-', '').replace('-4-6', '')}</span>` : ''}
+      ${session.errorCount > 0 ? `<span class="compact-stat-err">${session.errorCount} err</span>` : ''}
     </div>
   `;
 
@@ -250,7 +263,9 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     if (childCount > 0 && !expandedParents.has(session.id)) {
       expandedParents.add(session.id);
     }
-    update({ selectedSessionId: session.id === state.selectedSessionId ? null : session.id });
+    const updates: Record<string, unknown> = { selectedSessionId: session.id === state.selectedSessionId ? null : session.id };
+    if (state.view !== 'list') updates.view = 'list';
+    update(updates);
   };
   el.addEventListener('click', selectCompactSession);
   el.addEventListener('keydown', (e) => {
@@ -260,24 +275,6 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     }
   });
 
-  // Stats line
-  const totalTokens = session.inputTokens + session.outputTokens + session.cacheReadTokens;
-  const statsDiv = document.createElement('div');
-  statsDiv.className = 'compact-stats';
-  const statParts: string[] = [];
-  statParts.push(`<span>${formatTokens(totalTokens)} tok</span>`);
-  if (session.cacheHitPct > 0) {
-    statParts.push(`<span>${Math.round(session.cacheHitPct)}% cache</span>`);
-  }
-  if (session.errorCount > 0) {
-    statParts.push(`<span class="compact-stat-err">${session.errorCount} err</span>`);
-  }
-  if (session.costRate > 0) {
-    statParts.push(`<span>$${session.costRate.toFixed(2)}/min</span>`);
-  }
-  statsDiv.innerHTML = statParts.join('');
-  el.appendChild(statsDiv);
-
   container.appendChild(el);
 
   // Render children if expanded
@@ -285,7 +282,8 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     const showIdle = showIdleChildren.has(session.id);
     const children = session.children
       .map(id => state.sessions.get(id))
-      .filter((c): c is Session => !!c);
+      .filter((c): c is Session => !!c)
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
     const activeChildren = children.filter(c => c.status !== 'idle');
     const idleChildren = children.filter(c => c.status === 'idle');
 
@@ -341,7 +339,9 @@ export function renderDot(session: Session): HTMLElement {
   dot.setAttribute('tabindex', '0');
 
   dot.addEventListener('click', () => {
-    update({ selectedSessionId: session.id });
+    const updates: Record<string, unknown> = { selectedSessionId: session.id };
+    if (state.view !== 'list') updates.view = 'list';
+    update(updates);
   });
 
   return dot;

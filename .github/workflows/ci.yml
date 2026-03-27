@@ -23,6 +23,9 @@ jobs:
       - name: Install and build frontend
         run: cd web && npm ci && npm run build
 
+      - name: Frontend type check
+        run: cd web && npx tsc --noEmit
+
       - name: Build
         run: go build ./...
 

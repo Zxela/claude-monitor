@@ -37,9 +37,6 @@ export async function open(sid: string): Promise<void> {
   show();
 }
 
-export function close(): void {
-  events = [];
-}
 
 async function loadEvents(sid: string): Promise<void> {
   try {

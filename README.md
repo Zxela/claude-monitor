@@ -20,6 +20,13 @@
   <img src="docs/screenshots/feed.png" alt="Claude Monitor — live feed with active agents" width="100%" />
 </p>
 
+## Requirements
+
+- **Go** >= 1.25
+- **Node.js** >= 18
+- **npm**
+- **make**
+
 ## Install
 
 ```bash
@@ -53,6 +60,24 @@ claude-monitor --swagger
 
 ## Configuration
 
+### CLI Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `7700` | HTTP listen port |
+| `--bind` | `127.0.0.1` | Address to bind to (use `0.0.0.0` for all interfaces) |
+| `--broadcast` | `false` | Listen on all interfaces (shorthand for `--bind 0.0.0.0`) |
+| `--watch` | — | Additional directory to watch (repeatable) |
+| `--docker` | `false` | Auto-discover `.claude/projects` mounts from running Docker containers |
+| `--docker-socket` | `/var/run/docker.sock` | Path to Docker socket |
+| `--swagger` | `false` | Serve Swagger UI at `/swagger` |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CLAUDE_MONITOR_NO_UPDATE_CHECK` | Set to `1` or `true` to disable the startup update check |
+
 ### Update Notifications
 
 On startup, claude-monitor checks GitHub for newer releases. If an update is available, a banner appears in the web UI with a link to the release page.
@@ -62,6 +87,25 @@ To disable the update check:
 ```bash
 CLAUDE_MONITOR_NO_UPDATE_CHECK=1 claude-monitor
 ```
+
+### Database Migrations
+
+Use the `migrate` subcommand to manage the SQLite schema:
+
+```bash
+# Apply pending migrations (also runs automatically on startup)
+claude-monitor migrate
+
+# Show current schema version and pending migrations
+claude-monitor migrate status
+
+# Roll back the last migration
+claude-monitor migrate rollback
+```
+
+### Data Storage
+
+Session history is persisted to a SQLite database at `~/.claude-monitor/history.db`.
 
 ## Features
 

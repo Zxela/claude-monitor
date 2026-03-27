@@ -343,16 +343,33 @@
 
 .session-card-compact .subagent-chevron { font-size: 9px; }
 
-.compact-stats {
+.compact-task-desc {
+  padding: 0 10px 1px 18px;
+  font-size: 10px;
+  color: var(--text-dim, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-meta {
   display: flex;
   gap: 8px;
-  padding: 1px 10px 2px 18px;
-  font-size: 9px;
+  padding: 1px 10px 3px 18px;
+  font-size: 10px;
   color: var(--text-dim, #666);
+  align-items: center;
 }
 
 .compact-stat-err {
   color: var(--red, #ff4444);
+  font-size: 9px;
+}
+
+.session-card-compact .session-status-badge {
+  font-size: 8px;
+  padding: 0 4px;
+  line-height: 14px;
 }
 
 /* Idle subagent toggle */

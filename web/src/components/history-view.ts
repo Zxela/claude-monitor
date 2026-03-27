@@ -30,12 +30,19 @@ export function render(mount: HTMLElement): void {
   subscribe(onStateChange);
 }
 
+let historyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('view') && state.view === 'history') {
     loadData();
   }
   if (changed.has('historyShowSubagents') && state.view === 'history') {
     show();
+  }
+  // Refresh history when sessions update while viewing history (debounced)
+  if (changed.has('sessions') && state.view === 'history') {
+    if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
+    historyRefreshTimer = setTimeout(loadData, 5000);
   }
 }
 
@@ -275,7 +282,17 @@ function sortData(rows: HistoryRow[]): HistoryRow[] {
       case 'projectName': va = (a.sessionName || a.projectName || '').toLowerCase(); vb = (b.sessionName || b.projectName || '').toLowerCase(); break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
       case 'endedAt': va = a.endedAt || ''; vb = b.endedAt || ''; break;
-      default: va = (a as any)[sortCol] ?? 0; vb = (b as any)[sortCol] ?? 0;
+      default: {
+        const numericAccessors: Record<string, (r: HistoryRow) => number> = {
+          totalCost: r => r.totalCost,
+          durationSeconds: r => r.durationSeconds,
+          messageCount: r => r.messageCount,
+          errorCount: r => r.errorCount,
+        };
+        const accessor = numericAccessors[sortCol];
+        va = accessor ? accessor(a) : 0;
+        vb = accessor ? accessor(b) : 0;
+      }
     }
     const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
     return sortAsc ? cmp : -cmp;

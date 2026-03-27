@@ -6,6 +6,7 @@ import '../styles/topbar.css';
 
 let el: HTMLElement | null = null;
 let searchInput: HTMLInputElement | null = null;
+let renderAbort: AbortController | null = null;
 
 let statActive: HTMLElement | null = null;
 let statCost: HTMLElement | null = null;
@@ -14,6 +15,11 @@ let statCache: HTMLElement | null = null;
 let statRate: HTMLElement | null = null;
 
 export function render(container: HTMLElement): void {
+  // Abort previous document-level listeners to prevent accumulation on re-render
+  if (renderAbort) renderAbort.abort();
+  renderAbort = new AbortController();
+  const signal = renderAbort.signal;
+
   el = document.createElement('div');
   el.className = 'topbar';
   el.innerHTML = `
@@ -70,7 +76,7 @@ export function render(container: HTMLElement): void {
       collapsible.classList.remove('open');
       hamburger.setAttribute('aria-expanded', 'false');
     }
-  });
+  }, { signal });
 
   container.appendChild(el);
 
@@ -104,7 +110,7 @@ export function render(container: HTMLElement): void {
       e.preventDefault();
       searchInput!.focus();
     }
-  });
+  }, { signal });
 
   subscribe(onStateChange);
 
@@ -154,7 +160,7 @@ function setVal(el: HTMLElement | null, text: string): void {
 
 function updateStats(): void {
   const sessions = Array.from(state.sessions.values());
-  const active = sessions.filter(s => isSessionActive(s.lastActive));
+  const active = sessions.filter(s => isSessionActive(s.lastActive) && !s.isSubagent);
   const working = active.filter(s => s.status === 'thinking' || s.status === 'tool_use');
   const totalCost = sessions.reduce((sum, s) => sum + s.totalCostUSD, 0);
   const totalRate = active.reduce((sum, s) => sum + s.costRate, 0);
@@ -164,19 +170,8 @@ function updateStats(): void {
   const cacheHit = totalInput > 0 ? (totalCacheRead / totalInput * 100) : 0;
 
   setVal(statActive, String(active.length));
-  const costFmt = totalCost < 10 ? `$${totalCost.toFixed(1)}` : `$${totalCost.toFixed(0)}`;
-  setVal(statCost, costFmt);
+  setVal(statCost, `$${totalCost.toFixed(0)}`);
   setVal(statWorking, String(working.length));
-  if (statWorking) {
-    const thinkingCount = working.filter(s => s.status === 'thinking').length;
-    const toolCount = working.filter(s => s.status === 'tool_use').length;
-    const waitingCount = active.filter(s => s.status === 'waiting').length;
-    const parts: string[] = [];
-    if (thinkingCount > 0) parts.push(`${thinkingCount} thinking`);
-    if (toolCount > 0) parts.push(`${toolCount} tool`);
-    if (waitingCount > 0) parts.push(`${waitingCount} waiting`);
-    statWorking.title = parts.length > 0 ? parts.join(', ') : 'No active work';
-  }
   setVal(statCache, cacheHit > 0 ? `${cacheHit.toFixed(0)}%` : '—');
   setVal(statRate, totalRate > 0 ? `$${totalRate.toFixed(3)}/m` : '—');
 }

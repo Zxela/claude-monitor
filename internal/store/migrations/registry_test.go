@@ -37,23 +37,23 @@ func TestRunUp_AppliesAllMigrations(t *testing.T) {
 
 	Register(1, Migration{
 		Name: "create_test_table",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`CREATE TABLE test (id TEXT)`)
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE test (id TEXT)`)
 			return err
 		},
-		Down: func(db *sql.DB) error {
-			_, err := db.Exec(`DROP TABLE test`)
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`DROP TABLE test`)
 			return err
 		},
 	})
 	Register(2, Migration{
 		Name: "add_test_column",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`ALTER TABLE test ADD COLUMN name TEXT DEFAULT ''`)
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE test ADD COLUMN name TEXT DEFAULT ''`)
 			return err
 		},
-		Down: func(db *sql.DB) error {
-			_, err := db.Exec(`CREATE TABLE test_bak AS SELECT id FROM test;
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE test_bak AS SELECT id FROM test;
 				DROP TABLE test; ALTER TABLE test_bak RENAME TO test`)
 			return err
 		},
@@ -91,12 +91,12 @@ func TestRunUp_SkipsAlreadyApplied(t *testing.T) {
 
 	Register(1, Migration{
 		Name: "create_test_table",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`CREATE TABLE test (id TEXT)`)
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE test (id TEXT)`)
 			return err
 		},
-		Down: func(db *sql.DB) error {
-			_, err := db.Exec(`DROP TABLE test`)
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`DROP TABLE test`)
 			return err
 		},
 	})
@@ -111,11 +111,11 @@ func TestRunUp_SkipsAlreadyApplied(t *testing.T) {
 	// Add second migration.
 	Register(2, Migration{
 		Name: "add_column",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`ALTER TABLE test ADD COLUMN val TEXT DEFAULT ''`)
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE test ADD COLUMN val TEXT DEFAULT ''`)
 			return err
 		},
-		Down: func(db *sql.DB) error {
+		Down: func(tx *sql.Tx) error {
 			return nil
 		},
 	})
@@ -145,12 +145,12 @@ func TestRunDown_RollsBackLastMigration(t *testing.T) {
 
 	Register(1, Migration{
 		Name: "create_test_table",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`CREATE TABLE test (id TEXT)`)
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE test (id TEXT)`)
 			return err
 		},
-		Down: func(db *sql.DB) error {
-			_, err := db.Exec(`DROP TABLE test`)
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`DROP TABLE test`)
 			return err
 		},
 	})
@@ -194,8 +194,8 @@ func TestStatus(t *testing.T) {
 	defer func() { registry = saved }()
 	registry = nil
 
-	Register(1, Migration{Name: "first", Up: func(db *sql.DB) error { return nil }, Down: func(db *sql.DB) error { return nil }})
-	Register(2, Migration{Name: "second", Up: func(db *sql.DB) error { return nil }, Down: func(db *sql.DB) error { return nil }})
+	Register(1, Migration{Name: "first", Up: func(tx *sql.Tx) error { return nil }, Down: func(tx *sql.Tx) error { return nil }})
+	Register(2, Migration{Name: "second", Up: func(tx *sql.Tx) error { return nil }, Down: func(tx *sql.Tx) error { return nil }})
 
 	db := openTestDB(t)
 
@@ -221,18 +221,18 @@ func TestFailedMigration_RollsBack(t *testing.T) {
 
 	Register(1, Migration{
 		Name: "good",
-		Up: func(db *sql.DB) error {
-			_, err := db.Exec(`CREATE TABLE test (id TEXT)`)
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE test (id TEXT)`)
 			return err
 		},
-		Down: func(db *sql.DB) error { return nil },
+		Down: func(tx *sql.Tx) error { return nil },
 	})
 	Register(2, Migration{
 		Name: "bad",
-		Up: func(db *sql.DB) error {
+		Up: func(tx *sql.Tx) error {
 			return sql.ErrNoRows // simulate failure
 		},
-		Down: func(db *sql.DB) error { return nil },
+		Down: func(tx *sql.Tx) error { return nil },
 	})
 
 	db := openTestDB(t)

@@ -1,9 +1,8 @@
-import type { Session, GroupedSessions, SearchResult, ProjectEntry } from './types';
+import type { Session, GroupedSessions, SearchResult } from './types';
 
 export interface AppState {
   sessions: Map<string, Session>;
   grouped: GroupedSessions | null;
-  projects: ProjectEntry[];
   selectedSessionId: string | null;
   view: 'list' | 'graph' | 'history' | 'table';
   projectFilter: string | null;
@@ -50,7 +49,6 @@ const listeners: Listener[] = [];
 export const state: AppState = {
   sessions: new Map(),
   grouped: null,
-  projects: [],
   selectedSessionId: null,
   view: 'list',
   projectFilter: null,
