@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.2](https://github.com/Zxela/claude-monitor/compare/v1.24.1...v1.24.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* show — for cache% on history rows missing cacheCreationTokens ([86c187a](https://github.com/Zxela/claude-monitor/commit/86c187a90560351a09af4bb4b87bed68d68610f9))
+
 ## [1.24.1](https://github.com/Zxela/claude-monitor/compare/v1.24.0...v1.24.1) (2026-03-27)
 
 
