@@ -595,6 +595,125 @@ Examples:
 		}
 	})
 
+	// Aggregate stats endpoint — merges SQLite history with live active sessions.
+	mux.HandleFunc("GET /api/stats", func(w http.ResponseWriter, r *http.Request) {
+		type statsResponse struct {
+			TotalCost           float64            `json:"totalCost"`
+			InputTokens         int64              `json:"inputTokens"`
+			OutputTokens        int64              `json:"outputTokens"`
+			CacheReadTokens     int64              `json:"cacheReadTokens"`
+			CacheCreationTokens int64              `json:"cacheCreationTokens"`
+			SessionCount        int                `json:"sessionCount"`
+			ActiveSessions      int                `json:"activeSessions"`
+			CacheHitPct         float64            `json:"cacheHitPct"`
+			CostRate            float64            `json:"costRate"`
+			CostByModel         map[string]float64 `json:"costByModel"`
+		}
+
+		// Parse window query param.
+		now := time.Now()
+		var since time.Time
+		switch r.URL.Query().Get("window") {
+		case "today":
+			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		case "week":
+			weekday := int(now.Weekday())
+			if weekday == 0 {
+				weekday = 7
+			}
+			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -(weekday - 1))
+		case "month":
+			since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		default:
+			// "all" or empty — zero time, no filter.
+		}
+
+		// Get SQLite aggregates for the window.
+		agg, err := historyDB.AggregateStats(since)
+		if err != nil {
+			log.Printf("stats aggregate error: %v", err)
+			writeJSONError(w, "failed to compute stats", http.StatusInternalServerError)
+			return
+		}
+
+		resp := statsResponse{
+			TotalCost:           agg.TotalCost,
+			InputTokens:         agg.InputTokens,
+			OutputTokens:        agg.OutputTokens,
+			CacheReadTokens:     agg.CacheReadTokens,
+			CacheCreationTokens: agg.CacheCreationTokens,
+			SessionCount:        agg.SessionCount,
+			CostByModel:         agg.CostByModel,
+		}
+		if resp.CostByModel == nil {
+			resp.CostByModel = make(map[string]float64)
+		}
+
+		// Collect active top-level sessions within the window.
+		allSessions := sessionStore.All()
+		var activeSessions []*session.Session
+		var activeIDs []string
+		for _, sess := range allSessions {
+			if sess.IsSubagent {
+				continue
+			}
+			if !sess.IsActive {
+				continue
+			}
+			// Filter by window: session must have started within the window.
+			if !since.IsZero() && sess.StartedAt.Before(since) {
+				continue
+			}
+			activeSessions = append(activeSessions, sess)
+			activeIDs = append(activeIDs, sess.ID)
+		}
+
+		// Get last-saved snapshots for active sessions.
+		snapshots, err := historyDB.GetSessionSnapshots(activeIDs)
+		if err != nil {
+			log.Printf("stats snapshot error: %v", err)
+			writeJSONError(w, "failed to compute stats", http.StatusInternalServerError)
+			return
+		}
+
+		// Merge active session deltas into the aggregate.
+		for _, sess := range activeSessions {
+			if snap, ok := snapshots[sess.ID]; ok {
+				// Session is in SQLite — add only the delta (live - saved).
+				resp.TotalCost += sess.TotalCost - snap.TotalCost
+				resp.InputTokens += sess.InputTokens - snap.InputTokens
+				resp.OutputTokens += sess.OutputTokens - snap.OutputTokens
+				resp.CacheReadTokens += sess.CacheReadTokens - snap.CacheReadTokens
+				resp.CacheCreationTokens += sess.CacheCreationTokens - snap.CacheCreationTokens
+			} else {
+				// Session not in SQLite — add full live values.
+				resp.TotalCost += sess.TotalCost
+				resp.InputTokens += sess.InputTokens
+				resp.OutputTokens += sess.OutputTokens
+				resp.CacheReadTokens += sess.CacheReadTokens
+				resp.CacheCreationTokens += sess.CacheCreationTokens
+				resp.SessionCount++
+				if sess.Model != "" {
+					resp.CostByModel[sess.Model] += sess.TotalCost
+				}
+			}
+			resp.CostRate += sess.CostRate
+		}
+
+		resp.ActiveSessions = len(activeSessions)
+
+		// Compute derived cache hit percentage.
+		totalInput := resp.InputTokens + resp.CacheReadTokens + resp.CacheCreationTokens
+		if totalInput > 0 {
+			resp.CacheHitPct = float64(resp.CacheReadTokens) / float64(totalInput) * 100
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Printf("json encode stats: %v", err)
+		}
+	})
+
 	// Distinct project names with session counts.
 	mux.HandleFunc("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
 		sessions := sessionStore.All()
