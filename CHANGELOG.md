@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/Zxela/claude-monitor/compare/v1.22.0...v1.23.0) (2026-03-27)
+
+
+### Features
+
+* remove redundant table view, keep history as the single tabular view ([e7615b8](https://github.com/Zxela/claude-monitor/commit/e7615b8bc82e72cda190d133e4d6c1a34fe5d18d))
+
 ## [1.22.0](https://github.com/Zxela/claude-monitor/compare/v1.21.2...v1.22.0) (2026-03-27)
 
 
