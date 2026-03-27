@@ -139,11 +139,11 @@ function updateHeader(): void {
     const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
-    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
-      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
-      <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
-      ${!isLive ? '<span class="replay-btn" role="button" tabindex="0" aria-label="Replay session" style="margin-left:4px;color:var(--purple,#a855f7);font-size:9px;cursor:pointer;border:1px solid rgba(168,85,247,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">▶ REPLAY</span>' : ''}
-      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
+    headerEl.innerHTML = `<span class="feed-header-label">${label}</span>
+      <span class="feed-header-name">${escapeHtml(name)}</span>
+      <span class="timeline-btn feed-header-btn timeline" role="button" tabindex="0" aria-label="Open timeline view">TIMELINE</span>
+      ${!isLive ? '<span class="replay-btn feed-header-btn replay" role="button" tabindex="0" aria-label="Replay session">&#9654; REPLAY</span>' : ''}
+      <span class="back-to-feed feed-header-btn back" role="button" tabindex="0" aria-label="Back to all sessions">&larr; all</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
     backBtn?.addEventListener('keydown', (e) => {
@@ -179,8 +179,8 @@ function updateHeader(): void {
       });
     }
   } else {
-    headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
-      <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
+    headerEl.innerHTML = `<span class="feed-header-label">LIVE FEED</span>
+      <span class="feed-header-name">all sessions</span>`;
   }
 }
 

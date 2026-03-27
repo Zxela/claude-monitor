@@ -172,7 +172,7 @@
 .fe-time {
   flex: 0 0 85px;
   color: #44445a;
-  font-size: 11px;
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 
@@ -201,7 +201,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 
 .fe-content.dim    { color: var(--text-dim); }
@@ -412,3 +412,20 @@
   opacity: 0.75;
   border-left: 2px solid rgba(0,204,255,0.2);
 }
+
+/* Feed header button classes (replacing inline styles) */
+.feed-header-label { color: var(--cyan); letter-spacing: 1px; font-size: var(--text-base, 11px); }
+.feed-header-name { color: var(--text-dim); font-size: var(--text-sm, 10px); }
+.feed-header-btn {
+  font-size: var(--text-xs, 9px);
+  cursor: pointer;
+  border: 1px solid;
+  padding: 1px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+  background: none;
+  font-family: var(--font-mono);
+}
+.feed-header-btn.timeline { color: var(--yellow); border-color: rgba(255,204,0,0.3); margin-left: 8px; }
+.feed-header-btn.replay { color: var(--purple); border-color: rgba(168,85,247,0.3); margin-left: 4px; }
+.feed-header-btn.back { margin-left: auto; color: var(--cyan); font-size: var(--text-sm, 10px); border: none; letter-spacing: 0.5px; }
