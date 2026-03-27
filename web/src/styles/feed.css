@@ -379,24 +379,25 @@
 
 /* Scroll lock button */
 .scroll-lock-btn {
-  position: fixed;
-  bottom: 38px;
-  right: 14px;
-  background: rgba(68,136,255,0.15);
-  border: 1px solid var(--cyan);
+  position: sticky;
+  bottom: 0;
+  width: 100%;
+  background: rgba(68,136,255,0.1);
+  border: none;
+  border-top: 1px solid var(--cyan);
   color: var(--cyan);
   font-family: var(--font-mono);
   font-size: 10px;
-  padding: 4px 10px;
+  padding: 4px 0;
   cursor: pointer;
   letter-spacing: 1px;
-  border-radius: 2px;
-  z-index: 50;
+  text-align: center;
+  z-index: 10;
   display: none;
 }
 
 .scroll-lock-btn:hover {
-  background: rgba(68,136,255,0.3);
+  background: rgba(68,136,255,0.2);
 }
 
 .scroll-lock-btn.visible { display: block; }

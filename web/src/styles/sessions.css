@@ -156,24 +156,25 @@
 .session-dot.dot-active {
   background: var(--green);
   box-shadow: 0 0 6px var(--green);
-  animation: dotPulse 1.8s ease-in-out infinite;
+  /* No animation — solid glow indicates waiting/ready */
 }
 
 .session-dot.dot-thinking {
   background: var(--yellow);
   box-shadow: 0 0 6px var(--yellow);
-  animation: dotPulse 1.8s ease-in-out infinite;
+  animation: pulseThinking 2s ease-in-out infinite;
 }
 
 .session-dot.dot-tool {
   background: var(--cyan);
   box-shadow: 0 0 6px var(--cyan);
-  animation: dotPulse 1.8s ease-in-out infinite;
+  animation: flashTool 0.8s ease-in-out infinite;
 }
 
 .session-dot.dot-idle {
   background: var(--text-dim);
-  opacity: 0.4;
+  opacity: 0.3;
+  /* No animation — static and dim */
 }
 
 @keyframes dotPulse {
@@ -216,19 +217,20 @@
   border-radius: 2px;
   text-transform: uppercase;
   flex-shrink: 0;
-  animation: dotPulse 1.8s ease-in-out infinite;
 }
 
 .status-thinking {
   color: var(--yellow);
   border: 1px solid rgba(255,204,0,0.3);
   background: rgba(255,204,0,0.05);
+  animation: pulseThinking 2s ease-in-out infinite;
 }
 
 .status-tool_use {
   color: var(--cyan);
   border: 1px solid rgba(0,136,255,0.3);
   background: rgba(0,136,255,0.05);
+  animation: flashTool 0.8s ease-in-out infinite;
 }
 
 .status-waiting {
@@ -248,7 +250,6 @@
   color: var(--green);
   border: 1px solid rgba(0,255,136,0.3);
   background: rgba(0,255,136,0.05);
-  animation: dotPulse 1.8s ease-in-out infinite;
 }
 
 /* Task description */
@@ -395,3 +396,15 @@
 .cost-tier-mid { color: var(--yellow) !important; }
 .cost-tier-high { color: var(--orange) !important; }
 .cost-tier-extreme { color: var(--red) !important; }
+
+/* Differentiated status animations */
+@keyframes pulseThinking {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes flashTool {
+  0%, 70% { opacity: 1; }
+  85% { opacity: 0.3; }
+  100% { opacity: 1; }
+}

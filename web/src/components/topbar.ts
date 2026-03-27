@@ -167,6 +167,16 @@ function updateStats(): void {
   const costFmt = totalCost < 10 ? `$${totalCost.toFixed(1)}` : `$${totalCost.toFixed(0)}`;
   setVal(statCost, costFmt);
   setVal(statWorking, String(working.length));
+  if (statWorking) {
+    const thinkingCount = working.filter(s => s.status === 'thinking').length;
+    const toolCount = working.filter(s => s.status === 'tool_use').length;
+    const waitingCount = active.filter(s => s.status === 'waiting').length;
+    const parts: string[] = [];
+    if (thinkingCount > 0) parts.push(`${thinkingCount} thinking`);
+    if (toolCount > 0) parts.push(`${toolCount} tool`);
+    if (waitingCount > 0) parts.push(`${waitingCount} waiting`);
+    statWorking.title = parts.length > 0 ? parts.join(', ') : 'No active work';
+  }
   setVal(statCache, cacheHit > 0 ? `${cacheHit.toFixed(0)}%` : '—');
   setVal(statRate, totalRate > 0 ? `$${totalRate.toFixed(3)}/m` : '—');
 }
