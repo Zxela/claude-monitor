@@ -20,7 +20,7 @@ const COLUMNS: Column[] = [
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
   { key: 'durationSeconds', label: 'Duration', cls: 'col-dim', fmt: r => formatDurationSecs(r.durationSeconds) },
   { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens) },
-  { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: r => { const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return total > 0 ? `${Math.round(r.cacheReadTokens / total * 100)}%` : ''; } },
+  { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: r => { if (!r.cacheCreationTokens && r.cacheReadTokens > 0) return '—'; const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return total > 0 ? `${Math.round(r.cacheReadTokens / total * 100)}%` : ''; } },
   { key: 'messageCount', label: 'Msgs', fmt: r => String(r.messageCount) },
   { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: r => r.errorCount > 0 ? String(r.errorCount) : '' },
   { key: 'model', label: 'Model', cls: 'col-model', fmt: r => (r.model || '').replace('claude-', '') },
