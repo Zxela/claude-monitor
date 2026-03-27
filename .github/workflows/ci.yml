@@ -74,8 +74,9 @@ jobs:
           release-type: go
 
       # Auto-merge the release PR so releases ship without manual intervention.
+      # Only when release-please created a PR but didn't already create the release.
       - name: Auto-merge release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -88,7 +89,7 @@ jobs:
       # in this same run instead.
       - name: Create release after merge
         id: create-release
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
