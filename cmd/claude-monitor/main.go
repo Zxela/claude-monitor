@@ -157,11 +157,8 @@ func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request
 		// Try to find the JSONL file on disk for historical sessions.
 		if sessionFinder != nil {
 			if filePath := sessionFinder.FindSessionFile(id); filePath != "" {
-				// Create a minimal session with enough info to serve replay/recent.
-				sess = store.Upsert(id, func(s *session.Session) {
-					s.FilePath = filePath
-				})
-				return sess, true
+				// Return transient session — do NOT persist to live store.
+				return &session.Session{ID: id, FilePath: filePath}, true
 			}
 		}
 		writeJSONError(w, "session not found", http.StatusNotFound)
