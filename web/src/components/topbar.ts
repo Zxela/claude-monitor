@@ -159,13 +159,14 @@ function setVal(el: HTMLElement | null, text: string): void {
 
 function updateStats(): void {
   const sessions = Array.from(state.sessions.values());
-  const active = sessions.filter(s => isSessionActive(s.lastActive) && !s.isSubagent);
+  const topLevel = sessions.filter(s => !s.isSubagent);
+  const active = topLevel.filter(s => isSessionActive(s.lastActive));
   const working = active.filter(s => s.status === 'thinking' || s.status === 'tool_use');
-  const totalCost = sessions.reduce((sum, s) => sum + s.totalCostUSD, 0);
+  const totalCost = topLevel.reduce((sum, s) => sum + s.totalCostUSD, 0);
   const totalRate = active.reduce((sum, s) => sum + s.costRate, 0);
 
-  const totalInput = sessions.reduce((sum, s) => sum + s.inputTokens + s.cacheReadTokens + s.cacheCreationTokens, 0);
-  const totalCacheRead = sessions.reduce((sum, s) => sum + s.cacheReadTokens, 0);
+  const totalInput = topLevel.reduce((sum, s) => sum + s.inputTokens + s.cacheReadTokens + s.cacheCreationTokens, 0);
+  const totalCacheRead = topLevel.reduce((sum, s) => sum + s.cacheReadTokens, 0);
   const cacheHit = totalInput > 0 ? (totalCacheRead / totalInput * 100) : 0;
 
   setVal(statActive, String(active.length));
