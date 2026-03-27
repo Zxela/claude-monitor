@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.3](https://github.com/Zxela/claude-monitor/compare/v1.25.2...v1.25.3) (2026-03-27)
+
+
+### Bug Fixes
+
+* use explicit equality check for release_created output ([8e7a629](https://github.com/Zxela/claude-monitor/commit/8e7a6291b3c5973acfabb4142a2c80e8596b144a))
+
 ## [1.25.2](https://github.com/Zxela/claude-monitor/compare/v1.25.1...v1.25.2) (2026-03-27)
 
 
