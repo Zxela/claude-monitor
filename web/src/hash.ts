@@ -37,7 +37,7 @@ function restoreFromHash(): void {
   const session = params.get('session');
   if (session) changes.selectedSessionId = session;
   const view = params.get('view');
-  if (view && ['list', 'graph', 'history', 'table'].includes(view)) {
+  if (view && ['list', 'graph', 'history'].includes(view)) {
     changes.view = view;
   }
   if (Object.keys(changes).length > 0) {

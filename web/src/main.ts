@@ -7,7 +7,6 @@ import { render as renderSessionList } from './components/session-list';
 import { render as renderSearch } from './components/search';
 import { render as renderFeedPanel } from './components/feed-panel';
 import { render as renderGraphView } from './components/graph-view';
-import { render as renderTableView } from './components/table-view';
 import { render as renderHistoryView } from './components/history-view';
 import { render as renderTimeline } from './components/timeline-view';
 import { render as renderBudget } from './components/budget-popover';
@@ -30,7 +29,6 @@ renderSessionList(sessionsMount);
 // Feed panel + views all render into feed-mount
 renderFeedPanel(feedMount);
 renderGraphView(feedMount);
-renderTableView(feedMount);
 renderHistoryView(feedMount);
 renderTimeline(feedMount);
 renderReplay(feedMount);
@@ -91,9 +89,6 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'h':
       update({ view: state.view === 'history' ? 'list' : 'history' });
-      break;
-    case 't':
-      update({ view: state.view === 'table' ? 'list' : 'table' });
       break;
     case '?':
       toggleHelp();

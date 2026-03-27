@@ -4,7 +4,7 @@ export interface AppState {
   sessions: Map<string, Session>;
   grouped: GroupedSessions | null;
   selectedSessionId: string | null;
-  view: 'list' | 'graph' | 'history' | 'table';
+  view: 'list' | 'graph' | 'history';
   projectFilter: string | null;
   searchQuery: string;
   searchResults: SearchResult[];
