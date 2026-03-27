@@ -256,6 +256,67 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
+// TestStats verifies GET /api/stats returns 200 and a valid stats response
+// with all expected fields.
+func TestStats(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]interface{}
+	getJSON(t, "/api/stats", &body)
+
+	for _, key := range []string{
+		"totalCost", "inputTokens", "outputTokens",
+		"cacheReadTokens", "cacheCreationTokens",
+		"sessionCount", "activeSessions", "cacheHitPct",
+		"costRate", "costByModel",
+	} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response missing expected key %q", key)
+		}
+	}
+
+	// costByModel must be an object, not null
+	if body["costByModel"] == nil {
+		t.Error("costByModel is null, expected an object")
+	}
+}
+
+// TestStatsWindows verifies each window parameter is accepted (no 400/500).
+func TestStatsWindows(t *testing.T) {
+	t.Parallel()
+
+	for _, window := range []string{"all", "today", "week", "month", ""} {
+		path := "/api/stats"
+		if window != "" {
+			path += "?window=" + window
+		}
+		var body map[string]interface{}
+		getJSON(t, path, &body)
+
+		if _, ok := body["totalCost"]; !ok {
+			t.Errorf("window=%q: response missing totalCost", window)
+		}
+	}
+}
+
+// TestStatsNonNegative verifies stats values are never negative.
+func TestStatsNonNegative(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]interface{}
+	getJSON(t, "/api/stats?window=all", &body)
+
+	for _, key := range []string{"totalCost", "inputTokens", "outputTokens", "sessionCount", "activeSessions"} {
+		val, ok := body[key].(float64) // JSON numbers decode as float64
+		if !ok {
+			continue
+		}
+		if val < 0 {
+			t.Errorf("%s is negative: %f", key, val)
+		}
+	}
+}
+
 // TestSwaggerEndpoint verifies that /swagger is not served by default (404).
 func TestSwaggerEndpoint(t *testing.T) {
 	t.Parallel()
