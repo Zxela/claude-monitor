@@ -320,14 +320,39 @@ func main() {
 					}
 				}
 			}
-			if msg.IsError {
+			if msg.IsError && msg.MessageID != "" {
+				if s.SeenMessageIDs == nil {
+					s.SeenMessageIDs = make(map[string]bool)
+				}
+				errKey := "err:" + msg.MessageID
+				if !s.SeenMessageIDs[errKey] {
+					s.SeenMessageIDs[errKey] = true
+					s.ErrorCount++
+				}
+			} else if msg.IsError {
 				s.ErrorCount++
 			}
-			s.TotalCost += msg.CostUSD
-			s.InputTokens += msg.InputTokens
-			s.OutputTokens += msg.OutputTokens
-			s.CacheReadTokens += msg.CacheReadTokens
-			s.CacheCreationTokens += msg.CacheCreationTokens
+			// Deduplicate cost/token accumulation by message ID.
+			// Multiple JSONL lines share the same message ID (streaming chunks)
+			// with cumulative token counts — only count the delta vs last seen.
+			if msg.MessageID != "" && (msg.CostUSD > 0 || msg.InputTokens > 0 || msg.OutputTokens > 0) {
+				if s.SeenMessageCosts == nil {
+					s.SeenMessageCosts = make(map[string]session.MessageCosts)
+				}
+				prev := s.SeenMessageCosts[msg.MessageID]
+				s.TotalCost += msg.CostUSD - prev.CostUSD
+				s.InputTokens += msg.InputTokens - prev.InputTokens
+				s.OutputTokens += msg.OutputTokens - prev.OutputTokens
+				s.CacheReadTokens += msg.CacheReadTokens - prev.CacheReadTokens
+				s.CacheCreationTokens += msg.CacheCreationTokens - prev.CacheCreationTokens
+				s.SeenMessageCosts[msg.MessageID] = session.MessageCosts{
+					CostUSD:             msg.CostUSD,
+					InputTokens:         msg.InputTokens,
+					OutputTokens:        msg.OutputTokens,
+					CacheReadTokens:     msg.CacheReadTokens,
+					CacheCreationTokens: msg.CacheCreationTokens,
+				}
+			}
 			if msg.IsConversationMessage() {
 				if s.SeenMessageIDs == nil {
 					s.SeenMessageIDs = make(map[string]bool)

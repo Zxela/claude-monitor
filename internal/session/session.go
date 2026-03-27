@@ -12,6 +12,16 @@ const activeThreshold = 30 * time.Second
 // maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
 const maxSeenMessageIDs = 10000
 
+// MessageCosts tracks the last-seen cost/tokens for a single message ID,
+// so we can replace (not double-add) when streaming sends multiple lines per message.
+type MessageCosts struct {
+	CostUSD             float64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+}
+
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
 	ID           string    `json:"id"`
@@ -30,7 +40,8 @@ type Session struct {
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt      time.Time        `json:"startedAt"`
 	Status         string           `json:"status"` // idle, thinking, tool_use, waiting
-	SeenMessageIDs map[string]bool  `json:"-"`      // tracks message IDs to deduplicate streaming chunks
+	SeenMessageIDs   map[string]bool          `json:"-"` // tracks message IDs to deduplicate streaming chunks
+	SeenMessageCosts map[string]MessageCosts  `json:"-"` // tracks per-message cost/tokens for dedup
 	ParentID       string           `json:"parentId,omitempty"`
 	Children       []string         `json:"children,omitempty"`
 	CWD            string           `json:"cwd,omitempty"`
@@ -107,10 +118,13 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		delete(s.replayCache, sessionID)
 	}
 
-	// Prevent unbounded growth of the deduplication map.
+	// Prevent unbounded growth of the deduplication maps.
 	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
 		sess.SeenMessageIDs = make(map[string]bool)
 	}
+	// Note: we do NOT cap SeenMessageCosts — clearing it would break the
+	// delta-based cost accumulation (cleared entries re-add full cost).
+	// 10k entries ≈ 500KB, acceptable for correctness.
 
 	// Recalculate derived fields.
 	sess.IsActive = time.Since(sess.LastActive) < activeThreshold
@@ -145,7 +159,8 @@ func (s *Store) All() []*Session {
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		cp := *sess
-		cp.SeenMessageIDs = nil // don't share internal dedup map
+		cp.SeenMessageIDs = nil   // don't share internal dedup map
+		cp.SeenMessageCosts = nil // don't share internal dedup map
 		// Recalculate IsActive so callers always see fresh status.
 		cp.IsActive = time.Since(cp.LastActive) < activeThreshold
 		if !cp.IsActive {
@@ -182,6 +197,7 @@ func (s *Store) Get(id string) (*Session, bool) {
 	}
 	cp := *sess
 	cp.SeenMessageIDs = nil
+	cp.SeenMessageCosts = nil
 	return &cp, true
 }
 

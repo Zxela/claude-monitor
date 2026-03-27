@@ -88,16 +88,12 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
         contentEl.appendChild(expandBtn);
         if (navBtn) contentEl.appendChild(navBtn);
         expandBtn.textContent = '−';
-        contentEl.style.whiteSpace = 'pre-wrap';
-        contentEl.style.overflow = 'visible';
         el.classList.add('expanded');
       } else {
         contentEl.textContent = content;
         contentEl.appendChild(expandBtn);
         if (navBtn) contentEl.appendChild(navBtn);
         expandBtn.textContent = '+';
-        contentEl.style.whiteSpace = '';
-        contentEl.style.overflow = '';
         el.classList.remove('expanded');
       }
     });

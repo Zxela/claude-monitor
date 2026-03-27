@@ -1,6 +1,7 @@
 package session
 
 import (
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -202,6 +203,114 @@ func TestErrorCount_Tracking(t *testing.T) {
 	})
 	if sess.ErrorCount != 2 {
 		t.Errorf("ErrorCount after non-error upsert: got %d, want 2", sess.ErrorCount)
+	}
+}
+
+func TestMessageCosts_DedupStreamingChunks(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+
+	// Simulate 3 JSONL lines for the same message ID with cumulative output tokens.
+	// This mimics Claude's streaming: each chunk carries the running total.
+	chunks := []struct {
+		msgID       string
+		cost        float64
+		input       int64
+		output      int64
+		cacheRead   int64
+		cacheCreate int64
+	}{
+		{"msg_abc", 0.001, 100, 10, 5000, 2000},   // first chunk
+		{"msg_abc", 0.001, 100, 50, 5000, 2000},   // second chunk (output grew)
+		{"msg_abc", 0.001, 100, 200, 5000, 2000},  // final chunk (output grew)
+	}
+
+	for _, c := range chunks {
+		s.Upsert("dedup-session", func(sess *Session) {
+			if sess.SeenMessageCosts == nil {
+				sess.SeenMessageCosts = make(map[string]MessageCosts)
+			}
+			prev := sess.SeenMessageCosts[c.msgID]
+			sess.TotalCost += c.cost - prev.CostUSD
+			sess.InputTokens += c.input - prev.InputTokens
+			sess.OutputTokens += c.output - prev.OutputTokens
+			sess.CacheReadTokens += c.cacheRead - prev.CacheReadTokens
+			sess.CacheCreationTokens += c.cacheCreate - prev.CacheCreationTokens
+			sess.SeenMessageCosts[c.msgID] = MessageCosts{
+				CostUSD:             c.cost,
+				InputTokens:         c.input,
+				OutputTokens:        c.output,
+				CacheReadTokens:     c.cacheRead,
+				CacheCreationTokens: c.cacheCreate,
+			}
+		})
+	}
+
+	sess, ok := s.Get("dedup-session")
+	if !ok {
+		t.Fatal("session not found")
+	}
+
+	// Should reflect the FINAL values, not the sum of all 3 chunks.
+	if sess.TotalCost != 0.001 {
+		t.Errorf("TotalCost: got %g, want 0.001 (should not triple-count)", sess.TotalCost)
+	}
+	if sess.InputTokens != 100 {
+		t.Errorf("InputTokens: got %d, want 100", sess.InputTokens)
+	}
+	if sess.OutputTokens != 200 {
+		t.Errorf("OutputTokens: got %d, want 200 (final cumulative value)", sess.OutputTokens)
+	}
+	if sess.CacheReadTokens != 5000 {
+		t.Errorf("CacheReadTokens: got %d, want 5000", sess.CacheReadTokens)
+	}
+	if sess.CacheCreationTokens != 2000 {
+		t.Errorf("CacheCreationTokens: got %d, want 2000", sess.CacheCreationTokens)
+	}
+}
+
+func TestMessageCosts_MultipleMessages(t *testing.T) {
+	t.Parallel()
+	s := NewStore()
+
+	// Two different message IDs — costs should add, not replace.
+	messages := []struct {
+		msgID  string
+		cost   float64
+		output int64
+	}{
+		{"msg_1", 0.05, 500},
+		{"msg_1", 0.05, 800},  // same msg, output grew
+		{"msg_2", 0.10, 1000}, // new message
+	}
+
+	for _, m := range messages {
+		s.Upsert("multi-msg-session", func(sess *Session) {
+			if sess.SeenMessageCosts == nil {
+				sess.SeenMessageCosts = make(map[string]MessageCosts)
+			}
+			prev := sess.SeenMessageCosts[m.msgID]
+			sess.TotalCost += m.cost - prev.CostUSD
+			sess.OutputTokens += m.output - prev.OutputTokens
+			sess.SeenMessageCosts[m.msgID] = MessageCosts{
+				CostUSD:      m.cost,
+				OutputTokens: m.output,
+			}
+		})
+	}
+
+	sess, ok := s.Get("multi-msg-session")
+	if !ok {
+		t.Fatal("session not found")
+	}
+
+	// msg_1 final cost=0.05, msg_2 cost=0.10 → total=0.15
+	if math.Abs(sess.TotalCost-0.15) > 1e-12 {
+		t.Errorf("TotalCost: got %g, want 0.15", sess.TotalCost)
+	}
+	// msg_1 final output=800, msg_2 output=1000 → total=1800
+	if sess.OutputTokens != 1800 {
+		t.Errorf("OutputTokens: got %d, want 1800", sess.OutputTokens)
 	}
 }
 

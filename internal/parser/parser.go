@@ -115,9 +115,9 @@ type modelPricing struct {
 }
 
 var pricingTable = map[string]modelPricing{
-	"claude-opus-4-6":   {15.0, 75.0, 1.50, 18.75},
+	"claude-opus-4-6":   {5.0, 25.0, 0.50, 6.25},
 	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
-	"claude-haiku-4-5":  {0.80, 4.0, 0.08, 1.0},
+	"claude-haiku-4-5":  {1.0, 5.0, 0.10, 1.25},
 }
 
 var defaultPricing = pricingTable["claude-sonnet-4-6"]

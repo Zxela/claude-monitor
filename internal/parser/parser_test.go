@@ -481,10 +481,10 @@ func TestComputeCost_ByModel(t *testing.T) {
 		model    string
 		wantCost float64
 	}{
-		{"opus", "claude-opus-4-6", 15.0 + 75.0 + 1.50 + 18.75},
+		{"opus", "claude-opus-4-6", 5.0 + 25.0 + 0.50 + 6.25},
 		{"sonnet", "claude-sonnet-4-6", 3.0 + 15.0 + 0.30 + 3.75},
-		{"haiku", "claude-haiku-4-5", 0.80 + 4.0 + 0.08 + 1.0},
-		{"haiku versioned", "claude-haiku-4-5-20251001", 0.80 + 4.0 + 0.08 + 1.0},
+		{"haiku", "claude-haiku-4-5", 1.0 + 5.0 + 0.10 + 1.25},
+		{"haiku versioned", "claude-haiku-4-5-20251001", 1.0 + 5.0 + 0.10 + 1.25},
 		{"unknown falls back to sonnet", "claude-unknown-99", 3.0 + 15.0 + 0.30 + 3.75},
 	}
 
@@ -524,10 +524,10 @@ func TestParseLine_OpusPricing(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedCost := float64(100)*15.0/1e6 +
-		float64(200)*75.0/1e6 +
-		float64(400)*1.50/1e6 +
-		float64(300)*18.75/1e6
+	expectedCost := float64(100)*5.0/1e6 +
+		float64(200)*25.0/1e6 +
+		float64(400)*0.50/1e6 +
+		float64(300)*6.25/1e6
 	if math.Abs(msg.CostUSD-expectedCost) > 1e-12 {
 		t.Errorf("CostUSD = %g, want %g (should use Opus pricing)", msg.CostUSD, expectedCost)
 	}

@@ -11,7 +11,7 @@ import { render as renderTableView } from './components/table-view';
 import { render as renderHistoryView } from './components/history-view';
 import { render as renderTimeline } from './components/timeline-view';
 import { render as renderBudget } from './components/budget-popover';
-import { open as openReplay, togglePlay as replayToggle, restart as replayRestart, stepForward as replayForward, stepBackward as replayBack } from './components/replay';
+import { render as renderReplay, open as openReplay, togglePlay as replayToggle, restart as replayRestart, stepForward as replayForward, stepBackward as replayBack } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { init as initHash } from './hash';
 import { init as initOnboarding } from './components/onboarding';
@@ -33,6 +33,7 @@ renderGraphView(feedMount);
 renderTableView(feedMount);
 renderHistoryView(feedMount);
 renderTimeline(feedMount);
+renderReplay(feedMount);
 
 // Search dropdown
 const searchBox = topbarMount.querySelector<HTMLElement>('.search-box');
