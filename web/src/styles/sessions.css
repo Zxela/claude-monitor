@@ -366,8 +366,8 @@
 
 .idle-toggle:hover { opacity: 1; color: var(--text); }
 
-.session-card.focused { outline: 1px dashed var(--text-dim); outline-offset: -1px; }
-.session-card-compact.focused { outline: 1px dashed var(--text-dim); outline-offset: -1px; }
+.session-card.focused { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.session-card-compact.focused { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
 .session-current-tool {
   font-size: 10px;
