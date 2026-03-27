@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.3](https://github.com/Zxela/claude-monitor/compare/v1.24.2...v1.24.3) (2026-03-27)
+
+
+### Bug Fixes
+
+* topbar stats exclude subagents to avoid double-counting ([4fdeba7](https://github.com/Zxela/claude-monitor/commit/4fdeba77b0d56acc59c2843912b96df01767e80d))
+
 ## [1.24.2](https://github.com/Zxela/claude-monitor/compare/v1.24.1...v1.24.2) (2026-03-27)
 
 
