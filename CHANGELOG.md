@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.25.5](https://github.com/Zxela/claude-monitor/compare/v1.25.4...v1.25.5) (2026-03-27)
+
+
+### Bug Fixes
+
+* gate release workflow on CI success ([9dd3657](https://github.com/Zxela/claude-monitor/commit/9dd3657a690983f5069732fd881663c0619da303))
+* merge release workflow into CI so releases require passing tests ([f74f89f](https://github.com/Zxela/claude-monitor/commit/f74f89f2db7a870c3eb55c0431792791e34282ab))
+* skip manual release creation when release-please already handled it ([41b730e](https://github.com/Zxela/claude-monitor/commit/41b730e5451b02a96dfaa7842be6c8e768cf5953))
+
 ## [1.25.4](https://github.com/Zxela/claude-monitor/compare/v1.25.3...v1.25.4) (2026-03-27)
 
 
