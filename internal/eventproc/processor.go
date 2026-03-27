@@ -121,6 +121,17 @@ func (p *Processor) Process(ev watcher.Event) Result {
 				}
 			}
 		}
+		// Team agent detection: link to team lead session via config file.
+		if msg.TeamName != "" && s.ParentID == "" {
+			if leadSID := p.resolveTeamLead(msg.TeamName, ev.SessionID); leadSID != "" {
+				s.ParentID = leadSID
+				s.IsSubagent = true
+				if msg.AgentName != "" && s.SessionName == "" {
+					s.SessionName = msg.AgentName
+					s.ProjectName = msg.AgentName
+				}
+			}
+		}
 		if msg.IsError && msg.MessageID != "" {
 			if s.SeenMessageIDs == nil {
 				s.SeenMessageIDs = make(map[string]bool)
@@ -235,4 +246,55 @@ func ParentSessionIDFromPath(filePath string) string {
 		return filepath.Base(parentDir)
 	}
 	return ""
+}
+
+// teamConfig is the minimal structure of ~/.claude/teams/{name}/config.json.
+type teamConfig struct {
+	LeadSessionID string `json:"leadSessionId"`
+}
+
+// resolveTeamLead reads the team config file and returns the lead session ID.
+// Results are cached in metaCache (keyed by "team:" + teamName).
+func (p *Processor) resolveTeamLead(teamName, sessionID string) string {
+	cacheKey := "team:" + teamName
+	p.metaMu.Lock()
+	if cached, ok := p.metaCache[cacheKey]; ok {
+		p.metaMu.Unlock()
+		if cached != nil {
+			return cached.Description // repurpose Description field for leadSessionID
+		}
+		return ""
+	}
+	p.metaMu.Unlock()
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	configPath := filepath.Join(homeDir, ".claude", "teams", teamName, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		p.metaMu.Lock()
+		p.metaCache[cacheKey] = nil // cache the miss
+		p.metaMu.Unlock()
+		return ""
+	}
+	var cfg teamConfig
+	if err := json.Unmarshal(data, &cfg); err != nil || cfg.LeadSessionID == "" {
+		p.metaMu.Lock()
+		p.metaCache[cacheKey] = nil
+		p.metaMu.Unlock()
+		return ""
+	}
+	// Don't link the team lead to itself.
+	if cfg.LeadSessionID == sessionID {
+		p.metaMu.Lock()
+		p.metaCache[cacheKey] = nil
+		p.metaMu.Unlock()
+		return ""
+	}
+	p.metaMu.Lock()
+	p.metaCache[cacheKey] = &agentMeta{Description: cfg.LeadSessionID}
+	p.metaMu.Unlock()
+	return cfg.LeadSessionID
 }

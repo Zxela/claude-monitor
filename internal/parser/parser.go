@@ -25,6 +25,8 @@ type rawMessage struct {
 	CWD        string          `json:"cwd"`
 	GitBranch  string          `json:"gitBranch"`
 	IsSidechain bool            `json:"isSidechain"`
+	TeamName    string          `json:"teamName"`
+	AgentName   string          `json:"agentName"`
 	Data        rawProgressData `json:"data"`
 }
 
@@ -93,6 +95,8 @@ type ParsedMessage struct {
 	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
 	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
 	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
+	TeamName     string    `json:"teamName,omitempty"`     // team name for team agents
+	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
 }
 
 // IsConversationMessage returns true if this message represents a real
@@ -175,6 +179,8 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	msg.GitBranch = raw.GitBranch
 	msg.Model = raw.Message.Model
 	msg.IsSidechain = raw.IsSidechain
+	msg.TeamName = raw.TeamName
+	msg.AgentName = raw.AgentName
 	if raw.Message.StopReason != nil {
 		msg.StopReason = *raw.Message.StopReason
 	}
