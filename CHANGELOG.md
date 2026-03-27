@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.25.0](https://github.com/Zxela/claude-monitor/compare/v1.24.3...v1.25.0) (2026-03-27)
+
+
+### Features
+
+* add /api/stats endpoint with server-side merge of history and live data ([bfd1d4f](https://github.com/Zxela/claude-monitor/commit/bfd1d4fee5fe7e31fc63a23103e4bc2671fabebd))
+* add AggregateStats, GetSessionSnapshots, and cache_hit_pct to SaveSession ([bf34c8f](https://github.com/Zxela/claude-monitor/commit/bf34c8f992535f315b37d6a86956c14ff52fbcf9))
+* add migration 004 for cache_hit_pct column ([303be83](https://github.com/Zxela/claude-monitor/commit/303be833da42e20e5cec9ebecb3405121f01b02e))
+* add Stats type, fetchStats API, and stats/statsWindow state fields ([7ce388f](https://github.com/Zxela/claude-monitor/commit/7ce388fd251e11ad570090a106e88a5d2a3e3f3c))
+* rewrite frontend components to use /api/stats and totalCost ([a983e0e](https://github.com/Zxela/claude-monitor/commit/a983e0e0031b3d19f72fd2453ae79d73bcba4846))
+
+
+### Bug Fixes
+
+* apply costByModel delta for active sessions already in SQLite ([f6adf6b](https://github.com/Zxela/claude-monitor/commit/f6adf6b144b3f5bbd264f75c544e2689ba1f4a79))
+* normalize JSON tag totalCostUSD to totalCost in Session struct ([8edb1fa](https://github.com/Zxela/claude-monitor/commit/8edb1fa9240aae2fafe80517bc59634884df6a54))
+* return transient session in requireSession to avoid store pollution ([03c53b6](https://github.com/Zxela/claude-monitor/commit/03c53b6cda96399da80050b88b552efcc4ad2d25))
+
 ## [1.24.3](https://github.com/Zxela/claude-monitor/compare/v1.24.2...v1.24.3) (2026-03-27)
 
 
