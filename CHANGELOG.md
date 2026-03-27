@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/Zxela/claude-monitor/compare/v1.25.0...v1.25.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* backfill cache_hit_pct for pre-migration history rows ([e80fa37](https://github.com/Zxela/claude-monitor/commit/e80fa37a882038e74ef72742d2e0dbc35c644372))
+
 ## [1.25.0](https://github.com/Zxela/claude-monitor/compare/v1.24.3...v1.25.0) (2026-03-27)
 
 
