@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.2](https://github.com/Zxela/claude-monitor/compare/v1.21.1...v1.21.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* security docs, npm vulns, semantic HTML, memory bounds, docker leak ([d6a3445](https://github.com/Zxela/claude-monitor/commit/d6a34454721f0bb5681d1fa79ed1b42afb3c1ad2))
+
 ## [1.21.1](https://github.com/Zxela/claude-monitor/compare/v1.21.0...v1.21.1) (2026-03-27)
 
 
