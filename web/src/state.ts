@@ -38,6 +38,9 @@ export interface AppState {
 
   // History grouping
   historyShowSubagents: boolean;
+
+  // Sidebar
+  sidebarCollapsed: boolean;
 }
 
 type Listener = (state: AppState, changedKeys: Set<string>) => void;
@@ -69,6 +72,7 @@ export const state: AppState = {
   updateUrl: null,
   updateDismissed: false,
   historyShowSubagents: false,
+  sidebarCollapsed: false,
 };
 
 export function subscribe(listener: Listener): () => void {

@@ -11,6 +11,13 @@ function getCostTier(cost: number): string {
   return 'cost-tier-extreme';
 }
 
+function getDotClass(session: Session): string {
+  if (!session.isActive) return 'dot-idle';
+  if (session.status === 'thinking') return 'dot-thinking';
+  if (session.status === 'tool_use') return 'dot-tool';
+  return 'dot-active';
+}
+
 // Track which parent sessions have their children expanded
 export const expandedParents = new Set<string>();
 // Track which parents show idle subagents (hidden by default)
@@ -25,9 +32,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   if (session.isSubagent) el.classList.add('subagent');
   if (session.isActive) el.classList.add('active-card');
 
-  const dotClass = session.isActive
-    ? (session.status === 'thinking' ? 'dot-thinking' : session.status === 'tool_use' ? 'dot-tool' : 'dot-active')
-    : 'dot-idle';
+  const dotClass = getDotClass(session);
 
   const displayName = session.sessionName || session.projectName || session.id;
   const statusClass = `status-${session.status}`;
@@ -194,9 +199,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   if (session.id === state.selectedSessionId) el.classList.add('selected');
   if (session.isSubagent) el.classList.add('subagent');
 
-  const dotClass = session.isActive
-    ? (session.status === 'thinking' ? 'dot-thinking' : session.status === 'tool_use' ? 'dot-tool' : 'dot-active')
-    : 'dot-idle';
+  const dotClass = getDotClass(session);
 
   const displayName = session.sessionName || session.projectName || session.id;
   const childCount = session.children?.length ?? 0;
@@ -325,6 +328,23 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   }
 
   return el;
+}
+
+export function renderDot(session: Session): HTMLElement {
+  const dot = document.createElement('div');
+  dot.className = 'sidebar-dot';
+  dot.dataset.sessionId = session.id;
+  dot.classList.add(getDotClass(session));
+
+  dot.title = session.sessionName || session.projectName || session.id;
+  dot.setAttribute('role', 'button');
+  dot.setAttribute('tabindex', '0');
+
+  dot.addEventListener('click', () => {
+    update({ selectedSessionId: session.id });
+  });
+
+  return dot;
 }
 
 function truncate(s: string, n: number): string {

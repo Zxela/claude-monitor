@@ -1,8 +1,8 @@
 // web/src/components/session-list.ts
 import type { Session } from '../types';
 import type { AppState } from '../state';
-import { state, subscribe } from '../state';
-import { renderExpanded, renderCompact } from './session-card';
+import { state, subscribe, update } from '../state';
+import { renderExpanded, renderCompact, renderDot } from './session-card';
 import { isSessionActive } from '../utils';
 import '../styles/sessions.css';
 
@@ -41,6 +41,16 @@ export function render(container: HTMLElement): void {
   listEl.style.cssText = 'flex:1; overflow-y:auto;';
   el.appendChild(listEl);
 
+  // Toggle button
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'sidebar-toggle';
+  toggleBtn.setAttribute('aria-label', 'Toggle sidebar');
+  toggleBtn.textContent = '\u00AB';
+  toggleBtn.addEventListener('click', () => {
+    update({ sidebarCollapsed: !state.sidebarCollapsed });
+  });
+  el.appendChild(toggleBtn);
+
   container.appendChild(el);
 
   renderList();
@@ -62,6 +72,12 @@ function updateFilterBar(): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
+  if (changed.has('sidebarCollapsed') && el) {
+    el.classList.toggle('collapsed', _state.sidebarCollapsed);
+    const toggleBtn = el.querySelector('.sidebar-toggle');
+    if (toggleBtn) toggleBtn.textContent = _state.sidebarCollapsed ? '\u00BB' : '\u00AB';
+    renderList();
+  }
   if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
     renderList();
   }
@@ -83,6 +99,18 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 function renderList(): void {
   if (!listEl) return;
+
+  // Collapsed mode: render dots only
+  if (state.sidebarCollapsed) {
+    listEl.innerHTML = '';
+    const allSessions = [...state.sessions.values()]
+      .filter(s => !s.isSubagent)
+      .sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
+    for (const sess of allSessions) {
+      listEl.appendChild(renderDot(sess));
+    }
+    return;
+  }
 
   const now = Date.now();
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
