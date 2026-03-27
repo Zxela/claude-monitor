@@ -198,7 +198,17 @@ function show(): void {
       triangle.setAttribute('aria-label', isCollapsed ? 'Expand subagents' : 'Collapse subagents');
       triangle.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (collapsedParents.has(parent.id)) {
+        if (isCollapsed) {
+          // Expanding this parent: if global minimize is on, switch to
+          // per-parent mode by collapsing all others individually instead.
+          if (!state.historyShowSubagents) {
+            for (const { parent: p, children: c } of grouped) {
+              if (c.length > 0 && p.id !== parent.id) {
+                collapsedParents.add(p.id);
+              }
+            }
+            update({ historyShowSubagents: true });
+          }
           collapsedParents.delete(parent.id);
         } else {
           collapsedParents.add(parent.id);
