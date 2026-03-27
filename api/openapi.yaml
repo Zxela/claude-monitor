@@ -25,6 +25,8 @@ tags:
     description: Project aggregations
   - name: realtime
     description: WebSocket real-time updates
+  - name: stats
+    description: Aggregated statistics with time windowing
 
 paths:
   /health:
@@ -316,6 +318,35 @@ paths:
                 items:
                   $ref: "#/components/schemas/SearchResult"
 
+  /api/stats:
+    get:
+      tags: [stats]
+      summary: Aggregate stats with configurable time window
+      description: >
+        Returns aggregated cost, token, and session counts from the SQLite
+        history database, merged with live deltas from currently active
+        sessions. Subagent sessions are excluded from all totals.
+      operationId: getStats
+      parameters:
+        - name: window
+          in: query
+          description: >
+            Time window for aggregation. Filters sessions by started_at.
+            Defaults to all (no filter).
+          schema:
+            type: string
+            enum: [all, today, week, month]
+            default: all
+      responses:
+        "200":
+          description: Aggregated stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /ws:
     get:
       tags: [realtime]
@@ -390,7 +421,7 @@ components:
         - projectDir
         - projectName
         - filePath
-        - totalCostUSD
+        - totalCost
         - inputTokens
         - outputTokens
         - cacheReadTokens
@@ -429,7 +460,7 @@ components:
           type: string
           description: Absolute path to the JSONL session file on disk.
           example: "/home/user/.claude/projects/-root-my-project/abc123.jsonl"
-        totalCostUSD:
+        totalCost:
           type: number
           format: double
           description: Cumulative estimated cost in USD for this session.
@@ -595,6 +626,9 @@ components:
         - model
         - cwd
         - gitBranch
+        - cacheCreationTokens
+        - cacheHitPct
+        - parentId
         - taskDescription
       properties:
         id:
@@ -666,6 +700,24 @@ components:
           type: string
           description: First 200 characters of the first user message.
           example: "Refactor the authentication module to use JWT tokens"
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Total prompt cache creation tokens. 0 for sessions recorded before this field was added.
+          example: 2000
+        cacheHitPct:
+          type: number
+          format: double
+          description: >
+            Pre-computed cache hit percentage at time of save. 0 for sessions
+            recorded before migration 004.
+          example: 32.0
+        parentId:
+          type: string
+          description: >
+            Session ID of the parent session when this is a subagent.
+            Empty string for top-level sessions.
+          example: "parentSession123"
 
     ParsedMessage:
       type: object
@@ -939,19 +991,92 @@ components:
           description: Number of live sessions belonging to this project.
           example: 3
 
+    StatsResponse:
+      type: object
+      description: >
+        Aggregated statistics across all top-level sessions within the
+        requested time window. Merges SQLite history with live active
+        session deltas for real-time accuracy.
+      required:
+        - totalCost
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - sessionCount
+        - activeSessions
+        - cacheHitPct
+        - costRate
+        - costByModel
+      properties:
+        totalCost:
+          type: number
+          format: double
+          description: Total estimated cost in USD across all matching sessions.
+          example: 142.37
+        inputTokens:
+          type: integer
+          format: int64
+          description: Total input tokens (excluding cache tokens).
+          example: 12840000
+        outputTokens:
+          type: integer
+          format: int64
+          description: Total output tokens.
+          example: 3210000
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Total cache read tokens.
+          example: 9800000
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Total cache creation tokens.
+          example: 1200000
+        sessionCount:
+          type: integer
+          description: Number of sessions in the window (including live unsaved sessions).
+          example: 87
+        activeSessions:
+          type: integer
+          description: Number of currently active top-level sessions.
+          example: 3
+        cacheHitPct:
+          type: number
+          format: double
+          description: >
+            Aggregate cache hit percentage: cacheReadTokens /
+            (inputTokens + cacheReadTokens + cacheCreationTokens) * 100.
+          example: 38.2
+        costRate:
+          type: number
+          format: double
+          description: Sum of cost rates (USD per minute) across all active sessions.
+          example: 0.042
+        costByModel:
+          type: object
+          description: Cost breakdown by model identifier.
+          additionalProperties:
+            type: number
+            format: double
+          example:
+            claude-opus-4-6: 98.20
+            claude-sonnet-4-6: 44.17
+
     BroadcastEvent:
       type: object
       description: >
         WebSocket message envelope pushed to all connected clients on every
         significant session or message change.
-      required: [event, session]
+      required: [event]
       properties:
         event:
           type: string
           description: >
             Event type. `session_new` on first message for a session,
             `message` for subsequent updates.
-          enum: [session_new, message]
+          enum: [session_new, message, update_available]
           example: "message"
         session:
           $ref: "#/components/schemas/Session"
