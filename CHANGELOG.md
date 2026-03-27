@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.1](https://github.com/Zxela/claude-monitor/compare/v1.20.0...v1.20.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* expanding one parent doesn't expand all others ([f818289](https://github.com/Zxela/claude-monitor/commit/f818289bb6d52c7e81c725d18d79824801f22ff9))
+
 ## [1.20.0](https://github.com/Zxela/claude-monitor/compare/v1.19.0...v1.20.0) (2026-03-26)
 
 
