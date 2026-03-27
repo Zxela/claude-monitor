@@ -4,6 +4,13 @@ import { state, update } from '../state';
 import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo } from '../utils';
 import { getLastTool } from '../tool-tracker';
 
+function getCostTier(cost: number): string {
+  if (cost < 0.50) return 'cost-tier-low';
+  if (cost < 2) return 'cost-tier-mid';
+  if (cost < 5) return 'cost-tier-high';
+  return 'cost-tier-extreme';
+}
+
 // Track which parent sessions have their children expanded
 export const expandedParents = new Set<string>();
 // Track which parents show idle subagents (hidden by default)
@@ -49,18 +56,22 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       </div>
       <div class="session-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription || '', 80))}</div>
       <div class="session-stats">
-        <span class="cost">$${session.totalCostUSD.toFixed(2)}</span>
+        <span class="cost ${getCostTier(session.totalCostUSD)}">$${session.totalCostUSD.toFixed(2)}</span>
         ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
-        <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens)} tok</span>
-        <span class="cache">${session.cacheHitPct.toFixed(0)}%</span>
-        ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
       </div>
-      <div class="session-meta">
-        <span class="model">${(session.model || '').replace('claude-', '').replace('-4-6', '')}</span>
-        <span>${timeAgo(session.lastActive)}</span>
-        <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
+      <div class="session-card-details">
+        <div class="session-stats">
+          <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens)} tok</span>
+          <span class="cache">${session.cacheHitPct.toFixed(0)}%</span>
+          ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
+        </div>
+        <div class="session-meta">
+          <span class="model">${(session.model || '').replace('claude-', '').replace('-4-6', '')}</span>
+          <span>${timeAgo(session.lastActive)}</span>
+          <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
+        </div>
+        ${session.status === 'tool_use' ? `<div class="session-current-tool">${escapeHtml(getLastTool(session.id) || '')}</div>` : ''}
       </div>
-      ${session.status === 'tool_use' ? `<div class="session-current-tool">${escapeHtml(getLastTool(session.id) || '')}</div>` : ''}
     </div>
   `;
 
@@ -204,7 +215,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
       <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
       ${childCount > 0 ? `<span class="subagent-chevron" role="button" tabindex="0" aria-label="${isExpanded ? 'Collapse subagents' : 'Expand subagents'}">${isExpanded ? '▾' : '▸'} ${childCount}</span>` : ''}
-      <span class="cost">$${session.totalCostUSD.toFixed(2)}</span>
+      <span class="cost ${getCostTier(session.totalCostUSD)}">$${session.totalCostUSD.toFixed(2)}</span>
       <span class="duration">${timeAgo(session.lastActive)}</span>
       <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
       ${session.model ? `<span class="model">${session.model.replace('claude-', '').replace('-4-6', '')}</span>` : ''}
