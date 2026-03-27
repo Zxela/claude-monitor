@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.4](https://github.com/Zxela/claude-monitor/compare/v1.25.3...v1.25.4) (2026-03-27)
+
+
+### Bug Fixes
+
+* extract tag name from PR title instead of missing tagName field ([02c8bc5](https://github.com/Zxela/claude-monitor/commit/02c8bc50cec4e9dc3e966ab6de684043a5eadf37))
+
 ## [1.25.3](https://github.com/Zxela/claude-monitor/compare/v1.25.2...v1.25.3) (2026-03-27)
 
 
