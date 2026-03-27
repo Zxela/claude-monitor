@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/Zxela/claude-monitor/compare/v1.21.2...v1.22.0) (2026-03-27)
+
+
+### Features
+
+* restore horizontal canvas timeline with improved bar sizing ([71304c6](https://github.com/Zxela/claude-monitor/commit/71304c6a1e16ccf1a11708e8f8ffe2b31a6a476d))
+
 ## [1.21.2](https://github.com/Zxela/claude-monitor/compare/v1.21.1...v1.21.2) (2026-03-27)
 
 
