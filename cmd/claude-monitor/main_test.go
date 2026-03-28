@@ -145,13 +145,13 @@ func TestSessions(t *testing.T) {
 	}
 }
 
-// TestSessionsGrouped verifies GET /api/sessions/grouped returns 200 and a
-// response containing all six expected bucket keys.
+// TestSessionsGrouped verifies GET /api/sessions?group=activity returns 200
+// and a response containing all six expected bucket keys.
 func TestSessionsGrouped(t *testing.T) {
 	t.Parallel()
 
 	var body map[string]json.RawMessage
-	getJSON(t, "/api/sessions/grouped", &body)
+	getJSON(t, "/api/sessions?group=activity", &body)
 
 	for _, key := range []string{"active", "lastHour", "today", "yesterday", "thisWeek", "older"} {
 		if _, ok := body[key]; !ok {
@@ -160,12 +160,12 @@ func TestSessionsGrouped(t *testing.T) {
 	}
 }
 
-// TestProjects verifies GET /api/projects returns 200 and a JSON array.
-func TestProjects(t *testing.T) {
+// TestRepos verifies GET /api/repos returns 200 and a JSON array.
+func TestRepos(t *testing.T) {
 	t.Parallel()
 
 	var body []json.RawMessage
-	getJSON(t, "/api/projects", &body)
+	getJSON(t, "/api/repos", &body)
 
 	if body == nil {
 		t.Error("expected non-nil array, got null")
@@ -213,12 +213,12 @@ func TestSearchEmpty(t *testing.T) {
 	}
 }
 
-// TestHistory verifies GET /api/history?limit=5 returns 200 and a JSON array.
-func TestHistory(t *testing.T) {
+// TestSessionsList verifies GET /api/sessions?limit=5 returns 200 and a JSON array.
+func TestSessionsList(t *testing.T) {
 	t.Parallel()
 
 	var body []json.RawMessage
-	getJSON(t, "/api/history?limit=5", &body)
+	getJSON(t, "/api/sessions?limit=5", &body)
 
 	if body == nil {
 		t.Error("expected non-nil array, got null")
@@ -268,7 +268,7 @@ func TestStats(t *testing.T) {
 		"totalCost", "inputTokens", "outputTokens",
 		"cacheReadTokens", "cacheCreationTokens",
 		"sessionCount", "activeSessions", "cacheHitPct",
-		"costRate", "costByModel",
+		"costRate", "costByModel", "costByRepo",
 	} {
 		if _, ok := body[key]; !ok {
 			t.Errorf("response missing expected key %q", key)
