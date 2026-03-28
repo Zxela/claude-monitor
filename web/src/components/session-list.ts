@@ -11,7 +11,7 @@ let listEl: HTMLElement | null = null;
 let lastRenderTime = 0;
 const MAX_VISIBLE = 15;
 const showAllGroups = new Set<string>();
-const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
+const collapsedGroups = new Set<string>(['yesterday', 'thisWeek', 'older']);
 let activeFilter: 'active' | 'recent' | 'all' = 'recent';
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null;

@@ -33,9 +33,13 @@ export function sessionDisplayName(s: { sessionName?: string; cwd?: string; id: 
   return s.id.slice(0, 8);
 }
 
-/** Strip internal XML/HTML tags from content preview (e.g. <local-command-caveat>). */
+/** Strip internal XML/HTML tags and Claude Code boilerplate from content preview. */
 export function stripInternalTags(text: string): string {
-  return text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  let s = text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  // Strip common boilerplate patterns
+  s = s.replace(/^Caveat:.*?consider them in your response unless the user explicitly asks you to\.\s*/i, '');
+  s = s.replace(/^Status dialog dismissed\s*/i, '');
+  return s.trim();
 }
 
 const ACTIVE_THRESHOLD_MS = 45_000; // 45s — slightly longer than backend's 30s to prevent flashing
