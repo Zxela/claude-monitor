@@ -1,5 +1,5 @@
 import { state } from '../state';
-import { escapeHtml } from '../utils';
+import { escapeHtml, sessionDisplayName } from '../utils';
 import { COLORS } from '../colors';
 import '../styles/views.css';
 
@@ -111,7 +111,7 @@ export function toggle(anchor: HTMLElement): void {
   // Top 5
   const top5El = popover.querySelector('.cb-top5')!;
   for (const s of top5) {
-    const name = s.sessionName || s.cwd || s.id.slice(0, 12);
+    const name = sessionDisplayName(s);
     top5El.innerHTML += `<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0">
       <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">${escapeHtml(name)}</span>
       <span style="color:var(--yellow)">$${s.totalCost.toFixed(2)}</span>

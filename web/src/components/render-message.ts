@@ -58,6 +58,8 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   // Strip redundant prefixes baked in by the backend parser
   rawText = rawText.replace(/^\[hook:\w+\]\s*/, '');
   rawText = rawText.replace(/^\[tool:\s*\w+\]\s*/, '');
+  // Strip internal XML tags (e.g. <local-command-caveat>)
+  rawText = rawText.replace(/<[^>]+>/g, '').trim();
 
   // Build display content
   let content = '';
@@ -86,9 +88,10 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     content = truncate(rawText || detail, 100);
     contentClass = 'result';
   } else if (type === 'error') {
-    content = truncate(rawText, 120);
+    content = truncate(rawText || detail || 'Error', 120);
   } else {
     content = truncate(rawText, 120);
+    if (!content && type === 'assistant') content = '[thinking...]';
     if (type === 'system') contentClass = 'dim';
   }
 

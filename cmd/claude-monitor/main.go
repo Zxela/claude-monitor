@@ -462,8 +462,8 @@ Examples:
 		}
 
 		// ?group=activity — return time-bucketed sessions
+		// Merges live sessions (for active status) with DB sessions (for history).
 		if q.Get("group") == "activity" {
-			sessions := sessionStore.All()
 			now := time.Now()
 			hourAgo := now.Add(-1 * time.Hour)
 			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -483,7 +483,11 @@ Examples:
 				Today: []*session.Session{}, Yesterday: []*session.Session{},
 				ThisWeek: []*session.Session{}, Older: []*session.Session{},
 			}
-			for _, s := range sessions {
+
+			// Start with live sessions (have real-time status).
+			seen := make(map[string]bool)
+			for _, s := range sessionStore.All() {
+				seen[s.ID] = true
 				if s.IsActive {
 					g.Active = append(g.Active, s)
 					continue
@@ -502,6 +506,30 @@ Examples:
 					g.Older = append(g.Older, s)
 				}
 			}
+
+			// Fill in from DB for sessions not in the live store.
+			if dbRows, err := historyDB.ListSessions(500, 0); err == nil {
+				for _, row := range dbRows {
+					if seen[row.ID] {
+						continue
+					}
+					s := row.ToSession()
+					la := s.LastActive
+					switch {
+					case la.After(hourAgo):
+						g.LastHour = append(g.LastHour, s)
+					case la.After(todayStart):
+						g.Today = append(g.Today, s)
+					case la.After(yesterdayStart):
+						g.Yesterday = append(g.Yesterday, s)
+					case la.After(weekStart):
+						g.ThisWeek = append(g.ThisWeek, s)
+					default:
+						g.Older = append(g.Older, s)
+					}
+				}
+			}
+
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(g)
 			return

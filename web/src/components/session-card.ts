@@ -1,7 +1,7 @@
 // web/src/components/session-card.ts
 import type { Session } from '../types';
 import { state, update } from '../state';
-import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo } from '../utils';
+import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo, sessionDisplayName, stripInternalTags } from '../utils';
 import { getLastTool } from '../tool-tracker';
 
 function getCostTier(cost: number): string {
@@ -34,7 +34,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
 
   const dotClass = getDotClass(session);
 
-  const displayName = session.sessionName || session.cwd || session.id;
+  const displayName = sessionDisplayName(session);
   const statusClass = `status-${session.status}`;
   const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
@@ -60,7 +60,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
             ? '<span class="session-status-badge status-live">LIVE</span>'
             : ''}
       </div>
-      <div class="session-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription || '', 80))}</div>
+      <div class="session-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription || ''))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription || ''), 80))}</div>
       <div class="session-stats">
         <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
         ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
@@ -198,7 +198,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
 
   const dotClass = getDotClass(session);
 
-  const displayName = session.sessionName || session.cwd || session.id;
+  const displayName = sessionDisplayName(session);
   const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
 
@@ -321,7 +321,7 @@ export function renderDot(session: Session): HTMLElement {
   dot.dataset.sessionId = session.id;
   dot.classList.add(getDotClass(session));
 
-  dot.title = session.sessionName || session.cwd || session.id;
+  dot.title = sessionDisplayName(session);
 
   dot.addEventListener('click', () => {
     const updates: Record<string, unknown> = { selectedSessionId: session.id };

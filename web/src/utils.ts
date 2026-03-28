@@ -22,6 +22,22 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+/** Extract a short display name for a session. */
+export function sessionDisplayName(s: { sessionName?: string; cwd?: string; id: string }): string {
+  if (s.sessionName) return s.sessionName;
+  if (s.cwd) {
+    // Use basename of cwd, not the full path
+    const parts = s.cwd.replace(/\/+$/, '').split('/');
+    return parts[parts.length - 1] || s.cwd;
+  }
+  return s.id.slice(0, 8);
+}
+
+/** Strip internal XML/HTML tags from content preview (e.g. <local-command-caveat>). */
+export function stripInternalTags(text: string): string {
+  return text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
 const ACTIVE_THRESHOLD_MS = 45_000; // 45s — slightly longer than backend's 30s to prevent flashing
 
 export function isSessionActive(lastActive: string): boolean {

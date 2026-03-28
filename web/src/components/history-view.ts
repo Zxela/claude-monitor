@@ -3,7 +3,7 @@ import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions } from '../api';
-import { formatDurationSecs, formatTokens } from '../utils';
+import { formatDurationSecs, formatTokens, sessionDisplayName } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
@@ -16,7 +16,7 @@ type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => s
 
 const COLUMNS: Column[] = [
   { key: 'lastActive', label: 'Date', cls: 'col-dim', fmt: r => r.lastActive ? new Date(r.lastActive).toLocaleString() : '' },
-  { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.cwd || r.id },
+  { key: 'projectName', label: 'Name', fmt: r => sessionDisplayName(r) },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
   { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: r => {
     if (!r.startedAt || !r.lastActive) return '';
@@ -57,7 +57,9 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 async function loadData(): Promise<void> {
   try {
-    data = await fetchSessions(200, 0);
+    const raw = await fetchSessions(200, 0);
+    // Filter out trivial sessions (no cost, no tokens, few messages)
+    data = raw.filter(s => s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3);
     show();
   } catch (err) {
     console.error('Failed to load history:', err);
@@ -288,7 +290,7 @@ function sortData(rows: Session[]): Session[] {
     let va: number | string, vb: number | string;
     switch (sortCol) {
       case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0); vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0); break;
-      case 'projectName': va = (a.sessionName || a.cwd || '').toLowerCase(); vb = (b.sessionName || b.cwd || '').toLowerCase(); break;
+      case 'projectName': va = sessionDisplayName(a).toLowerCase(); vb = sessionDisplayName(b).toLowerCase(); break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
       case 'lastActive': va = a.lastActive || ''; vb = b.lastActive || ''; break;
       default: {

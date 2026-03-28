@@ -2,7 +2,7 @@
 import type { ParsedMessage } from '../types';
 import { state, update } from '../state';
 import { renderFeedEntry } from './render-message';
-import { escapeHtml } from '../utils';
+import { escapeHtml, sessionDisplayName } from '../utils';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -34,7 +34,7 @@ function renderReplayPanel(sessionId: string): void {
   if (!container) return;
 
   const session = state.sessions.get(sessionId);
-  const name = session?.sessionName || session?.cwd || sessionId;
+  const name = session ? sessionDisplayName(session) : sessionId;
 
   container.innerHTML = '';
   const panel = document.createElement('div');

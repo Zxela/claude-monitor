@@ -174,6 +174,12 @@ function renderList(): void {
 
   // Time groups
   if (activeFilter === 'active') {
+    if (activeSorted.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'time-group-empty';
+      empty.textContent = 'No active sessions';
+      listEl.appendChild(empty);
+    }
     listEl.scrollTop = scrollTop;
     return;
   }

@@ -5,7 +5,7 @@ import { state, subscribe, update } from '../state';
 import { fetchSessionEvents } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
-import { escapeHtml } from '../utils';
+import { escapeHtml, sessionDisplayName } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
 import { open as openTimeline } from './timeline-view';
@@ -71,11 +71,11 @@ function onWsMessage(event: WsEvent): void {
   }
 
   if (msg.isError) {
-    const name = event.session.sessionName || event.session.cwd || 'Agent';
+    const name = sessionDisplayName(event.session);
     notify('error', 'Agent Error', `${name}: ${(msg.contentPreview || '').slice(0, 100)}`);
   }
 
-  const sessionName = event.session.sessionName || event.session.cwd || event.session.id.slice(0, 8);
+  const sessionName = sessionDisplayName(event.session);
   const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
   appendMessage(msg as ParsedMessage, opts);
 }
@@ -140,7 +140,7 @@ function updateHeader(): void {
   if (!headerEl) return;
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
-    const name = sess ? (sess.sessionName || sess.cwd || sess.id) : state.selectedSessionId;
+    const name = sess ? (sessionDisplayName(sess)) : state.selectedSessionId;
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
