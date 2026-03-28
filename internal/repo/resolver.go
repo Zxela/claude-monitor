@@ -35,13 +35,19 @@ func (r *Resolver) Resolve(cwd, label string) (*Repo, error) {
 	}
 	r.mu.RUnlock()
 
-	repo := r.resolve(cwd, label)
+	resolved := r.resolve(cwd, label)
 
+	// Re-check under write lock to avoid duplicate git spawns
+	// from concurrent Resolve calls for the same cwd.
 	r.mu.Lock()
-	r.cache[cwd] = repo
+	if cached, ok := r.cache[cwd]; ok {
+		r.mu.Unlock()
+		return cached, nil
+	}
+	r.cache[cwd] = resolved
 	r.mu.Unlock()
 
-	return repo, nil
+	return resolved, nil
 }
 
 func (r *Resolver) resolve(cwd, label string) *Repo {

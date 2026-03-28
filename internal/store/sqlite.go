@@ -143,6 +143,10 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SQLite only supports one writer at a time. Limit the pool to one
+	// connection to avoid "database is locked" errors from concurrent writes
+	// across goroutines (pipeline flush, retention compaction, HTTP handlers).
+	sqlDB.SetMaxOpenConns(1)
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		sqlDB.Close()
 		return nil, err
