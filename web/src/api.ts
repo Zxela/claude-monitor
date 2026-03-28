@@ -1,4 +1,4 @@
-import type { GroupedSessions, SessionRow, Event, Stats, StorageInfo, RepoEntry } from './types';
+import type { Session, GroupedSessions, Event, Stats, StorageInfo, RepoEntry } from './types';
 
 const BASE = '';
 
@@ -14,8 +14,8 @@ export async function fetchGroupedSessions(): Promise<GroupedSessions> {
   return request<GroupedSessions>(`${BASE}/api/sessions?group=activity`);
 }
 
-export async function fetchSessions(limit = 50, offset = 0): Promise<SessionRow[]> {
-  return request<SessionRow[]>(`${BASE}/api/sessions?limit=${limit}&offset=${offset}`);
+export async function fetchSessions(limit = 50, offset = 0): Promise<Session[]> {
+  return request<Session[]>(`${BASE}/api/sessions?limit=${limit}&offset=${offset}`);
 }
 
 export async function fetchSearch(query: string, limit = 50): Promise<Event[]> {

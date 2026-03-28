@@ -1,5 +1,5 @@
 // web/src/components/history-view.ts
-import type { SessionRow } from '../types';
+import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions } from '../api';
@@ -7,20 +7,20 @@ import { formatDurationSecs, formatTokens } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
-let data: SessionRow[] = [];
-let sortCol = 'endedAt';
+let data: Session[] = [];
+let sortCol = 'lastActive';
 let sortAsc = false;
 const collapsedParents = new Set<string>();
 
-type Column = { key: string; label: string; cls?: string; fmt: (r: SessionRow) => string };
+type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
 
 const COLUMNS: Column[] = [
-  { key: 'endedAt', label: 'Date', cls: 'col-dim', fmt: r => r.endedAt ? new Date(r.endedAt).toLocaleString() : '' },
+  { key: 'lastActive', label: 'Date', cls: 'col-dim', fmt: r => r.lastActive ? new Date(r.lastActive).toLocaleString() : '' },
   { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.cwd || r.id },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
   { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: r => {
-    if (!r.startedAt || !r.endedAt) return '';
-    const secs = (new Date(r.endedAt).getTime() - new Date(r.startedAt).getTime()) / 1000;
+    if (!r.startedAt || !r.lastActive) return '';
+    const secs = (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000;
     return formatDurationSecs(secs);
   }},
   { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0)) },
@@ -78,10 +78,10 @@ function exportCsv(): void {
 }
 
 /** Group rows: parents first (sorted), children grouped under their parent */
-function groupRows(rows: SessionRow[]): { parent: SessionRow; children: SessionRow[] }[] {
-  const childrenByParent = new Map<string, SessionRow[]>();
-  const parents: SessionRow[] = [];
-  const rowById = new Map<string, SessionRow>();
+function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] {
+  const childrenByParent = new Map<string, Session[]>();
+  const parents: Session[] = [];
+  const rowById = new Map<string, Session>();
 
   for (const row of rows) {
     rowById.set(row.id, row);
@@ -261,7 +261,7 @@ function show(): void {
   container.appendChild(wrapper);
 }
 
-function createRow(row: SessionRow, isChild: boolean): HTMLTableRowElement {
+function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
   const tr = document.createElement('tr');
   if (isChild) tr.className = 'history-child-row';
 
@@ -283,18 +283,18 @@ function createRow(row: SessionRow, isChild: boolean): HTMLTableRowElement {
   return tr;
 }
 
-function sortData(rows: SessionRow[]): SessionRow[] {
+function sortData(rows: Session[]): Session[] {
   return rows.sort((a, b) => {
     let va: number | string, vb: number | string;
     switch (sortCol) {
       case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0); vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0); break;
       case 'projectName': va = (a.sessionName || a.cwd || '').toLowerCase(); vb = (b.sessionName || b.cwd || '').toLowerCase(); break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
-      case 'endedAt': va = a.endedAt || ''; vb = b.endedAt || ''; break;
+      case 'lastActive': va = a.lastActive || ''; vb = b.lastActive || ''; break;
       default: {
-        const numericAccessors: Record<string, (r: SessionRow) => number> = {
+        const numericAccessors: Record<string, (r: Session) => number> = {
           totalCost: r => r.totalCost,
-          duration: r => r.startedAt && r.endedAt ? (new Date(r.endedAt).getTime() - new Date(r.startedAt).getTime()) / 1000 : 0,
+          duration: r => r.startedAt && r.lastActive ? (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000 : 0,
           messageCount: r => r.messageCount,
           errorCount: r => r.errorCount,
           cache: r => { const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return t > 0 ? r.cacheReadTokens / t * 100 : 0; },

@@ -528,11 +528,12 @@ Examples:
 			writeJSONError(w, "failed to list sessions", http.StatusInternalServerError)
 			return
 		}
-		if rows == nil {
-			rows = []store.SessionRow{}
+		sessions := store.SessionRowsToSessions(rows)
+		if sessions == nil {
+			sessions = []*session.Session{}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rows)
+		json.NewEncoder(w).Encode(sessions)
 	})
 
 	// Single session by ID.
@@ -555,7 +556,7 @@ Examples:
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(row)
+		json.NewEncoder(w).Encode(row.ToSession())
 	})
 
 	// Aggregate stats — reads from DB (pipeline keeps it up to date).
@@ -670,11 +671,12 @@ Examples:
 			writeJSONError(w, "failed to list repo sessions", http.StatusInternalServerError)
 			return
 		}
-		if rows == nil {
-			rows = []store.SessionRow{}
+		sessions := store.SessionRowsToSessions(rows)
+		if sessions == nil {
+			sessions = []*session.Session{}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rows)
+		json.NewEncoder(w).Encode(sessions)
 	})
 
 	// Search — FTS5 on preview + tool_detail.

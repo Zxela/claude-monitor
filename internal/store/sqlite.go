@@ -40,6 +40,51 @@ type SessionRow struct {
 	ErrorCount          int     `json:"errorCount"`
 }
 
+// ToSession converts a SessionRow to a session.Session with default runtime fields.
+func (r *SessionRow) ToSession() *session.Session {
+	s := &session.Session{
+		ID:                  r.ID,
+		RepoID:              r.RepoID,
+		SessionName:         r.SessionName,
+		TotalCost:           r.TotalCost,
+		InputTokens:         r.InputTokens,
+		OutputTokens:        r.OutputTokens,
+		CacheReadTokens:     r.CacheReadTokens,
+		CacheCreationTokens: r.CacheCreationTokens,
+		MessageCount:        r.MessageCount,
+		EventCount:          r.EventCount,
+		ErrorCount:          r.ErrorCount,
+		ParentID:            r.ParentID,
+		CWD:                 r.CWD,
+		GitBranch:           r.Branch,
+		Model:               r.Model,
+		TaskDescription:     r.TaskDescription,
+		IsActive:            false,
+		Status:              "idle",
+		CostRate:            0,
+	}
+	if r.StartedAt != "" {
+		if t, err := time.Parse(time.RFC3339, r.StartedAt); err == nil {
+			s.StartedAt = t
+		}
+	}
+	if r.EndedAt != "" {
+		if t, err := time.Parse(time.RFC3339, r.EndedAt); err == nil {
+			s.LastActive = t
+		}
+	}
+	return s
+}
+
+// SessionRowsToSessions converts a slice of SessionRow to session.Session.
+func SessionRowsToSessions(rows []SessionRow) []*session.Session {
+	result := make([]*session.Session, len(rows))
+	for i := range rows {
+		result[i] = rows[i].ToSession()
+	}
+	return result
+}
+
 // EventRow represents a single event as stored in the database.
 type EventRow struct {
 	ID                  int64   `json:"id"`

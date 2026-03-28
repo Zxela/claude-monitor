@@ -23,27 +23,6 @@ export interface Session {
   taskDescription: string;
 }
 
-export interface SessionRow {
-  id: string;
-  repoId: string;
-  parentId: string;
-  sessionName: string;
-  taskDescription: string;
-  cwd: string;
-  branch: string;
-  model: string;
-  startedAt: string;
-  endedAt: string;
-  totalCost: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  messageCount: number;
-  eventCount: number;
-  errorCount: number;
-}
-
 export interface GroupedSessions {
   active: Session[];
   lastHour: Session[];
@@ -129,5 +108,7 @@ export interface StorageInfo {
 
 export interface RepoEntry {
   id: string;
+  name: string;
+  url?: string;
   totalCost: number;
 }
