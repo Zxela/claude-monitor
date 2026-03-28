@@ -295,9 +295,9 @@ GET  /api/sessions/{id}/events     — events for a session (paginated)
                                      ?tool=Bash       — filter by tool
 GET  /api/sessions/{id}/replay     — events with timing for playback (from DB)
 
-GET  /api/repos                    — all repos with cost rollups
-GET  /api/repos/{id}/stats         — per-repo cost/usage stats
-GET  /api/repos/{id}/sessions      — sessions for a repo
+GET  /api/repos                    — all repos with id, name, url, totalCost
+GET  /api/repos/{id}/stats         — per-repo cost/usage/model breakdown
+GET  /api/repos/{id}/sessions      — sessions for a repo (paginated)
 
 GET  /api/stats?window=            — aggregate stats (all sessions incl. children)
                                      window: all | today | week | month

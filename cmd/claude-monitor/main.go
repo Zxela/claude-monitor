@@ -390,6 +390,41 @@ Examples:
 		}
 	}()
 
+	// Retention compaction — runs hourly, compresses/deletes old event content.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				hotDays := 30
+				warmDays := 90
+				if v, err := historyDB.GetSetting("retention_hot_days"); err == nil {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						hotDays = n
+					}
+				}
+				if v, err := historyDB.GetSetting("retention_warm_days"); err == nil {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						warmDays = n
+					}
+				}
+				if compressed, err := historyDB.CompactHotToWarm(hotDays); err != nil {
+					log.Printf("retention compact hot→warm error: %v", err)
+				} else if compressed > 0 {
+					log.Printf("retention: compressed %d event content entries (hot→warm)", compressed)
+				}
+				if deleted, err := historyDB.CompactWarmToCold(warmDays); err != nil {
+					log.Printf("retention compact warm→cold error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("retention: deleted %d event content entries (warm→cold)", deleted)
+				}
+			}
+		}
+	}()
+
 	// HTTP routes.
 	mux := http.NewServeMux()
 
@@ -472,7 +507,7 @@ Examples:
 			return
 		}
 
-		// Default: paginated list from DB
+		// Default: paginated list from DB, with optional ?repo= filter
 		limit := 50
 		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
 			limit = n
@@ -481,7 +516,13 @@ Examples:
 		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
 			offset = n
 		}
-		rows, err := historyDB.ListSessions(limit, offset)
+		var rows []store.SessionRow
+		var err error
+		if repoID := q.Get("repo"); repoID != "" {
+			rows, err = historyDB.ListSessionsByRepo(repoID, limit, offset)
+		} else {
+			rows, err = historyDB.ListSessions(limit, offset)
+		}
 		if err != nil {
 			log.Printf("list sessions error: %v", err)
 			writeJSONError(w, "failed to list sessions", http.StatusInternalServerError)
@@ -492,6 +533,29 @@ Examples:
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rows)
+	})
+
+	// Single session by ID.
+	mux.HandleFunc("GET /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		// Try live store first
+		if sess, ok := sessionStore.Get(id); ok {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(sess)
+			return
+		}
+		// Fall back to DB
+		row, err := historyDB.GetSession(id)
+		if err != nil {
+			writeJSONError(w, "failed to get session", http.StatusInternalServerError)
+			return
+		}
+		if row == nil {
+			writeJSONError(w, "session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(row)
 	})
 
 	// Aggregate stats — reads from DB (pipeline keeps it up to date).
@@ -566,21 +630,51 @@ Examples:
 
 	// Repos endpoint — replaces /api/projects.
 	mux.HandleFunc("GET /api/repos", func(w http.ResponseWriter, r *http.Request) {
-		agg, err := historyDB.AggregateStats(time.Time{})
+		repos, err := historyDB.ListRepos()
 		if err != nil {
-			writeJSONError(w, "failed to get repos", http.StatusInternalServerError)
+			writeJSONError(w, "failed to list repos", http.StatusInternalServerError)
 			return
 		}
-		type repoEntry struct {
-			ID       string  `json:"id"`
-			TotalCost float64 `json:"totalCost"`
-		}
-		var result []repoEntry
-		for id, cost := range agg.CostByRepo {
-			result = append(result, repoEntry{ID: id, TotalCost: cost})
+		if repos == nil {
+			repos = []store.RepoRow{}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		json.NewEncoder(w).Encode(repos)
+	})
+
+	// Per-repo stats.
+	mux.HandleFunc("GET /api/repos/{id}/stats", func(w http.ResponseWriter, r *http.Request) {
+		repoID := r.PathValue("id")
+		agg, err := historyDB.AggregateStatsByRepo(repoID)
+		if err != nil {
+			writeJSONError(w, "failed to get repo stats", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(agg)
+	})
+
+	// Sessions for a repo.
+	mux.HandleFunc("GET /api/repos/{id}/sessions", func(w http.ResponseWriter, r *http.Request) {
+		repoID := r.PathValue("id")
+		limit := 50
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+			limit = n
+		}
+		offset := 0
+		if n, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && n >= 0 {
+			offset = n
+		}
+		rows, err := historyDB.ListSessionsByRepo(repoID, limit, offset)
+		if err != nil {
+			writeJSONError(w, "failed to list repo sessions", http.StatusInternalServerError)
+			return
+		}
+		if rows == nil {
+			rows = []store.SessionRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rows)
 	})
 
 	// Search — FTS5 on preview + tool_detail.

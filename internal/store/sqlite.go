@@ -228,6 +228,112 @@ func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 	return scanSessionRows(rows)
 }
 
+// GetSession returns a single session by ID.
+func (d *DB) GetSession(id string) (*SessionRow, error) {
+	rows, err := d.db.Query(`SELECT
+		id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
+		COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
+		COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
+		total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+		message_count, event_count, error_count
+		FROM sessions WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result, err := scanSessionRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return &result[0], nil
+}
+
+// ListSessionsByRepo returns sessions for a given repo, ordered by ended_at descending.
+func (d *DB) ListSessionsByRepo(repoID string, limit, offset int) ([]SessionRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(`SELECT
+		id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
+		COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
+		COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
+		total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+		message_count, event_count, error_count
+		FROM sessions WHERE repo_id = ? ORDER BY ended_at DESC LIMIT ? OFFSET ?`, repoID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
+// AggregateStatsByRepo returns aggregate statistics for a single repo.
+func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
+	r := &AggregateResult{
+		CostByModel: make(map[string]float64),
+		CostByRepo:  make(map[string]float64),
+	}
+	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
+		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
+		FROM sessions WHERE repo_id = ?`, repoID).Scan(
+		&r.TotalCost, &r.InputTokens, &r.OutputTokens,
+		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	modelRows, err := d.db.Query(`SELECT COALESCE(model,''), SUM(total_cost)
+		FROM sessions WHERE repo_id = ? GROUP BY model`, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer modelRows.Close()
+	for modelRows.Next() {
+		var model string
+		var cost float64
+		if err := modelRows.Scan(&model, &cost); err != nil {
+			return nil, err
+		}
+		if model != "" {
+			r.CostByModel[model] = cost
+		}
+	}
+	r.CostByRepo[repoID] = r.TotalCost
+	return r, nil
+}
+
+// ListRepos returns all repos with their names.
+type RepoRow struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	URL       string  `json:"url,omitempty"`
+	TotalCost float64 `json:"totalCost"`
+}
+
+func (d *DB) ListRepos() ([]RepoRow, error) {
+	rows, err := d.db.Query(`SELECT r.id, r.name, COALESCE(r.url,''),
+		COALESCE(SUM(s.total_cost), 0)
+		FROM repos r LEFT JOIN sessions s ON s.repo_id = r.id
+		GROUP BY r.id ORDER BY COALESCE(SUM(s.total_cost),0) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []RepoRow
+	for rows.Next() {
+		var r RepoRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.TotalCost); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 	var result []SessionRow
 	for rows.Next() {
