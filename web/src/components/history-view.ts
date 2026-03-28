@@ -42,8 +42,13 @@ export function render(mount: HTMLElement): void {
 let historyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('view') && state.view === 'history') {
-    loadData();
+  if (changed.has('view')) {
+    if (state.view === 'history') {
+      loadData();
+    } else {
+      // Clear any pending refresh timer when leaving history view
+      if (historyRefreshTimer) { clearTimeout(historyRefreshTimer); historyRefreshTimer = null; }
+    }
   }
   if (changed.has('historyShowSubagents') && state.view === 'history') {
     show();
@@ -56,10 +61,12 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 }
 
 async function loadData(): Promise<void> {
+  if (state.view !== 'history') return; // Guard against stale timer callbacks
   try {
     const raw = await fetchSessions(200, 0);
     // Filter out trivial sessions (no cost, no tokens, few messages)
     data = raw.filter(s => s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3);
+    if (state.view !== 'history') return; // Re-check after async
     show();
   } catch (err) {
     console.error('Failed to load history:', err);

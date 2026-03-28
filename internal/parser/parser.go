@@ -70,7 +70,7 @@ type Event struct {
 	Type         string    `json:"type"`
 	MessageID    string    `json:"messageId,omitempty"`
 	Role         string    `json:"role"`
-	ContentText  string    `json:"contentText"`            // extracted plain-text preview (truncated)
+	ContentText  string    `json:"contentPreview"`         // extracted plain-text preview (truncated)
 	FullContent  string    `json:"fullContent,omitempty"`  // full untruncated content (for expand)
 	ToolName     string    `json:"toolName,omitempty"`
 	CostUSD      float64   `json:"costUSD"`

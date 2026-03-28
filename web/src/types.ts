@@ -91,7 +91,7 @@ export interface SearchResult {
   repoName: string;
   type: string;
   role: string;
-  contentText: string;
+  contentPreview: string;
   toolName?: string;
   timestamp: string;
   messageId?: string;

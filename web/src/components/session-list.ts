@@ -137,29 +137,34 @@ function renderList(): void {
     else older.push(sess);
   }
 
-  // Update filter counts
-  const recentCount = active.length + [...lastHour, ...today].filter(s => new Date(s.lastActive).getTime() > recentCutoff).length;
-  const totalCount = state.sessions.size;
+  // Save scroll + render
+  const scrollTop = listEl.scrollTop;
+  listEl.innerHTML = '';
+
+  const filter = state.repoFilter;
+
+  // Update filter counts — only count top-level, non-trivial sessions (no subagents) to match group display
+  const isTrivialCount = (s: Session) => s.totalCost === 0 && (s.inputTokens + s.outputTokens + s.cacheReadTokens) === 0 && s.messageCount < 4;
+  const topLevelFilter = (s: Session) => !s.parentId && !isTrivialCount(s) && (!filter || s.cwd === filter || s.sessionName === filter);
+  const recentCount = active.length + [...lastHour, ...today].filter(s => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff).length;
+  const totalCount = Array.from(state.sessions.values()).filter(topLevelFilter).length;
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
   if (fcActive) fcActive.textContent = String(active.length);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
-
-  // Save scroll + render
-  const scrollTop = listEl.scrollTop;
-  listEl.innerHTML = '';
-
-  const filter = state.repoFilter;
-  const topLevel = (sessions: Session[]) =>
+  // Filter: top-level only, repo filter, and skip trivial sessions (no cost, no tokens, few messages)
+  const isTrivial = (s: Session) => s.totalCost === 0 && (s.inputTokens + s.outputTokens + s.cacheReadTokens) === 0 && s.messageCount < 4;
+  const topLevel = (sessions: Session[], includeTrivial = false) =>
     (filter ? sessions.filter(s => s.cwd === filter || s.sessionName === filter) : sessions)
-      .filter(s => !s.parentId);
+      .filter(s => !s.parentId)
+      .filter(s => includeTrivial || !isTrivial(s));
   const sort = (sessions: Session[]) =>
     sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 
-  // Active Now
-  const activeSorted = sort(topLevel(active));
+  // Active Now (always show active sessions, even trivial ones)
+  const activeSorted = sort(topLevel(active, true));
   if (activeSorted.length > 0) {
     const header = document.createElement('div');
     header.className = 'active-section-header';

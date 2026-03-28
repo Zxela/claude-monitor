@@ -222,7 +222,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
         ? `<span class="session-status-badge ${compactStatusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
         : ''}
     </div>
-    ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription, 60))}</div>` : ''}
+    ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription), 60))}</div>` : ''}
     <div class="compact-meta">
       <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
       <span class="duration">${timeAgo(session.lastActive)}</span>

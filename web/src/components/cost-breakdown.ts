@@ -13,6 +13,7 @@ export function toggle(anchor: HTMLElement): void {
 
   const byModel = new Map<string, number>();
   for (const [model, cost] of Object.entries(stats.costByModel)) {
+    if (model === '<synthetic>' || model === 'unknown') continue; // skip internal placeholders
     byModel.set(model, cost);
   }
 
