@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/zxela-claude/claude-monitor/internal/parser"
@@ -538,7 +537,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			messageID = &ev.MessageID
 		}
 
-		_, err := eventStmt.Exec(
+		result, err := eventStmt.Exec(
 			ei.SessionID, ev.UUID, messageID, ev.Type, ev.Role,
 			ev.ContentText, ev.ToolName, ev.ToolDetail,
 			ev.CostUSD, ev.InputTokens, ev.OutputTokens,
@@ -552,15 +551,19 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			return fmt.Errorf("insert event: %w", err)
 		}
 
-		// Resolve the actual event ID — for upserts, LastInsertId is unreliable.
+		// Resolve the actual event ID for content and FTS association.
+		// For events with message_id: ON CONFLICT may have fired, so
+		// LastInsertId is unreliable — look up the actual row.
+		// For events without message_id: NULLs are distinct in the unique
+		// index, so this is always a fresh insert and LastInsertId is safe.
 		var eventID int64
 		if ev.MessageID != "" {
 			if err := lookupStmt.QueryRow(ei.SessionID, ev.MessageID).Scan(&eventID); err != nil {
 				return fmt.Errorf("lookup event id: %w", err)
 			}
 		} else {
-			// No message_id means a fresh insert — use last_insert_rowid().
-			if err := tx.QueryRow(`SELECT last_insert_rowid()`).Scan(&eventID); err != nil {
+			eventID, err = result.LastInsertId()
+			if err != nil {
 				return fmt.Errorf("get last insert id: %w", err)
 			}
 		}
@@ -855,48 +858,3 @@ func (d *DB) StorageInfo() (*StorageInfo, error) {
 	return info, nil
 }
 
-// --- Legacy compatibility ---
-
-// SessionSnapshot holds a point-in-time snapshot of session cost/token data.
-type SessionSnapshot struct {
-	TotalCost           float64
-	InputTokens         int64
-	OutputTokens        int64
-	CacheReadTokens     int64
-	CacheCreationTokens int64
-}
-
-// GetSessionSnapshots returns snapshots for the given session IDs.
-func (d *DB) GetSessionSnapshots(ids []string) (map[string]SessionSnapshot, error) {
-	result := make(map[string]SessionSnapshot)
-	if len(ids) == 0 {
-		return result, nil
-	}
-
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	rows, err := d.db.Query(`SELECT id, total_cost, input_tokens, output_tokens, cache_read_tokens,
-		cache_creation_tokens FROM sessions
-		WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id string
-		var s SessionSnapshot
-		if err := rows.Scan(&id, &s.TotalCost, &s.InputTokens, &s.OutputTokens,
-			&s.CacheReadTokens, &s.CacheCreationTokens); err != nil {
-			return nil, err
-		}
-		result[id] = s
-	}
-
-	return result, rows.Err()
-}

@@ -849,7 +849,7 @@ Examples:
 			writeJSONError(w, "session not found", http.StatusNotFound)
 			return
 		}
-		// Extract container name from projectName (format: "container / project")
+		// Extract container name from sessionName (format: "container / project")
 		containerName := ""
 		if parts := strings.SplitN(sess.SessionName, " / ", 2); len(parts) == 2 {
 			containerName = parts[0]
