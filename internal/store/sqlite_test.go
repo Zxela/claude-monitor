@@ -180,6 +180,7 @@ func TestPersistBatch(t *testing.T) {
 					OutputTokens: 50,
 					Timestamp:   time.Now(),
 					Model:       "claude-sonnet-4-6",
+					UUID:        "uuid-001",
 				},
 				FullContent: "Hello, I can help with that. Let me look at the code.",
 			},
@@ -192,6 +193,7 @@ func TestPersistBatch(t *testing.T) {
 					ToolName:    "Read",
 					ToolDetail:  "/home/user/parser.go",
 					Timestamp:   time.Now().Add(time.Second),
+					UUID:        "uuid-002",
 				},
 			},
 		},
@@ -361,6 +363,7 @@ func TestListRecentEvents(t *testing.T) {
 				Type:        "assistant",
 				ContentText: fmt.Sprintf("msg %d", i),
 				Timestamp:   ts.Add(time.Duration(i) * time.Second),
+				UUID:        fmt.Sprintf("uuid-%d", i),
 			},
 		})
 	}

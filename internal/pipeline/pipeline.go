@@ -375,7 +375,7 @@ func skipDetail(event *parser.Event) bool {
 		return true
 	}
 	switch event.Type {
-	case "system", "file-history-snapshot", "custom-title", "agent-name":
+	case "system", "file-history-snapshot", "custom-title", "agent-name", "queue-operation":
 		return true
 	}
 	return false

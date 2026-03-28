@@ -126,6 +126,30 @@ func TestParseLine_SystemTurnDuration(t *testing.T) {
 	}
 }
 
+func TestParseLine_QueueOperationEnqueue(t *testing.T) {
+	line := []byte(`{
+		"type": "queue-operation",
+		"operation": "enqueue",
+		"timestamp": "2026-03-28T18:37:35Z",
+		"sessionId": "sess-001",
+		"content": "fix the login bug"
+	}`)
+
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Type != "user" {
+		t.Errorf("Type = %q, want %q", msg.Type, "user")
+	}
+	if msg.Role != "user" {
+		t.Errorf("Role = %q, want %q", msg.Role, "user")
+	}
+	if msg.ContentText != "fix the login bug" {
+		t.Errorf("ContentText = %q, want %q", msg.ContentText, "fix the login bug")
+	}
+}
+
 func TestParseLine_ProgressMessage(t *testing.T) {
 	line := []byte(`{
 		"type": "progress",

@@ -24,9 +24,9 @@ export function render(container: HTMLElement): void {
   const filterBar = document.createElement('div');
   filterBar.className = 'session-filter-bar';
   filterBar.innerHTML = `
-    <button data-filter="active">Active <span id="fc-active"></span></button>
-    <button data-filter="recent" class="active">Recent <span id="fc-recent"></span></button>
-    <button data-filter="all">All <span id="fc-all"></span></button>
+    <button data-filter="active">ACTIVE (<span id="fc-active"></span>)</button>
+    <button data-filter="recent" class="active">RECENT (<span id="fc-recent"></span>)</button>
+    <button data-filter="all">ALL (<span id="fc-all"></span>)</button>
   `;
   filterBar.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -182,7 +182,7 @@ function renderList(): void {
     if (activeSorted.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'time-group-empty';
-      empty.textContent = 'No active sessions';
+      empty.textContent = 'NO ACTIVE SESSIONS';
       listEl.appendChild(empty);
     }
     listEl.scrollTop = scrollTop;
@@ -190,11 +190,11 @@ function renderList(): void {
   }
 
   const groups: [string, string, Session[]][] = [
-    ['lastHour', 'Last hour', lastHour],
-    ['today', 'Today', today],
-    ['yesterday', 'Yesterday', yesterday],
-    ['thisWeek', 'This week', thisWeek],
-    ['older', 'Older', older],
+    ['lastHour', 'LAST HOUR', lastHour],
+    ['today', 'TODAY', today],
+    ['yesterday', 'YESTERDAY', yesterday],
+    ['thisWeek', 'THIS WEEK', thisWeek],
+    ['older', 'OLDER', older],
   ];
 
   for (const [key, label, sessions] of groups) {
@@ -227,7 +227,7 @@ function renderList(): void {
     if (needsTruncation) {
       const btn = document.createElement('button');
       btn.className = 'show-all-btn';
-      btn.textContent = `Show all ${filtered.length} sessions`;
+      btn.textContent = `SHOW ALL ${filtered.length} SESSIONS`;
       btn.addEventListener('click', (e) => { e.stopPropagation(); showAllGroups.add(key); renderList(); });
       items.appendChild(btn);
     }

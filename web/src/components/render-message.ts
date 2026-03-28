@@ -22,6 +22,9 @@ export function detectType(msg: ParsedMessage): MessageType {
   // Agent tool calls show as 'agent' type, not 'tool_use'
   if (msg.isAgent && msg.role === 'assistant') return 'agent';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
+  // Fallback: detect agent/tool_use from content preview when fields weren't persisted (streaming race)
+  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[agent')) return 'agent';
+  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[tool: ')) return 'tool_use';
   if (msg.forToolUseId) return 'tool_result';
   if (msg.type === 'agent' || msg.type === 'agent-name') return 'agent';
   if (msg.role === 'user') return 'user';
@@ -57,7 +60,8 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
 
   // Strip redundant prefixes baked in by the backend parser
   rawText = rawText.replace(/^\[hook:\w+\]\s*/, '');
-  rawText = rawText.replace(/^\[tool:\s*\w+\]\s*/, '');
+  // Only strip [tool: ...] prefix when we have toolName (avoids blanking tool_use entries that lack toolName in DB)
+  if (msg.toolName) rawText = rawText.replace(/^\[tool:\s*\w+\]\s*/, '');
   // Strip internal XML tags (e.g. <local-command-caveat>)
   rawText = rawText.replace(/<[^>]+>/g, '').trim();
 
@@ -74,14 +78,26 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     content = rawText || msg.hookEvent || '';
     contentClass = 'hook';
   } else if (type === 'agent') {
-    const body = detail || rawText;
-    content = body ? `Agent: ${truncate(body, 80)}` : 'Agent';
+    // Extract agent name/description from content preview if toolDetail is missing (streaming race)
+    let agentLabel = detail;
+    let agentBody = rawText;
+    if (!agentLabel) {
+      const m = rawText.match(/^\[agent(?::\s*([^\]]*))?\]\s*(.*)/);
+      if (m) { agentLabel = m[1]?.trim() || ''; agentBody = m[2]?.trim() || ''; }
+    }
+    const display = agentLabel && agentBody ? `${agentLabel}: ${agentBody}` : agentLabel || agentBody;
+    content = display ? `Agent: ${truncate(display, 80)}` : 'Agent';
     contentClass = 'tool';
     fullContent = rawText || detail;
   } else if (type === 'tool_use') {
-    const name = msg.toolName || '';
+    // Extract tool name from content preview if toolName field is missing (streaming race)
+    let name = msg.toolName || '';
+    if (!name) {
+      const m = rawText.match(/^\[tool:\s*([^\]]+)\]/);
+      if (m) { name = m[1].trim(); rawText = rawText.replace(m[0], '').trim(); }
+    }
     const body = detail || rawText;
-    content = name ? `${name}: ${truncate(body, 80)}` : truncate(body, 80);
+    content = name && body ? `${name}: ${truncate(body, 80)}` : name || truncate(body, 80);
     contentClass = 'tool';
     fullContent = body;
   } else if (type === 'tool_result') {
@@ -96,7 +112,7 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   }
 
   const hasMore = fullContent.length > content.length;
-  const isAgentEntry = type === 'agent' && msg.isAgent;
+  const isAgentEntry = type === 'agent' && (msg.isAgent || msg.contentPreview?.startsWith('[agent'));
 
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +

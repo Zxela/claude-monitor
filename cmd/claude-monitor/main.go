@@ -762,6 +762,21 @@ Examples:
 		id := r.PathValue("id")
 		q := r.URL.Query()
 
+		// ?errors=true — all error events for a session
+		if q.Get("errors") == "true" {
+			events, err := historyDB.ListErrorEvents(id)
+			if err != nil {
+				writeJSONError(w, "failed to list events", http.StatusInternalServerError)
+				return
+			}
+			if events == nil {
+				events = []store.EventRow{}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(events)
+			return
+		}
+
 		// ?last=N — most recent N events
 		if lastStr := q.Get("last"); lastStr != "" {
 			n := 50

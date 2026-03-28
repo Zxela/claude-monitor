@@ -497,7 +497,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 model, is_error, stop_reason, hook_event, hook_name,
 		 tool_use_id, for_tool_use_id, is_agent, timestamp)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(session_id, message_id) DO UPDATE SET
+		ON CONFLICT(session_id, COALESCE(message_id, uuid)) DO UPDATE SET
 		 content_preview=excluded.content_preview,
 		 cost_usd=excluded.cost_usd,
 		 input_tokens=excluded.input_tokens,
@@ -528,7 +528,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 	defer ftsStmt.Close()
 
 	// For upserts, LastInsertId is unreliable — look up the actual ID.
-	lookupStmt, err := tx.Prepare(`SELECT id FROM events WHERE session_id = ? AND message_id = ?`)
+	lookupStmt, err := tx.Prepare(`SELECT id FROM events WHERE session_id = ? AND COALESCE(message_id, uuid) = ?`)
 	if err != nil {
 		return fmt.Errorf("prepare lookup stmt: %w", err)
 	}
@@ -556,13 +556,15 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		}
 
 		// Resolve the actual event ID for content and FTS association.
-		// For events with message_id: ON CONFLICT may have fired, so
-		// LastInsertId is unreliable — look up the actual row.
-		// For events without message_id: NULLs are distinct in the unique
-		// index, so this is always a fresh insert and LastInsertId is safe.
+		// ON CONFLICT may fire for any upsert, so LastInsertId is unreliable.
+		// Look up by the dedup key: message_id if present, else uuid.
 		var eventID int64
+		dedupKey := ev.UUID
 		if ev.MessageID != "" {
-			if err := lookupStmt.QueryRow(ei.SessionID, ev.MessageID).Scan(&eventID); err != nil {
+			dedupKey = ev.MessageID
+		}
+		if dedupKey != "" {
+			if err := lookupStmt.QueryRow(ei.SessionID, dedupKey).Scan(&eventID); err != nil {
 				return fmt.Errorf("lookup event id: %w", err)
 			}
 		} else {
@@ -607,6 +609,28 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 		WHERE e.session_id = ?
 		ORDER BY e.timestamp ASC
 		LIMIT ? OFFSET ?`, sessionID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEventRows(rows)
+}
+
+// ListErrorEvents returns all error events for a session, ordered chronologically.
+func (d *DB) ListErrorEvents(sessionID string) ([]EventRow, error) {
+	rows, err := d.db.Query(`SELECT
+		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
+		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
+		COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
+		e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
+		COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
+		COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
+		COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
+		e.timestamp,
+		COALESCE(ec.content,'')
+		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
+		WHERE e.session_id = ? AND e.is_error = 1
+		ORDER BY e.timestamp ASC`, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -55,12 +55,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 5px 10px 3px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   color: var(--text-dim);
   cursor: pointer;
   user-select: none;
   border-bottom: 1px solid var(--border);
+  letter-spacing: 1px;
 }
 
 .time-group-header:hover { color: var(--text); }
@@ -74,17 +75,29 @@
 
 .time-group-collapsed .time-group-items { display: none; }
 
+.time-group-empty {
+  padding: 24px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-align: center;
+  opacity: 0.4;
+}
+
 .show-all-btn {
   display: block;
   width: 100%;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 9px;
   color: var(--cyan);
   cursor: pointer;
   background: none;
   border: none;
   font-family: var(--font-mono);
   text-align: left;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
 }
 
 .show-all-btn:hover { color: var(--text); }
@@ -375,11 +388,15 @@
 /* Idle subagent toggle */
 .idle-toggle {
   margin-left: 20px;
-  padding: 2px 8px;
-  font-size: 10px;
+  padding: 3px 8px;
+  font-size: 9px;
   color: var(--text-dim);
   cursor: pointer;
-  opacity: 0.6;
+  opacity: 0.5;
+  letter-spacing: 0.5px;
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
 }
 
 .idle-toggle:hover { opacity: 1; color: var(--text); }

@@ -2,7 +2,7 @@
 import type { ParsedMessage, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchSessionEvents } from '../api';
+import { fetchSessionEvents, fetchSessionErrors } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
@@ -144,10 +144,10 @@ function updateHeader(): void {
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
-      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
+      <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">${escapeHtml(name)}</span>
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
       ${!isLive ? '<span class="replay-btn" role="button" tabindex="0" aria-label="Replay session" style="margin-left:4px;color:var(--purple,#a855f7);font-size:9px;cursor:pointer;border:1px solid rgba(168,85,247,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">▶ REPLAY</span>' : ''}
-      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
+      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
     backBtn?.addEventListener('keydown', (e) => {
@@ -184,7 +184,7 @@ function updateHeader(): void {
     }
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
-      <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
+      <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">ALL SESSIONS</span>`;
   }
 }
 
@@ -256,9 +256,30 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
-    const messages = await fetchSessionEvents(sessionId, 50);
+    const [messages, errors] = await Promise.all([
+      fetchSessionEvents(sessionId, 50),
+      fetchSessionErrors(sessionId),
+    ]);
     if (currentLoadSessionId !== sessionId) return;
-    for (const msg of messages) {
+
+    // Deduplicate: DB may contain duplicate rows from re-bootstraps.
+    // Use timestamp + content as a fingerprint since IDs aren't stable.
+    const seen = new Set<string>();
+    const dedup = (events: typeof messages) => events.filter(e => {
+      const key = `${e.timestamp}|${e.contentPreview ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Merge error events that aren't in the recent messages window.
+    const recentDeduped = dedup(messages);
+    const missingErrors = dedup(errors);
+    const merged = [...missingErrors, ...recentDeduped].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    for (const msg of merged) {
       appendMessage(msg as ParsedMessage);
     }
   } catch {
@@ -270,6 +291,22 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
 
 function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}): void {
   if (!feedContent) return;
+
+  // Suppress thinking-only assistant messages — they're streaming intermediates
+  // that will be replaced by the actual response with the same messageId.
+  // These have no contentPreview text (renderer would fall back to "[thinking...]")
+  // and no tool info. Keep them if they have expandable fullContent.
+  if (msg.role === 'assistant' && !msg.toolName && !msg.isAgent) {
+    const preview = (msg.contentPreview || '').replace(/^\[thinking\.\.\.\]$/, '');
+    if (!preview && !msg.fullContent) {
+      return;
+    }
+  }
+
+  // Suppress empty system messages (e.g. queue-operation/remove with no content).
+  if (!msg.role && !msg.contentPreview && !msg.fullContent) {
+    return;
+  }
 
   // Remove the "WAITING FOR EVENTS..." placeholder
   const empty = feedContent.querySelector('.feed-empty');

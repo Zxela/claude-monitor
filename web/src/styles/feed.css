@@ -117,7 +117,9 @@
   justify-content: center;
   height: 100%;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
 }
 
 /* Feed entries */
@@ -283,6 +285,7 @@
 .feed-filter-btn[data-type="tool_use"].active { background: rgba(221,204,68,0.2); color: #ddcc44; border-color: #ddcc44; }
 .feed-filter-btn[data-type="tool_result"].active { background: rgba(68,204,204,0.2); color: #44cccc; border-color: #44cccc; }
 .feed-filter-btn[data-type="agent"].active { background: rgba(221,136,68,0.2); color: #dd8844; border-color: #dd8844; }
+.feed-filter-btn[data-type="command"].active { background: rgba(136,170,204,0.2); color: #88aacc; border-color: #88aacc; }
 .feed-filter-btn[data-type="hook"].active { background: rgba(170,119,221,0.2); color: #aa77dd; border-color: #aa77dd; }
 .feed-filter-btn[data-type="error"].active { background: rgba(221,68,85,0.2); color: #dd4455; border-color: #dd4455; }
 

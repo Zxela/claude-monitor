@@ -73,7 +73,7 @@ function show(): void {
   for (const mode of ['graph', 'sequence'] as const) {
     const btn = document.createElement('button');
     btn.className = `graph-mode-btn${graphMode === mode ? ' active' : ''}`;
-    btn.textContent = mode === 'graph' ? 'Graph' : 'Sequence';
+    btn.textContent = mode === 'graph' ? 'GRAPH' : 'SEQUENCE';
     btn.addEventListener('click', () => {
       graphMode = mode;
       show();
@@ -121,8 +121,8 @@ function renderSequence(wrapper: HTMLElement): void {
 
   if (sessions.length === 0) {
     const empty = document.createElement('div');
-    empty.style.cssText = 'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 12px;';
-    empty.textContent = 'No active sessions';
+    empty.style.cssText = 'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 10px; letter-spacing: 1px; opacity: 0.4;';
+    empty.textContent = 'NO ACTIVE SESSIONS';
     list.appendChild(empty);
   }
 

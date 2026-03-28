@@ -28,6 +28,7 @@ type rawMessage struct {
 	TeamName    string          `json:"teamName"`
 	AgentName   string          `json:"agentName"`
 	Data        rawProgressData `json:"data"`
+	Operation   string          `json:"operation"`
 }
 
 type rawProgressData struct {
@@ -184,6 +185,12 @@ func ParseLine(line []byte) (*Event, error) {
 	if raw.Message.StopReason != nil {
 		msg.StopReason = *raw.Message.StopReason
 	}
+	// Treat queue-operation/enqueue as a user message (real-time user input).
+	if raw.Type == "queue-operation" && raw.Operation == "enqueue" {
+		msg.Type = "user"
+		msg.Role = "user"
+	}
+
 	// Extract hook data from progress messages.
 	if raw.Type == "progress" && raw.Data.Type == "hook_progress" {
 		msg.HookEvent = raw.Data.HookEvent

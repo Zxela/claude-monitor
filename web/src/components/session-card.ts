@@ -169,8 +169,8 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       toggle.type = 'button';
       toggle.className = 'idle-toggle';
       toggle.textContent = showIdle
-        ? `Hide ${idleChildren.length} idle`
-        : `Show ${idleChildren.length} idle`;
+        ? `HIDE ${idleChildren.length} IDLE`
+        : `SHOW ${idleChildren.length} IDLE`;
       const toggleIdle = (e: Event) => {
         e.stopPropagation();
         if (showIdleChildren.has(session.id)) {
@@ -295,8 +295,8 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       toggle.type = 'button';
       toggle.className = 'idle-toggle';
       toggle.textContent = showIdle
-        ? `Hide ${idleChildren.length} idle`
-        : `Show ${idleChildren.length} idle`;
+        ? `HIDE ${idleChildren.length} IDLE`
+        : `SHOW ${idleChildren.length} IDLE`;
       const toggleIdle = (e: Event) => {
         e.stopPropagation();
         if (showIdleChildren.has(session.id)) {

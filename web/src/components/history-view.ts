@@ -152,7 +152,7 @@ function show(): void {
   toolbar.className = 'history-toolbar';
 
   const exportBtn = document.createElement('button');
-  exportBtn.textContent = 'Export CSV';
+  exportBtn.textContent = 'EXPORT CSV';
   exportBtn.style.cssText = 'padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
   exportBtn.addEventListener('click', exportCsv);
   toolbar.appendChild(exportBtn);
@@ -170,7 +170,7 @@ function show(): void {
       update({ historyShowSubagents: !checkbox.checked });
     });
     toggleLabel.appendChild(checkbox);
-    toggleLabel.append(' Minimize all');
+    toggleLabel.append(' MINIMIZE ALL');
     toolbar.appendChild(toggleLabel);
   }
 

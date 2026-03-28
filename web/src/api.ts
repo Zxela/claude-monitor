@@ -31,6 +31,10 @@ export async function fetchSessionEvents(sessionId: string, last?: number): Prom
   return request<Event[]>(`${BASE}/api/sessions/${sessionId}/events${params}`);
 }
 
+export async function fetchSessionErrors(sessionId: string): Promise<Event[]> {
+  return request<Event[]>(`${BASE}/api/sessions/${sessionId}/events?errors=true`);
+}
+
 export async function fetchRepos(): Promise<RepoEntry[]> {
   return request<RepoEntry[]>(`${BASE}/api/repos`);
 }

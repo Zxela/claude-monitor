@@ -196,7 +196,7 @@ function updateStats(): void {
   setVal(statActive, String(stats.activeSessions));
   setVal(statCost, `$${stats.totalCost.toFixed(0)}`);
   setVal(statCache, stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—');
-  setVal(statRate, stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/m` : '—');
+  setVal(statRate, stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/min` : '—');
 }
 
 export function focusSearch(): void {
