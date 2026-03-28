@@ -762,9 +762,9 @@ Examples:
 		id := r.PathValue("id")
 		q := r.URL.Query()
 
-		// ?errors=true — all error events for a session
-		if q.Get("errors") == "true" {
-			events, err := historyDB.ListErrorEvents(id)
+		// ?pinned=true — all error + agent events (always visible regardless of window)
+		if q.Get("pinned") == "true" || q.Get("errors") == "true" {
+			events, err := historyDB.ListPinnedEvents(id)
 			if err != nil {
 				writeJSONError(w, "failed to list events", http.StatusInternalServerError)
 				return

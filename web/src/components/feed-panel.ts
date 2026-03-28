@@ -2,7 +2,7 @@
 import type { ParsedMessage, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchSessionEvents, fetchSessionErrors } from '../api';
+import { fetchSessionEvents, fetchPinnedEvents } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
@@ -256,9 +256,9 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
-    const [messages, errors] = await Promise.all([
-      fetchSessionEvents(sessionId, 50),
-      fetchSessionErrors(sessionId),
+    const [messages, pinned] = await Promise.all([
+      fetchSessionEvents(sessionId, 200),
+      fetchPinnedEvents(sessionId),
     ]);
     if (currentLoadSessionId !== sessionId) return;
 
@@ -272,10 +272,10 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       return true;
     });
 
-    // Merge error events that aren't in the recent messages window.
+    // Merge pinned events (errors + agents) that aren't in the recent window.
     const recentDeduped = dedup(messages);
-    const missingErrors = dedup(errors);
-    const merged = [...missingErrors, ...recentDeduped].sort(
+    const missingPinned = dedup(pinned);
+    const merged = [...missingPinned, ...recentDeduped].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 

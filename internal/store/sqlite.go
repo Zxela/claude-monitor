@@ -616,8 +616,9 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 	return scanEventRows(rows)
 }
 
-// ListErrorEvents returns all error events for a session, ordered chronologically.
-func (d *DB) ListErrorEvents(sessionID string) ([]EventRow, error) {
+// ListPinnedEvents returns all error and agent events for a session, ordered chronologically.
+// These are "pinned" because they should always be visible regardless of the recent-events window.
+func (d *DB) ListPinnedEvents(sessionID string) ([]EventRow, error) {
 	rows, err := d.db.Query(`SELECT
 		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
 		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
@@ -629,7 +630,7 @@ func (d *DB) ListErrorEvents(sessionID string) ([]EventRow, error) {
 		e.timestamp,
 		COALESCE(ec.content,'')
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
-		WHERE e.session_id = ? AND e.is_error = 1
+		WHERE e.session_id = ? AND (e.is_error = 1 OR e.is_agent = 1 OR e.content_preview LIKE '[agent%')
 		ORDER BY e.timestamp ASC`, sessionID)
 	if err != nil {
 		return nil, err
