@@ -133,7 +133,7 @@ function renderSequence(wrapper: HTMLElement): void {
     entry.style.paddingLeft = `${12 + depth * 24}px`;
 
     const time = sess.startedAt ? new Date(sess.startedAt).toLocaleTimeString() : '';
-    const name = sess.sessionName || sess.projectName || sess.id.slice(0, 8);
+    const name = sess.sessionName || sess.cwd || sess.id.slice(0, 8);
     const cost = `$${sess.totalCost.toFixed(2)}`;
     const statusClass = sess.isActive
       ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
@@ -219,7 +219,7 @@ function rebuildNodes(): void {
     const color = sess.isActive
       ? (sess.status === 'thinking' ? '#ffcc00' : sess.status === 'tool_use' ? '#4488ff' : '#00ff88')
       : '#44445a';
-    const label = (sess.sessionName || sess.projectName || sess.id).substring(0, 16);
+    const label = (sess.sessionName || sess.cwd || sess.id).substring(0, 16);
 
     return {
       id: sess.id,

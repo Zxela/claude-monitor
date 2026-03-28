@@ -1,4 +1,4 @@
-import type { GroupedSessions, SearchResult, HistoryRow, ParsedMessage, Stats } from './types';
+import type { GroupedSessions, SessionRow, Event, Stats, StorageInfo, RepoEntry } from './types';
 
 const BASE = '';
 
@@ -11,19 +11,28 @@ async function request<T>(url: string): Promise<T> {
 }
 
 export async function fetchGroupedSessions(): Promise<GroupedSessions> {
-  return request<GroupedSessions>(`${BASE}/api/sessions/grouped`);
+  return request<GroupedSessions>(`${BASE}/api/sessions?group=activity`);
 }
 
-export async function fetchSearch(query: string, limit = 50): Promise<SearchResult[]> {
-  return request<SearchResult[]>(`${BASE}/api/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+export async function fetchSessions(limit = 50, offset = 0): Promise<SessionRow[]> {
+  return request<SessionRow[]>(`${BASE}/api/sessions?limit=${limit}&offset=${offset}`);
 }
 
-export async function fetchHistory(limit = 50, offset = 0): Promise<HistoryRow[]> {
-  return request<HistoryRow[]>(`${BASE}/api/history?limit=${limit}&offset=${offset}`);
+export async function fetchSearch(query: string, limit = 50): Promise<Event[]> {
+  return request<Event[]>(`${BASE}/api/search?q=${encodeURIComponent(query)}&limit=${limit}`);
 }
 
-export async function fetchRecentMessages(sessionId: string): Promise<ParsedMessage[]> {
-  return request<ParsedMessage[]>(`${BASE}/api/sessions/${sessionId}/recent`);
+export async function fetchFullSearch(query: string, limit = 50): Promise<Event[]> {
+  return request<Event[]>(`${BASE}/api/search/full?q=${encodeURIComponent(query)}&limit=${limit}`);
+}
+
+export async function fetchSessionEvents(sessionId: string, last?: number): Promise<Event[]> {
+  const params = last ? `?last=${last}` : '';
+  return request<Event[]>(`${BASE}/api/sessions/${sessionId}/events${params}`);
+}
+
+export async function fetchRepos(): Promise<RepoEntry[]> {
+  return request<RepoEntry[]>(`${BASE}/api/repos`);
 }
 
 export type StatsWindow = 'all' | 'today' | 'week' | 'month';
@@ -35,4 +44,16 @@ export async function fetchStats(window: StatsWindow = 'today'): Promise<Stats> 
 export async function fetchVersion(): Promise<string> {
   const data = await request<{ version: string }>(`${BASE}/api/version`);
   return data.version;
+}
+
+export async function fetchStorage(): Promise<StorageInfo> {
+  return request<StorageInfo>(`${BASE}/api/storage`);
+}
+
+export async function fetchSettings(): Promise<Record<string, string>> {
+  return request<Record<string, string>>(`${BASE}/api/settings`);
+}
+
+export async function clearRepoCache(): Promise<void> {
+  await fetch(`${BASE}/api/cache/repos`, { method: 'DELETE' });
 }

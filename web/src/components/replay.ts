@@ -34,7 +34,7 @@ function renderReplayPanel(sessionId: string): void {
   if (!container) return;
 
   const session = state.sessions.get(sessionId);
-  const name = session?.sessionName || session?.projectName || sessionId;
+  const name = session?.sessionName || session?.cwd || sessionId;
 
   container.innerHTML = '';
   const panel = document.createElement('div');

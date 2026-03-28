@@ -7,7 +7,7 @@ interface TimelineEvent {
   timestamp: string;
   type: string;
   role: string;
-  contentText: string;
+  contentPreview: string;
   toolName?: string;
   costUSD: number;
 }
@@ -288,7 +288,7 @@ function onMouseMove(e: MouseEvent): void {
   if (evt) {
     canvas.style.cursor = 'pointer';
     const time = new Date(evt.timestamp).toLocaleTimeString();
-    const content = (evt.contentText || '').slice(0, 80);
+    const content = (evt.contentPreview || '').slice(0, 80);
     tooltip.innerHTML = `<div><b>${time}</b> [${evt.type || evt.role}]</div>
       ${evt.toolName ? `<div>${escapeHtml(evt.toolName)}</div>` : ''}
       <div style="color:var(--text-dim)">${escapeHtml(content)}</div>

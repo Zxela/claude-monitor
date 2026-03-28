@@ -1,26 +1,34 @@
 // web/src/components/history-view.ts
-import type { HistoryRow } from '../types';
+import type { SessionRow } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchHistory } from '../api';
+import { fetchSessions } from '../api';
 import { formatDurationSecs, formatTokens } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
-let data: HistoryRow[] = [];
+let data: SessionRow[] = [];
 let sortCol = 'endedAt';
 let sortAsc = false;
 const collapsedParents = new Set<string>();
 
-type Column = { key: string; label: string; cls?: string; fmt: (r: HistoryRow) => string };
+type Column = { key: string; label: string; cls?: string; fmt: (r: SessionRow) => string };
 
 const COLUMNS: Column[] = [
   { key: 'endedAt', label: 'Date', cls: 'col-dim', fmt: r => r.endedAt ? new Date(r.endedAt).toLocaleString() : '' },
-  { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.projectName || r.id },
+  { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.cwd || r.id },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
-  { key: 'durationSeconds', label: 'Duration', cls: 'col-dim', fmt: r => formatDurationSecs(r.durationSeconds) },
+  { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: r => {
+    if (!r.startedAt || !r.endedAt) return '';
+    const secs = (new Date(r.endedAt).getTime() - new Date(r.startedAt).getTime()) / 1000;
+    return formatDurationSecs(secs);
+  }},
   { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0)) },
-  { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: r => r.cacheHitPct > 0 ? `${Math.round(r.cacheHitPct)}%` : '' },
+  { key: 'cache', label: 'Cache%', cls: 'col-cache', fmt: r => {
+    const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
+    if (total === 0) return '';
+    return `${Math.round(r.cacheReadTokens / total * 100)}%`;
+  }},
   { key: 'messageCount', label: 'Msgs', fmt: r => String(r.messageCount) },
   { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: r => r.errorCount > 0 ? String(r.errorCount) : '' },
   { key: 'model', label: 'Model', cls: 'col-model', fmt: r => (r.model || '').replace('claude-', '') },
@@ -49,7 +57,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 async function loadData(): Promise<void> {
   try {
-    data = await fetchHistory(200, 0);
+    data = await fetchSessions(200, 0);
     show();
   } catch (err) {
     console.error('Failed to load history:', err);
@@ -70,10 +78,10 @@ function exportCsv(): void {
 }
 
 /** Group rows: parents first (sorted), children grouped under their parent */
-function groupRows(rows: HistoryRow[]): { parent: HistoryRow; children: HistoryRow[] }[] {
-  const childrenByParent = new Map<string, HistoryRow[]>();
-  const parents: HistoryRow[] = [];
-  const rowById = new Map<string, HistoryRow>();
+function groupRows(rows: SessionRow[]): { parent: SessionRow; children: SessionRow[] }[] {
+  const childrenByParent = new Map<string, SessionRow[]>();
+  const parents: SessionRow[] = [];
+  const rowById = new Map<string, SessionRow>();
 
   for (const row of rows) {
     rowById.set(row.id, row);
@@ -253,7 +261,7 @@ function show(): void {
   container.appendChild(wrapper);
 }
 
-function createRow(row: HistoryRow, isChild: boolean): HTMLTableRowElement {
+function createRow(row: SessionRow, isChild: boolean): HTMLTableRowElement {
   const tr = document.createElement('tr');
   if (isChild) tr.className = 'history-child-row';
 
@@ -275,21 +283,21 @@ function createRow(row: HistoryRow, isChild: boolean): HTMLTableRowElement {
   return tr;
 }
 
-function sortData(rows: HistoryRow[]): HistoryRow[] {
+function sortData(rows: SessionRow[]): SessionRow[] {
   return rows.sort((a, b) => {
     let va: number | string, vb: number | string;
     switch (sortCol) {
       case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0); vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0); break;
-      case 'projectName': va = (a.sessionName || a.projectName || '').toLowerCase(); vb = (b.sessionName || b.projectName || '').toLowerCase(); break;
+      case 'projectName': va = (a.sessionName || a.cwd || '').toLowerCase(); vb = (b.sessionName || b.cwd || '').toLowerCase(); break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
       case 'endedAt': va = a.endedAt || ''; vb = b.endedAt || ''; break;
       default: {
-        const numericAccessors: Record<string, (r: HistoryRow) => number> = {
+        const numericAccessors: Record<string, (r: SessionRow) => number> = {
           totalCost: r => r.totalCost,
-          durationSeconds: r => r.durationSeconds,
+          duration: r => r.startedAt && r.endedAt ? (new Date(r.endedAt).getTime() - new Date(r.startedAt).getTime()) / 1000 : 0,
           messageCount: r => r.messageCount,
           errorCount: r => r.errorCount,
-          cacheHitPct: r => r.cacheHitPct,
+          cache: r => { const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return t > 0 ? r.cacheReadTokens / t * 100 : 0; },
         };
         const accessor = numericAccessors[sortCol];
         va = accessor ? accessor(a) : 0;

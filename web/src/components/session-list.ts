@@ -70,7 +70,7 @@ function updateFilterBar(): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
+  if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('repoFilter')) {
     renderList();
   }
   if (changed.has('sessions')) {
@@ -151,10 +151,10 @@ function renderList(): void {
   const scrollTop = listEl.scrollTop;
   listEl.innerHTML = '';
 
-  const filter = state.projectFilter;
+  const filter = state.repoFilter;
   const topLevel = (sessions: Session[]) =>
-    (filter ? sessions.filter(s => s.projectName === filter || s.sessionName === filter) : sessions)
-      .filter(s => !s.isSubagent);
+    (filter ? sessions.filter(s => s.cwd === filter || s.sessionName === filter) : sessions)
+      .filter(s => !s.parentId);
   const sort = (sessions: Session[]) =>
     sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 

@@ -16,9 +16,9 @@ const COMMAND_CAVEAT_RE = /<local-command-caveat>[\s\S]*?<\/local-command-caveat
 export function detectType(msg: ParsedMessage): MessageType {
   if (msg.isError) return 'error';
   if (msg.hookEvent) return 'hook';
-  if (msg.role === 'user' && msg.contentText && COMMAND_RE.test(msg.contentText)) return 'command';
+  if (msg.role === 'user' && msg.contentPreview && COMMAND_RE.test(msg.contentPreview)) return 'command';
   // Caveat-only messages (preceding actual command) are also commands
-  if (msg.role === 'user' && msg.contentText && msg.contentText.includes('<local-command-caveat>') && !COMMAND_RE.test(msg.contentText)) return 'command';
+  if (msg.role === 'user' && msg.contentPreview && msg.contentPreview.includes('<local-command-caveat>') && !COMMAND_RE.test(msg.contentPreview)) return 'command';
   // Agent tool calls show as 'agent' type, not 'tool_use'
   if (msg.isAgent && msg.role === 'assistant') return 'agent';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
@@ -50,9 +50,9 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   el.dataset.type = type;
 
   const time = formatTime(msg.timestamp);
-  let rawText = msg.contentText || '';
+  let rawText = msg.contentPreview || '';
   const detail = msg.toolDetail || '';
-  // Backend sends full untruncated text in fullContent (contentText is capped at 200 chars)
+  // Backend sends full untruncated text in fullContent (contentPreview is capped at 200 chars)
   const fullText = msg.fullContent || rawText;
 
   // Strip redundant prefixes baked in by the backend parser

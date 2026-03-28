@@ -1,16 +1,14 @@
 export interface Session {
   id: string;
-  projectDir: string;
-  projectName: string;
+  repoId?: string;
   sessionName?: string;
-  filePath: string;
   totalCost: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
-  cacheHitPct: number;
   messageCount: number;
+  eventCount: number;
   lastActive: string;
   isActive: boolean;
   startedAt: string;
@@ -22,8 +20,28 @@ export interface Session {
   model?: string;
   costRate: number;
   errorCount: number;
-  isSubagent?: boolean;
   taskDescription: string;
+}
+
+export interface SessionRow {
+  id: string;
+  repoId: string;
+  parentId: string;
+  sessionName: string;
+  taskDescription: string;
+  cwd: string;
+  branch: string;
+  model: string;
+  startedAt: string;
+  endedAt: string;
+  totalCost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  messageCount: number;
+  eventCount: number;
+  errorCount: number;
 }
 
 export interface GroupedSessions {
@@ -35,40 +53,31 @@ export interface GroupedSessions {
   older: Session[];
 }
 
-export interface SearchResult {
+export interface Event {
+  id: number;
   sessionId: string;
-  sessionName: string;
-  projectName: string;
+  uuid?: string;
+  messageId?: string;
   type: string;
   role: string;
-  contentText: string;
+  contentPreview: string;
+  fullContent?: string;
   toolName?: string;
-  timestamp: string;
-  messageId?: string;
+  toolDetail?: string;
   costUSD: number;
-  isError: boolean;
-}
-
-export interface HistoryRow {
-  id: string;
-  projectName: string;
-  sessionName: string;
-  totalCost: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
-  cacheCreationTokens?: number;
-  cacheHitPct: number;
-  messageCount: number;
-  errorCount: number;
-  startedAt: string;
-  endedAt: string;
-  durationSeconds: number;
-  model: string;
-  cwd: string;
-  gitBranch: string;
-  taskDescription: string;
-  parentId?: string;
+  cacheCreationTokens: number;
+  model?: string;
+  isError: boolean;
+  stopReason?: string;
+  hookEvent?: string;
+  hookName?: string;
+  toolUseId?: string;
+  forToolUseId?: string;
+  isAgent?: boolean;
+  timestamp: string;
 }
 
 export interface Stats {
@@ -82,30 +91,43 @@ export interface Stats {
   cacheHitPct: number;
   costRate: number;
   costByModel: Record<string, number>;
+  costByRepo: Record<string, number>;
 }
 
 export interface WsEvent {
-  event: 'session_new' | 'message' | 'update_available';
+  event: 'session_new' | 'session_update' | 'event' | 'update_available';
   session?: Session;
-  message?: ParsedMessage;
+  data?: Event;
   version?: string;
   url?: string;
 }
 
-export interface ParsedMessage {
+// Legacy alias — frontend components still reference ParsedMessage
+// TODO: migrate components to use Event directly
+export type ParsedMessage = Event;
+
+export interface SearchResult {
+  sessionId: string;
+  sessionName: string;
+  repoName: string;
   type: string;
   role: string;
   contentText: string;
   toolName?: string;
-  toolDetail?: string;
   timestamp: string;
   messageId?: string;
   costUSD: number;
   isError: boolean;
-  model?: string;
-  hookEvent?: string;
-  fullContent?: string;  // untruncated content (backend truncates contentText to 200 chars)
-  toolUseId?: string;
-  forToolUseId?: string;
-  isAgent?: boolean;
+}
+
+export interface StorageInfo {
+  totalSizeBytes: number;
+  hotContentBytes: number;
+  warmContentBytes: number;
+  eventCount: number;
+}
+
+export interface RepoEntry {
+  id: string;
+  totalCost: number;
 }

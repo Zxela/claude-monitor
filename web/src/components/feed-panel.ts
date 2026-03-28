@@ -2,7 +2,7 @@
 import type { ParsedMessage, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchRecentMessages } from '../api';
+import { fetchSessionEvents } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml } from '../utils';
@@ -56,26 +56,28 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 }
 
 function onWsMessage(event: WsEvent): void {
-  if (!event.message || !event.session) return;
+  if (event.event !== 'event' || !event.data || !event.session) return;
   if (state.view !== 'list') return;
   if (!feedContent) return;
+
+  const msg = event.data;
 
   // In single-session mode, only show messages for selected session
   if (state.selectedSessionId && event.session.id !== state.selectedSessionId) return;
 
-  if (event.message.toolName && event.message.role === 'assistant') {
-    const toolInfo = event.message.toolName + (event.message.toolDetail ? ': ' + event.message.toolDetail.slice(0, 60) : '');
+  if (msg.toolName && msg.role === 'assistant') {
+    const toolInfo = msg.toolName + (msg.toolDetail ? ': ' + msg.toolDetail.slice(0, 60) : '');
     setLastTool(event.session.id, toolInfo);
   }
 
-  if (event.message.isError) {
-    const name = event.session.sessionName || event.session.projectName || 'Agent';
-    notify('error', 'Agent Error', `${name}: ${(event.message.contentText || '').slice(0, 100)}`);
+  if (msg.isError) {
+    const name = event.session.sessionName || event.session.cwd || 'Agent';
+    notify('error', 'Agent Error', `${name}: ${(msg.contentPreview || '').slice(0, 100)}`);
   }
 
-  const sessionName = event.session.sessionName || event.session.projectName || event.session.id.slice(0, 8);
+  const sessionName = event.session.sessionName || event.session.cwd || event.session.id.slice(0, 8);
   const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
-  appendMessage(event.message, opts);
+  appendMessage(msg as ParsedMessage, opts);
 }
 
 function renderFeedPanel(): void {
@@ -138,7 +140,7 @@ function updateHeader(): void {
   if (!headerEl) return;
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
-    const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
+    const name = sess ? (sess.sessionName || sess.cwd || sess.id) : state.selectedSessionId;
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
@@ -254,7 +256,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
-    const messages = await fetchRecentMessages(sessionId);
+    const messages = await fetchSessionEvents(sessionId, 50);
     if (currentLoadSessionId !== sessionId) return;
     for (const msg of messages) {
       appendMessage(msg as ParsedMessage);

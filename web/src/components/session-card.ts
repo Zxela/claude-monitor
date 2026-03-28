@@ -29,12 +29,12 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   el.dataset.sessionId = session.id;
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
-  if (session.isSubagent) el.classList.add('subagent');
+  if (!!session.parentId) el.classList.add('subagent');
   if (session.isActive) el.classList.add('active-card');
 
   const dotClass = getDotClass(session);
 
-  const displayName = session.sessionName || session.projectName || session.id;
+  const displayName = session.sessionName || session.cwd || session.id;
   const statusClass = `status-${session.status}`;
   const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
@@ -68,7 +68,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       <div class="session-card-details">
         <div class="session-stats">
           <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens + session.cacheCreationTokens)} tok</span>
-          <span class="cache">${session.cacheHitPct.toFixed(0)}%</span>
+          <span class="cache">${Math.round((session.cacheReadTokens / Math.max(1, session.inputTokens + session.cacheReadTokens + session.cacheCreationTokens)) * 100).toFixed(0)}%</span>
           ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
         </div>
         <div class="session-meta">
@@ -194,11 +194,11 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   el.dataset.sessionId = session.id;
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
-  if (session.isSubagent) el.classList.add('subagent');
+  if (!!session.parentId) el.classList.add('subagent');
 
   const dotClass = getDotClass(session);
 
-  const displayName = session.sessionName || session.projectName || session.id;
+  const displayName = session.sessionName || session.cwd || session.id;
   const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
 
@@ -321,7 +321,7 @@ export function renderDot(session: Session): HTMLElement {
   dot.dataset.sessionId = session.id;
   dot.classList.add(getDotClass(session));
 
-  dot.title = session.sessionName || session.projectName || session.id;
+  dot.title = session.sessionName || session.cwd || session.id;
 
   dot.addEventListener('click', () => {
     const updates: Record<string, unknown> = { selectedSessionId: session.id };
