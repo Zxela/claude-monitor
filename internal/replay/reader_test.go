@@ -1,5 +1,5 @@
 // Note: msgWithTime is defined in helpers_test.go in the same package.
-// parser is not imported here — msgWithTime returns parser.ParsedMessage but callers
+// parser is not imported here — msgWithTime returns parser.Event but callers
 // don't need the import since the embedded field name is used without package prefix.
 package replay_test
 
@@ -62,9 +62,9 @@ func TestIndexAt_returnsCorrectIndex(t *testing.T) {
 	t2 := t0.Add(10 * time.Second)
 
 	events := []replay.Event{
-		{Index: 0, ParsedMessage: msgWithTime(t0)},
-		{Index: 1, ParsedMessage: msgWithTime(t1)},
-		{Index: 2, ParsedMessage: msgWithTime(t2)},
+		{Index: 0, Event: msgWithTime(t0)},
+		{Index: 1, Event: msgWithTime(t1)},
+		{Index: 2, Event: msgWithTime(t2)},
 	}
 
 	if i := replay.IndexAt(events, t1); i != 1 {

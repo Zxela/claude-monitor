@@ -65,8 +65,8 @@ type contentBlock struct {
 	IsError   bool            `json:"is_error,omitempty"`    // for tool_result blocks: true when tool errored
 }
 
-// ParsedMessage is the normalised representation of one JSONL line.
-type ParsedMessage struct {
+// Event is the normalised representation of one JSONL line.
+type Event struct {
 	Type         string    `json:"type"`
 	MessageID    string    `json:"messageId,omitempty"`
 	Role         string    `json:"role"`
@@ -99,10 +99,10 @@ type ParsedMessage struct {
 	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
 }
 
-// IsConversationMessage returns true if this message represents a real
+// IsConversationTurn returns true if this message represents a real
 // conversation event (user or assistant turn), as opposed to metadata lines
 // like progress, system, file-history-snapshot, agent-name, etc.
-func (m *ParsedMessage) IsConversationMessage() bool {
+func (m *Event) IsConversationTurn() bool {
 	switch m.Type {
 	case "assistant", "user", "human":
 		return true
@@ -147,8 +147,8 @@ func computeCost(model string, usage rawUsage) float64 {
 		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
 }
 
-// ParseLine unmarshals a single JSONL line and returns a ParsedMessage.
-func ParseLine(line []byte) (*ParsedMessage, error) {
+// ParseLine unmarshals a single JSONL line and returns an Event.
+func ParseLine(line []byte) (*Event, error) {
 	var raw rawMessage
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil, fmt.Errorf("json unmarshal: %w", err)
@@ -160,7 +160,7 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 
 	cost := computeCost(raw.Message.Model, usage)
 
-	msg := &ParsedMessage{
+	msg := &Event{
 		Type:         raw.Type,
 		MessageID:    raw.Message.ID,
 		Role:         raw.Message.Role,

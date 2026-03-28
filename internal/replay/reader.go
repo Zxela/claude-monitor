@@ -15,7 +15,7 @@ import (
 // Event is a single parsed JSONL line with its zero-based position in the file.
 type Event struct {
 	Index int `json:"index"`
-	parser.ParsedMessage
+	parser.Event
 }
 
 // ReadFile reads all JSONL lines from path and returns them as Events in order.
@@ -45,7 +45,7 @@ func ReadFile(path string) ([]Event, error) {
 			byteOffset += lineLen
 			continue
 		}
-		events = append(events, Event{Index: i, ParsedMessage: *msg})
+		events = append(events, Event{Index: i, Event: *msg})
 		i++
 		byteOffset += lineLen
 	}

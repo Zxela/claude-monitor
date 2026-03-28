@@ -8,11 +8,11 @@ import (
 
 func TestAddAndSearchBasic(t *testing.T) {
 	idx := New()
-	idx.Add("s1", "Session 1", "project-a", parser.ParsedMessage{
+	idx.Add("s1", "Session 1", "project-a", parser.Event{
 		ContentText: "hello world",
 		Role:        "user",
 	})
-	idx.Add("s2", "Session 2", "project-b", parser.ParsedMessage{
+	idx.Add("s2", "Session 2", "project-b", parser.Event{
 		ContentText: "goodbye world",
 		Role:        "assistant",
 	})
@@ -33,7 +33,7 @@ func TestAddAndSearchBasic(t *testing.T) {
 
 func TestCaseInsensitiveSearch(t *testing.T) {
 	idx := New()
-	idx.Add("s1", "S1", "proj", parser.ParsedMessage{
+	idx.Add("s1", "S1", "proj", parser.Event{
 		ContentText: "Hello World",
 		Role:        "user",
 	})
@@ -49,7 +49,7 @@ func TestCaseInsensitiveSearch(t *testing.T) {
 func TestLimitRespected(t *testing.T) {
 	idx := New()
 	for i := 0; i < 20; i++ {
-		idx.Add("s1", "S1", "proj", parser.ParsedMessage{
+		idx.Add("s1", "S1", "proj", parser.Event{
 			ContentText: "matching text",
 			Role:        "user",
 		})
@@ -63,7 +63,7 @@ func TestLimitRespected(t *testing.T) {
 
 func TestEmptyQueryReturnsEmpty(t *testing.T) {
 	idx := New()
-	idx.Add("s1", "S1", "proj", parser.ParsedMessage{
+	idx.Add("s1", "S1", "proj", parser.Event{
 		ContentText: "some content",
 		Role:        "user",
 	})
@@ -77,11 +77,11 @@ func TestEmptyQueryReturnsEmpty(t *testing.T) {
 func TestEmptyContentNotIndexed(t *testing.T) {
 	idx := New()
 	// Message with no searchable content should not be indexed.
-	idx.Add("s1", "S1", "proj", parser.ParsedMessage{
+	idx.Add("s1", "S1", "proj", parser.Event{
 		Role: "assistant",
 	})
 	// Message with only whitespace should not be indexed.
-	idx.Add("s2", "S2", "proj", parser.ParsedMessage{
+	idx.Add("s2", "S2", "proj", parser.Event{
 		ContentText: "   ",
 		Role:        "assistant",
 	})
@@ -95,7 +95,7 @@ func TestEmptyContentNotIndexed(t *testing.T) {
 
 func TestSearchToolNameAndToolDetail(t *testing.T) {
 	idx := New()
-	idx.Add("s1", "S1", "proj", parser.ParsedMessage{
+	idx.Add("s1", "S1", "proj", parser.Event{
 		ToolName:   "Bash",
 		ToolDetail: "npm install",
 		Role:       "assistant",
@@ -114,11 +114,11 @@ func TestSearchToolNameAndToolDetail(t *testing.T) {
 
 func TestUpdateSession(t *testing.T) {
 	idx := New()
-	idx.Add("s1", "Old Name", "old-project", parser.ParsedMessage{
+	idx.Add("s1", "Old Name", "old-project", parser.Event{
 		ContentText: "some text",
 		Role:        "user",
 	})
-	idx.Add("s2", "Other Session", "other-project", parser.ParsedMessage{
+	idx.Add("s2", "Other Session", "other-project", parser.Event{
 		ContentText: "other text",
 		Role:        "user",
 	})
@@ -145,11 +145,11 @@ func TestUpdateSession(t *testing.T) {
 
 func TestNewestFirst(t *testing.T) {
 	idx := New()
-	idx.Add("s1", "First", "proj", parser.ParsedMessage{
+	idx.Add("s1", "First", "proj", parser.Event{
 		ContentText: "match first",
 		Role:        "user",
 	})
-	idx.Add("s2", "Second", "proj", parser.ParsedMessage{
+	idx.Add("s2", "Second", "proj", parser.Event{
 		ContentText: "match second",
 		Role:        "user",
 	})

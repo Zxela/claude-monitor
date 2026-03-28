@@ -23,9 +23,9 @@ func (f *flushRecorder) Flush() {}
 func TestStream_sendsAllEventsAsSSE(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	events := []replay.Event{
-		{Index: 0, ParsedMessage: msgWithTime(t0)},
-		{Index: 1, ParsedMessage: msgWithTime(t0.Add(10 * time.Millisecond))},
-		{Index: 2, ParsedMessage: msgWithTime(t0.Add(20 * time.Millisecond))},
+		{Index: 0, Event: msgWithTime(t0)},
+		{Index: 1, Event: msgWithTime(t0.Add(10 * time.Millisecond))},
+		{Index: 2, Event: msgWithTime(t0.Add(20 * time.Millisecond))},
 	}
 
 	rec := &flushRecorder{httptest.NewRecorder()}
@@ -48,9 +48,9 @@ func TestStream_sendsAllEventsAsSSE(t *testing.T) {
 func TestStream_respectsFromIndex(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	events := []replay.Event{
-		{Index: 0, ParsedMessage: msgWithTime(t0)},
-		{Index: 1, ParsedMessage: msgWithTime(t0.Add(10 * time.Millisecond))},
-		{Index: 2, ParsedMessage: msgWithTime(t0.Add(20 * time.Millisecond))},
+		{Index: 0, Event: msgWithTime(t0)},
+		{Index: 1, Event: msgWithTime(t0.Add(10 * time.Millisecond))},
+		{Index: 2, Event: msgWithTime(t0.Add(20 * time.Millisecond))},
 	}
 
 	rec := &flushRecorder{httptest.NewRecorder()}
@@ -82,7 +82,7 @@ func TestStream_parsesSSEDataAsJSON(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	msg := msgWithTime(t0)
 	msg.Role = "user"
-	events := []replay.Event{{Index: 0, ParsedMessage: msg}}
+	events := []replay.Event{{Index: 0, Event: msg}}
 
 	rec := &flushRecorder{httptest.NewRecorder()}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

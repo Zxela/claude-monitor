@@ -14,7 +14,7 @@ type Entry struct {
 	SessionID   string `json:"sessionId"`
 	SessionName string `json:"sessionName"`
 	ProjectName string `json:"projectName"`
-	parser.ParsedMessage
+	parser.Event
 }
 
 // indexedEntry pairs an Entry with pre-lowercased searchable text.
@@ -36,7 +36,7 @@ func New() *Index {
 
 // Add indexes a message for a session. Only messages with searchable content
 // (non-empty ContentText, ToolDetail, or ToolName) are stored. O(1) amortized.
-func (idx *Index) Add(sessionID, sessionName, projectName string, msg parser.ParsedMessage) {
+func (idx *Index) Add(sessionID, sessionName, projectName string, msg parser.Event) {
 	searchable := msg.ContentText + " " + msg.ToolDetail + " " + msg.ToolName
 	// Skip messages with no meaningful searchable content.
 	if strings.TrimSpace(searchable) == "" {
@@ -48,7 +48,7 @@ func (idx *Index) Add(sessionID, sessionName, projectName string, msg parser.Par
 			SessionID:     sessionID,
 			SessionName:   sessionName,
 			ProjectName:   projectName,
-			ParsedMessage: msg,
+			Event: msg,
 		},
 		searchStr: strings.ToLower(searchable),
 	}

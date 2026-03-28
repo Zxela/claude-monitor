@@ -27,7 +27,7 @@ type agentMeta struct {
 
 // Result holds the output of processing a single watcher event.
 type Result struct {
-	Message *parser.ParsedMessage
+	Message *parser.Event
 	Session *session.Session
 	IsNew   bool
 }
@@ -76,20 +76,8 @@ func (p *Processor) Process(ev watcher.Event) Result {
 	}
 
 	sess := p.store.Upsert(ev.SessionID, func(s *session.Session) {
-		s.FilePath = ev.FilePath
-		s.ProjectDir = ev.ProjectDir
-		if ev.Label != "" {
-			s.ProjectName = ev.Label + " / " + ev.ProjectDir
-		} else if s.ProjectName == "" {
-			s.ProjectName = ev.ProjectDir
-		}
 		if msg.CWD != "" {
 			s.CWD = msg.CWD
-			// Derive a cleaner project name from CWD if we only have
-			// the raw dir hash (e.g. "-root-claude-monitor").
-			if s.SessionName == "" && strings.HasPrefix(s.ProjectName, "-") {
-				s.ProjectName = filepath.Base(msg.CWD)
-			}
 		}
 		if msg.GitBranch != "" {
 			s.GitBranch = msg.GitBranch
@@ -102,14 +90,10 @@ func (p *Processor) Process(ev watcher.Event) Result {
 		} else if msg.Type == "agent-name" && msg.ContentText != "" && s.SessionName == "" {
 			s.SessionName = msg.ContentText
 		}
-		if s.SessionName != "" {
-			s.ProjectName = s.SessionName
-		}
 		if msg.IsSidechain || msg.ParentUUID != "" {
 			if parentSID := ParentSessionIDFromPath(ev.FilePath); parentSID != "" {
 				if s.ParentID == "" {
 					s.ParentID = parentSID
-					s.IsSubagent = true
 
 					// Apply cached meta.json for agent name/type.
 					p.metaMu.Lock()
@@ -122,20 +106,18 @@ func (p *Processor) Process(ev watcher.Event) Result {
 						}
 						if name != "" && s.SessionName == "" {
 							s.SessionName = name
-							s.ProjectName = name
 						}
 					}
 				}
 			}
 		}
-		// Team agent detection: link to team lead session via config file.
+		// Team agent detection via parent path (team agents use same
+		// subagent file structure — teamName in JSONL is not reliably set).
 		if msg.TeamName != "" && s.ParentID == "" {
-			if leadSID := p.resolveTeamLead(msg.TeamName, ev.SessionID); leadSID != "" {
-				s.ParentID = leadSID
-				s.IsSubagent = true
+			if parentSID := ParentSessionIDFromPath(ev.FilePath); parentSID != "" {
+				s.ParentID = parentSID
 				if msg.AgentName != "" && s.SessionName == "" {
 					s.SessionName = msg.AgentName
-					s.ProjectName = msg.AgentName
 				}
 			}
 		}
@@ -172,7 +154,7 @@ func (p *Processor) Process(ev watcher.Event) Result {
 				CacheCreationTokens: msg.CacheCreationTokens,
 			}
 		}
-		if msg.IsConversationMessage() {
+		if msg.IsConversationTurn() {
 			if s.SeenMessageIDs == nil {
 				s.SeenMessageIDs = make(map[string]bool)
 			}
@@ -217,7 +199,7 @@ func (p *Processor) Process(ev watcher.Event) Result {
 			s.TaskDescription = desc
 
 			// Fallback for subagents without meta.json: use short agent ID.
-			if s.IsSubagent && s.SessionName == "" && s.ProjectName == "subagents" {
+			if s.ParentID != "" && s.SessionName == "" {
 				aid := s.ID
 				if strings.HasPrefix(aid, "agent-") {
 					aid = aid[6:]
@@ -225,12 +207,12 @@ func (p *Processor) Process(ev watcher.Event) Result {
 				if len(aid) > 8 {
 					aid = aid[:8]
 				}
-				s.ProjectName = "agent " + aid
+				s.SessionName = "agent " + aid
 			}
 		}
 	})
 
-	if sess.IsSubagent && sess.ParentID != "" {
+	if sess.ParentID != "" {
 		p.store.LinkChild(sess.ParentID, ev.SessionID)
 	}
 
@@ -255,59 +237,3 @@ func ParentSessionIDFromPath(filePath string) string {
 	return ""
 }
 
-// teamConfig is the minimal structure of ~/.claude/teams/{name}/config.json.
-type teamConfig struct {
-	LeadSessionID string `json:"leadSessionId"`
-}
-
-// resolveTeamLead reads the team config file and returns the lead session ID.
-// Results are cached in metaCache (keyed by "team:" + teamName).
-func (p *Processor) resolveTeamLead(teamName, sessionID string) string {
-	cacheKey := "team:" + teamName
-
-	// Check cache first.
-	p.metaMu.Lock()
-	if cached, ok := p.metaCache[cacheKey]; ok {
-		p.metaMu.Unlock()
-		if cached != nil {
-			return cached.Description // repurpose Description field for leadSessionID
-		}
-		return ""
-	}
-	p.metaMu.Unlock()
-
-	// Read team config outside the lock (file I/O).
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	configPath := filepath.Join(homeDir, ".claude", "teams", teamName, "config.json")
-	data, err := os.ReadFile(configPath)
-
-	// Cache the result atomically.
-	p.metaMu.Lock()
-	defer p.metaMu.Unlock()
-
-	// Re-check: another goroutine may have populated the cache while we did I/O.
-	if cached, ok := p.metaCache[cacheKey]; ok {
-		if cached != nil {
-			return cached.Description
-		}
-		return ""
-	}
-
-	if err != nil {
-		p.metaCache[cacheKey] = nil
-		return ""
-	}
-	var cfg teamConfig
-	if err := json.Unmarshal(data, &cfg); err != nil || cfg.LeadSessionID == "" || cfg.LeadSessionID == sessionID {
-		p.metaCache[cacheKey] = nil
-		return ""
-	}
-	p.metaCache[cacheKey] = &agentMeta{Description: cfg.LeadSessionID}
-	if len(p.metaCache) > maxMetaCacheSize {
-		p.metaCache = make(map[string]*agentMeta)
-	}
-	return cfg.LeadSessionID
-}

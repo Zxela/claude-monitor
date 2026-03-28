@@ -113,7 +113,7 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 git_branch=excluded.git_branch,
 		 task_description=excluded.task_description,
 		 parent_id=excluded.parent_id`,
-		s.ID, s.ProjectName, s.SessionName, s.TotalCost,
+		s.ID, s.SessionName, s.SessionName, s.TotalCost,
 		s.InputTokens, s.OutputTokens, s.CacheReadTokens, s.CacheCreationTokens,
 		cacheHitPct, s.MessageCount, s.ErrorCount,
 		startedAt, endedAt, duration,

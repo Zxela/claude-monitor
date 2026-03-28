@@ -6,7 +6,7 @@ import (
 	"github.com/zxela-claude/claude-monitor/internal/parser"
 )
 
-// msgWithTime constructs a minimal ParsedMessage for use in tests.
-func msgWithTime(t time.Time) parser.ParsedMessage {
-	return parser.ParsedMessage{Timestamp: t}
+// msgWithTime constructs a minimal Event for use in tests.
+func msgWithTime(t time.Time) parser.Event {
+	return parser.Event{Timestamp: t}
 }

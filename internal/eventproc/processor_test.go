@@ -13,10 +13,9 @@ import (
 // makeEvent constructs a watcher.Event with a crafted JSON line.
 func makeEvent(sessionID, filePath string, jsonLine string) watcher.Event {
 	return watcher.Event{
-		SessionID:  sessionID,
-		ProjectDir: "test-project",
-		FilePath:   filePath,
-		Line:       []byte(jsonLine),
+		SessionID: sessionID,
+		FilePath:  filePath,
+		Line:      []byte(jsonLine),
 	}
 }
 
@@ -90,9 +89,6 @@ func TestProcess_BasicMessageParsingAndSessionCreation(t *testing.T) {
 	}
 	if res.Session.ID != "sess-1" {
 		t.Errorf("Session.ID = %q, want %q", res.Session.ID, "sess-1")
-	}
-	if res.Session.ProjectDir != "test-project" {
-		t.Errorf("Session.ProjectDir = %q, want %q", res.Session.ProjectDir, "test-project")
 	}
 	if res.Session.Model != "claude-sonnet-4-6" {
 		t.Errorf("Session.Model = %q, want %q", res.Session.Model, "claude-sonnet-4-6")
@@ -270,9 +266,6 @@ func TestProcess_SubagentDetection(t *testing.T) {
 		subLine)
 	res := proc.Process(subEv)
 
-	if !res.Session.IsSubagent {
-		t.Error("expected IsSubagent=true")
-	}
 	if res.Session.ParentID != "parent-sess-id" {
 		t.Errorf("ParentID = %q, want %q", res.Session.ParentID, "parent-sess-id")
 	}
@@ -324,9 +317,6 @@ func TestProcess_SubagentViaParentUUID(t *testing.T) {
 		subLine)
 	res := proc.Process(subEv)
 
-	if !res.Session.IsSubagent {
-		t.Error("expected IsSubagent=true via parentUuid")
-	}
 	if res.Session.ParentID != "parent-2" {
 		t.Errorf("ParentID = %q, want %q", res.Session.ParentID, "parent-2")
 	}
@@ -526,27 +516,5 @@ func TestProcess_SessionName(t *testing.T) {
 	if res.Session.SessionName != "My Custom Title" {
 		t.Errorf("SessionName = %q, want %q", res.Session.SessionName, "My Custom Title")
 	}
-	if res.Session.ProjectName != "My Custom Title" {
-		t.Errorf("ProjectName = %q, want %q (should match SessionName)", res.Session.ProjectName, "My Custom Title")
-	}
 }
 
-func TestProcess_LabelPrefixesProjectName(t *testing.T) {
-	t.Parallel()
-	store := session.NewStore()
-	proc := New(store)
-
-	line := makeAssistantLine("msg_lbl", "Hi", "claude-sonnet-4-6", "end_turn", 10, 5)
-	ev := watcher.Event{
-		SessionID:  "sess-lbl",
-		ProjectDir: "my-project",
-		FilePath:   "/tmp/projects/hash/sess-lbl.jsonl",
-		Line:       []byte(line),
-		Label:      "docker-container",
-	}
-	res := proc.Process(ev)
-
-	if res.Session.ProjectName != "docker-container / my-project" {
-		t.Errorf("ProjectName = %q, want %q", res.Session.ProjectName, "docker-container / my-project")
-	}
-}

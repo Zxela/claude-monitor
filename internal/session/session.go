@@ -31,18 +31,16 @@ type MessageCosts struct {
 
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
-	ID           string    `json:"id"`
-	ProjectDir   string    `json:"projectDir"`
-	ProjectName  string    `json:"projectName"`
-	SessionName  string    `json:"sessionName,omitempty"`
-	FilePath     string    `json:"filePath"`
-	TotalCost    float64   `json:"totalCost"`
-	InputTokens  int64     `json:"inputTokens"`
-	OutputTokens int64     `json:"outputTokens"`
+	ID              string    `json:"id"`
+	RepoID          string    `json:"repoId,omitempty"`
+	SessionName     string    `json:"sessionName,omitempty"`
+	TotalCost       float64   `json:"totalCost"`
+	InputTokens     int64     `json:"inputTokens"`
+	OutputTokens    int64     `json:"outputTokens"`
 	CacheReadTokens     int64   `json:"cacheReadTokens"`
 	CacheCreationTokens int64   `json:"cacheCreationTokens"`
-	CacheHitPct         float64 `json:"cacheHitPct"`
 	MessageCount   int              `json:"messageCount"`
+	EventCount     int              `json:"eventCount"`
 	LastActive     time.Time        `json:"lastActive"`
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt      time.Time        `json:"startedAt"`
@@ -56,7 +54,6 @@ type Session struct {
 	Model          string           `json:"model,omitempty"`
 	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
 	ErrorCount     int              `json:"errorCount"`
-	IsSubagent     bool             `json:"isSubagent,omitempty"`
 	TaskDescription string          `json:"taskDescription"`
 }
 
@@ -146,7 +143,7 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	// Recalculate derived fields.
 	// Subagents in "waiting" use a shorter threshold — they emit end_turn then stop.
 	threshold := activeThreshold
-	if sess.IsSubagent && sess.Status == "waiting" {
+	if sess.ParentID != "" && sess.Status == "waiting" {
 		threshold = subagentWaitingThreshold
 	}
 	sess.IsActive = time.Since(sess.LastActive) < threshold
@@ -161,12 +158,6 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		if mins >= 1 {
 			sess.CostRate = sess.TotalCost / mins
 		}
-	}
-
-	// Cache hit % = cache reads / total input tokens (including cache creation).
-	totalInput := sess.InputTokens + sess.CacheReadTokens + sess.CacheCreationTokens
-	if totalInput > 0 {
-		sess.CacheHitPct = float64(sess.CacheReadTokens) / float64(totalInput) * 100
 	}
 
 	return sess
@@ -185,7 +176,7 @@ func (s *Store) All() []*Session {
 		cp.SeenMessageCosts = nil // don't share internal dedup map
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
-		if cp.IsSubagent && cp.Status == "waiting" {
+		if cp.ParentID != "" && cp.Status == "waiting" {
 			th = subagentWaitingThreshold
 		}
 		cp.IsActive = time.Since(cp.LastActive) < th

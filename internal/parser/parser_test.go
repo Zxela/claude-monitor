@@ -214,7 +214,7 @@ func TestParseLine_ToolResult(t *testing.T) {
 	}
 }
 
-func TestIsConversationMessage(t *testing.T) {
+func TestIsConversationTurn(t *testing.T) {
 	tests := []struct {
 		name     string
 		msgType  string
@@ -235,10 +235,10 @@ func TestIsConversationMessage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			msg := &ParsedMessage{Type: tc.msgType}
-			got := msg.IsConversationMessage()
+			msg := &Event{Type: tc.msgType}
+			got := msg.IsConversationTurn()
 			if got != tc.expected {
-				t.Errorf("IsConversationMessage() for type %q = %v, want %v", tc.msgType, got, tc.expected)
+				t.Errorf("IsConversationTurn() for type %q = %v, want %v", tc.msgType, got, tc.expected)
 			}
 		})
 	}

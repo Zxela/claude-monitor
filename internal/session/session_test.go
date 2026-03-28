@@ -156,31 +156,7 @@ func TestIsActive_FalseWhenOldLastActive(t *testing.T) {
 	}
 }
 
-func TestCacheHitPct_CalculatedCorrectly(t *testing.T) {
-	t.Parallel()
-	s := NewStore()
-	// cacheHitPct = cacheReadTokens / (inputTokens + cacheReadTokens + cacheCreationTokens) * 100
-	// = 400 / (600 + 400 + 0) * 100 = 40.0
-	sess := s.Upsert("cache-session", func(sess *Session) {
-		sess.InputTokens = 600
-		sess.CacheReadTokens = 400
-		sess.CacheCreationTokens = 0
-	})
-	if sess.CacheHitPct != 40.0 {
-		t.Errorf("CacheHitPct: got %f, want 40.0", sess.CacheHitPct)
-	}
 
-	// Cache creation tokens dilute the hit percentage.
-	// = 400 / (100 + 400 + 500) * 100 = 40.0
-	sess2 := s.Upsert("cache-session-2", func(sess *Session) {
-		sess.InputTokens = 100
-		sess.CacheReadTokens = 400
-		sess.CacheCreationTokens = 500
-	})
-	if sess2.CacheHitPct != 40.0 {
-		t.Errorf("CacheHitPct with creation: got %f, want 40.0", sess2.CacheHitPct)
-	}
-}
 
 func TestErrorCount_Tracking(t *testing.T) {
 	t.Parallel()
@@ -314,14 +290,3 @@ func TestMessageCosts_MultipleMessages(t *testing.T) {
 	}
 }
 
-func TestCacheHitPct_ZeroWhenNoTokens(t *testing.T) {
-	t.Parallel()
-	s := NewStore()
-	sess := s.Upsert("no-token-session", func(sess *Session) {
-		sess.InputTokens = 0
-		sess.CacheReadTokens = 0
-	})
-	if sess.CacheHitPct != 0.0 {
-		t.Errorf("CacheHitPct: got %f, want 0.0", sess.CacheHitPct)
-	}
-}

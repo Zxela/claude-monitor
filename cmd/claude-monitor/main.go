@@ -58,7 +58,7 @@ var staticFiles embed.FS
 type broadcastEvent struct {
 	Event   string          `json:"event"`
 	Session *session.Session `json:"session"`
-	Message *parser.ParsedMessage `json:"message,omitempty"`
+	Message *parser.Event `json:"message,omitempty"`
 }
 
 // repeatable is a flag.Value that accumulates multiple --watch values.
@@ -142,30 +142,13 @@ func handleMigrate(args []string) {
 }
 
 
-// sessionFinder can locate JSONL files for sessions not in the live store.
-var sessionFinder interface {
-	FindSessionFile(sessionID string) string
-}
-
-// requireSession looks up a session by path parameter "id", validates it has a
-// file path, and writes an HTTP error if not. Falls back to searching watched
-// paths for historical sessions not in the live store.
+// requireSession looks up a session by path parameter "id" and writes an HTTP
+// error if not found.
 func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
 	id := r.PathValue("id")
 	sess, ok := store.Get(id)
 	if !ok {
-		// Try to find the JSONL file on disk for historical sessions.
-		if sessionFinder != nil {
-			if filePath := sessionFinder.FindSessionFile(id); filePath != "" {
-				// Return transient session — do NOT persist to live store.
-				return &session.Session{ID: id, FilePath: filePath}, true
-			}
-		}
 		writeJSONError(w, "session not found", http.StatusNotFound)
-		return nil, false
-	}
-	if sess.FilePath == "" {
-		writeJSONError(w, "session file not available", http.StatusBadRequest)
 		return nil, false
 	}
 	return sess, true
@@ -309,17 +292,16 @@ Examples:
 	}
 
 	proc := eventproc.New(sessionStore)
-	sessionFinder = w // allow requireSession to find historical JSONL files
 
 	// processAndIndex runs the event processor and feeds the search index.
-	processAndIndex := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
+	processAndIndex := func(ev watcher.Event) (*parser.Event, *session.Session, bool) {
 		res := proc.Process(ev)
 		if res.Message != nil && res.Session != nil {
-			displayName := res.Session.ProjectName
-			if res.Session.SessionName != "" {
-				displayName = res.Session.SessionName
+			displayName := res.Session.SessionName
+			if displayName == "" {
+				displayName = ev.SessionID
 			}
-			searchIdx.Add(ev.SessionID, displayName, res.Session.ProjectName, *res.Message)
+			searchIdx.Add(ev.SessionID, displayName, displayName, *res.Message)
 		}
 		return res.Message, res.Session, res.IsNew
 	}
@@ -473,7 +455,7 @@ Examples:
 				if msg.Role == "assistant" && msg.StopReason == "" && msg.ToolName == "" {
 					// Skip intermediate streaming chunks (no stop_reason, no tool)
 					broadcastMsg = nil
-				} else if !msg.IsConversationMessage() && msg.ContentText == "" {
+				} else if !msg.IsConversationTurn() && msg.ContentText == "" {
 					// Skip empty non-conversation messages
 					broadcastMsg = nil
 				}
@@ -605,7 +587,6 @@ Examples:
 			CacheCreationTokens int64              `json:"cacheCreationTokens"`
 			SessionCount        int                `json:"sessionCount"`
 			ActiveSessions      int                `json:"activeSessions"`
-			CacheHitPct         float64            `json:"cacheHitPct"`
 			CostRate            float64            `json:"costRate"`
 			CostByModel         map[string]float64 `json:"costByModel"`
 		}
@@ -654,7 +635,7 @@ Examples:
 		var activeSessions []*session.Session
 		var activeIDs []string
 		for _, sess := range allSessions {
-			if sess.IsSubagent {
+			if sess.ParentID != "" {
 				continue
 			}
 			if !sess.IsActive {
@@ -706,12 +687,6 @@ Examples:
 
 		resp.ActiveSessions = len(activeSessions)
 
-		// Compute derived cache hit percentage.
-		totalInput := resp.InputTokens + resp.CacheReadTokens + resp.CacheCreationTokens
-		if totalInput > 0 {
-			resp.CacheHitPct = float64(resp.CacheReadTokens) / float64(totalInput) * 100
-		}
-
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			log.Printf("json encode stats: %v", err)
@@ -723,9 +698,9 @@ Examples:
 		sessions := sessionStore.All()
 		counts := make(map[string]int)
 		for _, s := range sessions {
-			name := s.ProjectName
+			name := s.SessionName
 			if name == "" {
-				name = s.ProjectDir
+				name = s.CWD
 			}
 			counts[name]++
 		}
@@ -777,9 +752,9 @@ Examples:
 		if !ok {
 			return
 		}
-		events, err := replay.ReadFile(sess.FilePath)
+		events, err := replay.ReadFile(sess.CWD)
 		if err != nil && len(events) == 0 {
-			log.Printf("read session file %s: %v", sess.FilePath, err)
+			log.Printf("read session file %s: %v", sess.CWD, err)
 			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
 			return
 		}
@@ -795,7 +770,7 @@ Examples:
 			}
 			// Include conversation messages, hooks, and agent/skill calls
 			isHook := ev.HookEvent != ""
-			if !ev.IsConversationMessage() && !isHook {
+			if !ev.IsConversationTurn() && !isHook {
 				continue
 			}
 			filtered = append(filtered, ev)
@@ -819,9 +794,9 @@ Examples:
 		if !ok {
 			return
 		}
-		events, err := replay.ReadFile(sess.FilePath)
+		events, err := replay.ReadFile(sess.CWD)
 		if err != nil {
-			log.Printf("read session file %s: %v", sess.FilePath, err)
+			log.Printf("read session file %s: %v", sess.CWD, err)
 			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
 			return
 		}
@@ -846,9 +821,9 @@ Examples:
 			return
 		}
 
-		events, scanErr := replay.ReadFile(sess.FilePath)
+		events, scanErr := replay.ReadFile(sess.CWD)
 		if scanErr != nil && len(events) == 0 {
-			log.Printf("read session file %s: %v", sess.FilePath, scanErr)
+			log.Printf("read session file %s: %v", sess.CWD, scanErr)
 			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
 			return
 		}
@@ -900,7 +875,7 @@ Examples:
 		}
 		// Extract container name from projectName (format: "container / project")
 		containerName := ""
-		if parts := strings.SplitN(sess.ProjectName, " / ", 2); len(parts) == 2 {
+		if parts := strings.SplitN(sess.SessionName, " / ", 2); len(parts) == 2 {
 			containerName = parts[0]
 		}
 		if containerName == "" || dc == nil {
