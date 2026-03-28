@@ -501,14 +501,14 @@ Examples:
 		if n, err := strconv.Atoi(offsetStr); err == nil && n >= 0 {
 			offset = n
 		}
-		rows, err := historyDB.ListHistory(limit, offset)
+		rows, err := historyDB.ListSessions(limit, offset)
 		if err != nil {
 			log.Printf("history list error: %v", err)
 			writeJSONError(w, "failed to retrieve history", http.StatusInternalServerError)
 			return
 		}
 		if rows == nil {
-			rows = []store.HistoryRow{}
+			rows = []store.SessionRow{}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(rows); err != nil {

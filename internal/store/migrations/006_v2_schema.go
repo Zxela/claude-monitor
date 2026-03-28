@@ -99,7 +99,7 @@ func init() {
 			if _, err := tx.Exec(`CREATE INDEX idx_events_timestamp ON events(timestamp)`); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`CREATE UNIQUE INDEX idx_events_dedup ON events(session_id, message_id) WHERE message_id IS NOT NULL`); err != nil {
+			if _, err := tx.Exec(`CREATE UNIQUE INDEX idx_events_dedup ON events(session_id, message_id)`); err != nil {
 				return err
 			}
 

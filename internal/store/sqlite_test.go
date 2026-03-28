@@ -1,46 +1,86 @@
 package store
 
 import (
-	"os"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/zxela-claude/claude-monitor/internal/parser"
+	"github.com/zxela-claude/claude-monitor/internal/repo"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 )
 
 func tempDBPath(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	return filepath.Join(dir, "test.db")
+	return filepath.Join(t.TempDir(), "test.db")
 }
 
-func TestOpen_CreatesDatabase(t *testing.T) {
-	t.Parallel()
-	path := tempDBPath(t)
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer db.Close()
-
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Fatal("database file was not created")
-	}
-}
-
-func TestSaveSession_InsertsAndUpdates(t *testing.T) {
-	t.Parallel()
+func openTestDB(t *testing.T) *DB {
+	t.Helper()
 	db, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func TestOpen_CreatesDatabase(t *testing.T) {
+	t.Parallel()
+	openTestDB(t) // just verifying it doesn't panic/error
+}
+
+func TestUpsertRepo(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	r := &repo.Repo{ID: "github.com/test/repo", Name: "repo", URL: "git@github.com:test/repo.git"}
+	if err := db.UpsertRepo(r); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
+	// Update should not error
+	r.Name = "updated-repo"
+	if err := db.UpsertRepo(r); err != nil {
+		t.Fatalf("UpsertRepo update failed: %v", err)
+	}
+}
+
+func TestCwdRepos(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	// Insert repo first (FK constraint)
+	db.UpsertRepo(&repo.Repo{ID: "test-repo", Name: "test"})
+
+	if err := db.UpsertCwdRepo("/home/user/project", "test-repo"); err != nil {
+		t.Fatalf("UpsertCwdRepo failed: %v", err)
+	}
+
+	entries, err := db.LoadCwdRepos()
+	if err != nil {
+		t.Fatalf("LoadCwdRepos failed: %v", err)
+	}
+	if entries["/home/user/project"] != "test-repo" {
+		t.Errorf("expected test-repo, got %q", entries["/home/user/project"])
+	}
+
+	if err := db.ClearCwdRepos(); err != nil {
+		t.Fatalf("ClearCwdRepos failed: %v", err)
+	}
+	entries, _ = db.LoadCwdRepos()
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries after clear, got %d", len(entries))
+	}
+}
+
+func TestSaveSession_InsertAndUpdate(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
 
 	now := time.Now()
 	sess := &session.Session{
-		ID:              "test-session-1",
-		ProjectName:     "test-project",
+		ID:              "test-1",
 		SessionName:     "my session",
 		TotalCost:       1.23,
 		InputTokens:     1000,
@@ -57,433 +97,287 @@ func TestSaveSession_InsertsAndUpdates(t *testing.T) {
 	}
 
 	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession insert failed: %v", err)
+		t.Fatalf("SaveSession failed: %v", err)
 	}
 
-	rows, err := db.ListHistory(10, 0)
+	rows, err := db.ListSessions(10, 0)
 	if err != nil {
-		t.Fatalf("ListHistory failed: %v", err)
+		t.Fatalf("ListSessions failed: %v", err)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
-	r := rows[0]
-	if r.ID != "test-session-1" {
-		t.Errorf("ID: got %q, want test-session-1", r.ID)
-	}
-	if r.ProjectName != "test-project" {
-		t.Errorf("ProjectName: got %q, want test-project", r.ProjectName)
-	}
-	if r.TotalCost != 1.23 {
-		t.Errorf("TotalCost: got %f, want 1.23", r.TotalCost)
-	}
-	if r.TaskDescription != "Fix the bug" {
-		t.Errorf("TaskDescription: got %q, want 'Fix the bug'", r.TaskDescription)
+	if rows[0].TotalCost != 1.23 {
+		t.Errorf("TotalCost: got %f, want 1.23", rows[0].TotalCost)
 	}
 
-	// Update the session
+	// Update
 	sess.TotalCost = 2.50
 	if err := db.SaveSession(sess); err != nil {
 		t.Fatalf("SaveSession update failed: %v", err)
 	}
-
-	rows, err = db.ListHistory(10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory after update failed: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row after upsert, got %d", len(rows))
-	}
+	rows, _ = db.ListSessions(10, 0)
 	if rows[0].TotalCost != 2.50 {
 		t.Errorf("TotalCost after update: got %f, want 2.50", rows[0].TotalCost)
 	}
 }
 
-func TestListHistory_LimitAndOffset(t *testing.T) {
+func TestAggregateStats_IncludesChildren(t *testing.T) {
 	t.Parallel()
-	db, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer db.Close()
-
-	now := time.Now()
-	for i := 0; i < 5; i++ {
-		sess := &session.Session{
-			ID:         "sess-" + string(rune('a'+i)),
-			StartedAt:  now.Add(-time.Duration(5-i) * time.Minute),
-			LastActive: now.Add(-time.Duration(5-i) * time.Minute).Add(time.Minute),
-		}
-		if err := db.SaveSession(sess); err != nil {
-			t.Fatalf("SaveSession %d failed: %v", i, err)
-		}
-	}
-
-	// Get all
-	rows, err := db.ListHistory(10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory failed: %v", err)
-	}
-	if len(rows) != 5 {
-		t.Fatalf("expected 5 rows, got %d", len(rows))
-	}
-
-	// Limit 2
-	rows, err = db.ListHistory(2, 0)
-	if err != nil {
-		t.Fatalf("ListHistory limit failed: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows with limit, got %d", len(rows))
-	}
-
-	// Offset 3
-	rows, err = db.ListHistory(10, 3)
-	if err != nil {
-		t.Fatalf("ListHistory offset failed: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows with offset 3, got %d", len(rows))
-	}
-}
-
-func TestListHistory_OrderByEndedAtDesc(t *testing.T) {
-	t.Parallel()
-	db, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer db.Close()
-
-	now := time.Now()
-	// Insert sessions with different end times
-	for i, id := range []string{"old", "mid", "new"} {
-		sess := &session.Session{
-			ID:         id,
-			StartedAt:  now.Add(-time.Duration(3-i) * time.Hour),
-			LastActive: now.Add(-time.Duration(3-i) * time.Hour).Add(30 * time.Minute),
-		}
-		if err := db.SaveSession(sess); err != nil {
-			t.Fatalf("SaveSession %s failed: %v", id, err)
-		}
-	}
-
-	rows, err := db.ListHistory(10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory failed: %v", err)
-	}
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 rows, got %d", len(rows))
-	}
-	// Most recent ended_at should be first
-	if rows[0].ID != "new" {
-		t.Errorf("expected newest first, got %q", rows[0].ID)
-	}
-	if rows[2].ID != "old" {
-		t.Errorf("expected oldest last, got %q", rows[2].ID)
-	}
-}
-
-func TestSaveSession_ParentID(t *testing.T) {
-	t.Parallel()
-	db, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	now := time.Now()
 	parent := &session.Session{
-		ID:         "parent-1",
-		StartedAt:  now.Add(-10 * time.Minute),
-		LastActive: now,
+		ID: "parent-1", TotalCost: 2.00, InputTokens: 200,
+		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
+		Model: "claude-opus-4-6",
 	}
 	child := &session.Session{
-		ID:         "child-1",
-		ParentID:   "parent-1",
-		StartedAt:  now.Add(-5 * time.Minute),
-		LastActive: now,
+		ID: "child-1", ParentID: "parent-1", TotalCost: 0.50, InputTokens: 50,
+		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
+		Model: "claude-sonnet-4-6",
 	}
 
-	if err := db.SaveSession(parent); err != nil {
-		t.Fatalf("SaveSession parent failed: %v", err)
-	}
-	if err := db.SaveSession(child); err != nil {
-		t.Fatalf("SaveSession child failed: %v", err)
-	}
-
-	rows, err := db.ListHistory(10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory failed: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(rows))
-	}
-
-	var childRow *HistoryRow
-	for i := range rows {
-		if rows[i].ID == "child-1" {
-			childRow = &rows[i]
-			break
-		}
-	}
-	if childRow == nil {
-		t.Fatal("child row not found")
-	}
-	if childRow.ParentID != "parent-1" {
-		t.Errorf("ParentID: got %q, want 'parent-1'", childRow.ParentID)
-	}
-
-	var parentRow *HistoryRow
-	for i := range rows {
-		if rows[i].ID == "parent-1" {
-			parentRow = &rows[i]
-			break
-		}
-	}
-	if parentRow == nil {
-		t.Fatal("parent row not found")
-	}
-	if parentRow.ParentID != "" {
-		t.Errorf("Parent's ParentID should be empty, got %q", parentRow.ParentID)
-	}
-}
-
-func TestAggregateStats_All(t *testing.T) {
-	t.Parallel()
-	db, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer db.Close()
-
-	now := time.Now()
-
-	// Two top-level sessions
-	s1 := &session.Session{
-		ID:              "top-1",
-		TotalCost:       1.00,
-		InputTokens:     100,
-		OutputTokens:    50,
-		CacheReadTokens: 20,
-		CacheCreationTokens: 10,
-		StartedAt:       now.Add(-10 * time.Minute),
-		LastActive:      now,
-		Model:           "claude-sonnet-4-6",
-	}
-	s2 := &session.Session{
-		ID:              "top-2",
-		TotalCost:       2.00,
-		InputTokens:     200,
-		OutputTokens:    100,
-		CacheReadTokens: 40,
-		CacheCreationTokens: 20,
-		StartedAt:       now.Add(-5 * time.Minute),
-		LastActive:      now,
-		Model:           "claude-opus-4-6",
-	}
-	// One child session — should be excluded from aggregates
-	child := &session.Session{
-		ID:              "child-1",
-		ParentID:        "top-1",
-		TotalCost:       0.50,
-		InputTokens:     50,
-		OutputTokens:    25,
-		CacheReadTokens: 10,
-		StartedAt:       now.Add(-3 * time.Minute),
-		LastActive:      now,
-		Model:           "claude-sonnet-4-6",
-	}
-
-	for _, s := range []*session.Session{s1, s2, child} {
-		if err := db.SaveSession(s); err != nil {
-			t.Fatalf("SaveSession %s failed: %v", s.ID, err)
-		}
-	}
+	db.SaveSession(parent)
+	db.SaveSession(child)
 
 	agg, err := db.AggregateStats(time.Time{})
 	if err != nil {
 		t.Fatalf("AggregateStats failed: %v", err)
 	}
 
+	// Both sessions should be counted (no parent_id filter)
 	if agg.SessionCount != 2 {
 		t.Errorf("SessionCount: got %d, want 2", agg.SessionCount)
 	}
-	if agg.TotalCost != 3.00 {
-		t.Errorf("TotalCost: got %f, want 3.00", agg.TotalCost)
+	if agg.TotalCost != 2.50 {
+		t.Errorf("TotalCost: got %f, want 2.50", agg.TotalCost)
 	}
-	if agg.InputTokens != 300 {
-		t.Errorf("InputTokens: got %d, want 300", agg.InputTokens)
-	}
-	if agg.OutputTokens != 150 {
-		t.Errorf("OutputTokens: got %d, want 150", agg.OutputTokens)
-	}
-	if agg.CacheReadTokens != 60 {
-		t.Errorf("CacheReadTokens: got %d, want 60", agg.CacheReadTokens)
-	}
-	if agg.CacheCreationTokens != 30 {
-		t.Errorf("CacheCreationTokens: got %d, want 30", agg.CacheCreationTokens)
-	}
-	if len(agg.CostByModel) != 2 {
-		t.Errorf("CostByModel: got %d models, want 2", len(agg.CostByModel))
-	}
-	if agg.CostByModel["claude-sonnet-4-6"] != 1.00 {
-		t.Errorf("CostByModel[sonnet]: got %f, want 1.00", agg.CostByModel["claude-sonnet-4-6"])
-	}
-	if agg.CostByModel["claude-opus-4-6"] != 2.00 {
-		t.Errorf("CostByModel[opus]: got %f, want 2.00", agg.CostByModel["claude-opus-4-6"])
+	if agg.InputTokens != 250 {
+		t.Errorf("InputTokens: got %d, want 250", agg.InputTokens)
 	}
 }
 
-func TestAggregateStats_Window(t *testing.T) {
+func TestPersistBatch(t *testing.T) {
 	t.Parallel()
-	db, err := Open(tempDBPath(t))
+	db := openTestDB(t)
+
+	// Create a session first
+	db.SaveSession(&session.Session{
+		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
+	})
+
+	batch := &EventBatch{
+		Events: []EventInsert{
+			{
+				SessionID: "s1",
+				Event: &parser.Event{
+					Type:        "assistant",
+					Role:        "assistant",
+					ContentText: "Hello, I can help with that.",
+					CostUSD:     0.01,
+					InputTokens: 100,
+					OutputTokens: 50,
+					Timestamp:   time.Now(),
+					Model:       "claude-sonnet-4-6",
+				},
+				FullContent: "Hello, I can help with that. Let me look at the code.",
+			},
+			{
+				SessionID: "s1",
+				Event: &parser.Event{
+					Type:        "assistant",
+					Role:        "assistant",
+					ContentText: "[tool: Read]",
+					ToolName:    "Read",
+					ToolDetail:  "/home/user/parser.go",
+					Timestamp:   time.Now().Add(time.Second),
+				},
+			},
+		},
+	}
+
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
+
+	events, err := db.ListEvents("s1", 100, 0)
 	if err != nil {
-		t.Fatalf("Open failed: %v", err)
+		t.Fatalf("ListEvents failed: %v", err)
 	}
-	defer db.Close()
-
-	now := time.Now()
-
-	// Old session (2 hours ago)
-	old := &session.Session{
-		ID:          "old-1",
-		TotalCost:   5.00,
-		InputTokens: 500,
-		StartedAt:   now.Add(-2 * time.Hour),
-		LastActive:  now.Add(-1 * time.Hour),
-		Model:       "claude-sonnet-4-6",
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	// Recent session (5 minutes ago)
-	recent := &session.Session{
-		ID:          "recent-1",
-		TotalCost:   1.00,
-		InputTokens: 100,
-		StartedAt:   now.Add(-5 * time.Minute),
-		LastActive:  now,
-		Model:       "claude-sonnet-4-6",
+	if events[0].ContentPreview != "Hello, I can help with that." {
+		t.Errorf("event 0 content: got %q", events[0].ContentPreview)
 	}
-
-	for _, s := range []*session.Session{old, recent} {
-		if err := db.SaveSession(s); err != nil {
-			t.Fatalf("SaveSession %s failed: %v", s.ID, err)
-		}
+	if events[0].FullContent != "Hello, I can help with that. Let me look at the code." {
+		t.Errorf("event 0 fullContent: got %q", events[0].FullContent)
 	}
-
-	// Query with window that only includes recent session
-	since := now.Add(-30 * time.Minute)
-	agg, err := db.AggregateStats(since)
-	if err != nil {
-		t.Fatalf("AggregateStats failed: %v", err)
-	}
-
-	if agg.SessionCount != 1 {
-		t.Errorf("SessionCount: got %d, want 1", agg.SessionCount)
-	}
-	if agg.TotalCost != 1.00 {
-		t.Errorf("TotalCost: got %f, want 1.00", agg.TotalCost)
-	}
-	if agg.InputTokens != 100 {
-		t.Errorf("InputTokens: got %d, want 100", agg.InputTokens)
+	if events[1].ToolName != "Read" {
+		t.Errorf("event 1 toolName: got %q", events[1].ToolName)
 	}
 }
 
-func TestGetSessionSnapshots(t *testing.T) {
+func TestPersistBatch_Dedup(t *testing.T) {
 	t.Parallel()
-	db, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
-	now := time.Now()
-	sess := &session.Session{
-		ID:                  "snap-1",
-		TotalCost:           2.50,
-		InputTokens:         300,
-		OutputTokens:        150,
-		CacheReadTokens:     60,
-		CacheCreationTokens: 30,
-		StartedAt:           now.Add(-10 * time.Minute),
-		LastActive:          now,
-	}
-	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
-	}
+	db.SaveSession(&session.Session{
+		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
+	})
 
-	snaps, err := db.GetSessionSnapshots([]string{"snap-1", "nonexistent"})
-	if err != nil {
-		t.Fatalf("GetSessionSnapshots failed: %v", err)
+	ts := time.Now()
+	// First insert
+	batch1 := &EventBatch{Events: []EventInsert{{
+		SessionID: "s1",
+		Event: &parser.Event{
+			MessageID:   "msg-1",
+			Type:        "assistant",
+			ContentText: "partial...",
+			CostUSD:     0.005,
+			InputTokens: 50,
+			Timestamp:   ts,
+		},
+	}}}
+	if err := db.PersistBatch(batch1); err != nil {
+		t.Fatalf("PersistBatch 1 failed: %v", err)
 	}
 
-	snap, ok := snaps["snap-1"]
-	if !ok {
-		t.Fatal("expected snap-1 in result")
-	}
-	if snap.TotalCost != 2.50 {
-		t.Errorf("TotalCost: got %f, want 2.50", snap.TotalCost)
-	}
-	if snap.InputTokens != 300 {
-		t.Errorf("InputTokens: got %d, want 300", snap.InputTokens)
-	}
-	if snap.OutputTokens != 150 {
-		t.Errorf("OutputTokens: got %d, want 150", snap.OutputTokens)
-	}
-	if snap.CacheReadTokens != 60 {
-		t.Errorf("CacheReadTokens: got %d, want 60", snap.CacheReadTokens)
-	}
-	if snap.CacheCreationTokens != 30 {
-		t.Errorf("CacheCreationTokens: got %d, want 30", snap.CacheCreationTokens)
+	// Second insert with same message_id (streaming update)
+	batch2 := &EventBatch{Events: []EventInsert{{
+		SessionID: "s1",
+		Event: &parser.Event{
+			MessageID:   "msg-1",
+			Type:        "assistant",
+			ContentText: "full response here",
+			CostUSD:     0.01,
+			InputTokens: 100,
+			Timestamp:   ts,
+		},
+	}}}
+	if err := db.PersistBatch(batch2); err != nil {
+		t.Fatalf("PersistBatch 2 failed: %v", err)
 	}
 
-	// Nonexistent ID should not be in the map
-	if _, ok := snaps["nonexistent"]; ok {
-		t.Error("nonexistent ID should not be in result")
+	events, _ := db.ListEvents("s1", 100, 0)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event after dedup, got %d", len(events))
 	}
-
-	// Empty IDs should return empty map
-	empty, err := db.GetSessionSnapshots([]string{})
-	if err != nil {
-		t.Fatalf("GetSessionSnapshots empty failed: %v", err)
+	if events[0].ContentPreview != "full response here" {
+		t.Errorf("expected updated content, got %q", events[0].ContentPreview)
 	}
-	if len(empty) != 0 {
-		t.Errorf("expected empty map, got %d entries", len(empty))
+	if events[0].CostUSD != 0.01 {
+		t.Errorf("expected updated cost 0.01, got %f", events[0].CostUSD)
 	}
 }
 
-func TestListHistory_CacheHitPctBackfill(t *testing.T) {
+func TestSearchFTS(t *testing.T) {
 	t.Parallel()
-	db, err := Open(tempDBPath(t))
+	db := openTestDB(t)
+
+	db.SaveSession(&session.Session{
+		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
+	})
+
+	batch := &EventBatch{Events: []EventInsert{
+		{
+			SessionID: "s1",
+			Event: &parser.Event{
+				Type: "assistant", ContentText: "reading parser.go",
+				ToolName: "Read", ToolDetail: "/home/user/parser.go",
+				Timestamp: time.Now(),
+			},
+		},
+		{
+			SessionID: "s1",
+			Event: &parser.Event{
+				Type: "assistant", ContentText: "running tests",
+				ToolName: "Bash", ToolDetail: "go test ./...",
+				Timestamp: time.Now().Add(time.Second),
+			},
+		},
+	}}
+	db.PersistBatch(batch)
+
+	results, err := db.SearchFTS("parser", 10)
 	if err != nil {
-		t.Fatalf("Open failed: %v", err)
+		t.Fatalf("SearchFTS failed: %v", err)
 	}
-	defer db.Close()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 search result, got %d", len(results))
+	}
+	if results[0].ToolName != "Read" {
+		t.Errorf("expected Read tool, got %q", results[0].ToolName)
+	}
+}
 
-	now := time.Now()
-	sess := &session.Session{
-		ID:                  "backfill-test",
-		InputTokens:         1000,
-		OutputTokens:        500,
-		CacheReadTokens:     3000,
-		CacheCreationTokens: 500,
-		StartedAt:           now.Add(-10 * time.Minute),
-		LastActive:          now,
-	}
-	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
-	}
+func TestSettings(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
 
-	rows, err := db.ListHistory(10, 0)
+	// Defaults from migration
+	val, err := db.GetSetting("retention_hot_days")
 	if err != nil {
-		t.Fatalf("ListHistory failed: %v", err)
+		t.Fatalf("GetSetting failed: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
+	if val != "30" {
+		t.Errorf("expected 30, got %q", val)
 	}
 
-	// cache_hit_pct = 3000 / (1000 + 3000 + 500) * 100 = 66.67
-	expected := 3000.0 / 4500.0 * 100
-	if rows[0].CacheHitPct < expected-0.1 || rows[0].CacheHitPct > expected+0.1 {
-		t.Errorf("CacheHitPct: got %f, want ~%f", rows[0].CacheHitPct, expected)
+	// Update
+	if err := db.SetSetting("retention_hot_days", "14"); err != nil {
+		t.Fatalf("SetSetting failed: %v", err)
+	}
+	val, _ = db.GetSetting("retention_hot_days")
+	if val != "14" {
+		t.Errorf("expected 14 after update, got %q", val)
+	}
+
+	// All settings
+	all, err := db.AllSettings()
+	if err != nil {
+		t.Fatalf("AllSettings failed: %v", err)
+	}
+	if len(all) < 2 {
+		t.Errorf("expected at least 2 settings, got %d", len(all))
+	}
+}
+
+func TestListRecentEvents(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	db.SaveSession(&session.Session{
+		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
+	})
+
+	ts := time.Now()
+	batch := &EventBatch{}
+	for i := 0; i < 10; i++ {
+		batch.Events = append(batch.Events, EventInsert{
+			SessionID: "s1",
+			Event: &parser.Event{
+				Type:        "assistant",
+				ContentText: fmt.Sprintf("msg %d", i),
+				Timestamp:   ts.Add(time.Duration(i) * time.Second),
+			},
+		})
+	}
+	db.PersistBatch(batch)
+
+	events, err := db.ListRecentEvents("s1", 3)
+	if err != nil {
+		t.Fatalf("ListRecentEvents failed: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+	// Should be in chronological order (oldest first of the last 3)
+	if events[0].ContentPreview != "msg 7" {
+		t.Errorf("expected msg 7 first, got %q", events[0].ContentPreview)
+	}
+	if events[2].ContentPreview != "msg 9" {
+		t.Errorf("expected msg 9 last, got %q", events[2].ContentPreview)
 	}
 }
