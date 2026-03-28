@@ -365,12 +365,20 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 	}
 	defer contentStmt.Close()
 
-	ftsStmt, err := tx.Prepare(`INSERT INTO events_fts(rowid, content_preview, tool_name, tool_detail)
+	// FTS5 uses INSERT OR REPLACE to handle both new inserts and updates.
+	ftsStmt, err := tx.Prepare(`INSERT OR REPLACE INTO events_fts(rowid, content_preview, tool_name, tool_detail)
 		VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare fts stmt: %w", err)
 	}
 	defer ftsStmt.Close()
+
+	// For upserts, LastInsertId is unreliable — look up the actual ID.
+	lookupStmt, err := tx.Prepare(`SELECT id FROM events WHERE session_id = ? AND message_id = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare lookup stmt: %w", err)
+	}
+	defer lookupStmt.Close()
 
 	for _, ei := range batch.Events {
 		ev := ei.Event
@@ -379,7 +387,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			messageID = &ev.MessageID
 		}
 
-		result, err := eventStmt.Exec(
+		_, err := eventStmt.Exec(
 			ei.SessionID, ev.UUID, messageID, ev.Type, ev.Role,
 			ev.ContentText, ev.ToolName, ev.ToolDetail,
 			ev.CostUSD, ev.InputTokens, ev.OutputTokens,
@@ -393,12 +401,20 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			return fmt.Errorf("insert event: %w", err)
 		}
 
-		eventID, err := result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("get event id: %w", err)
+		// Resolve the actual event ID — for upserts, LastInsertId is unreliable.
+		var eventID int64
+		if ev.MessageID != "" {
+			if err := lookupStmt.QueryRow(ei.SessionID, ev.MessageID).Scan(&eventID); err != nil {
+				return fmt.Errorf("lookup event id: %w", err)
+			}
+		} else {
+			// No message_id means a fresh insert — use last_insert_rowid().
+			if err := tx.QueryRow(`SELECT last_insert_rowid()`).Scan(&eventID); err != nil {
+				return fmt.Errorf("get last insert id: %w", err)
+			}
 		}
 
-		// Insert full content if present
+		// Insert/update full content if present
 		if ei.FullContent != "" {
 			if _, err := contentStmt.Exec(eventID, ei.FullContent); err != nil {
 				return fmt.Errorf("insert content: %w", err)

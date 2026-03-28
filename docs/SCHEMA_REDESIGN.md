@@ -1,6 +1,6 @@
 # Schema Redesign — Data Model v2
 
-Status: DESIGN (not yet implemented)
+Status: IMPLEMENTED (feature/data-model-v2 branch)
 
 ## Decisions
 
