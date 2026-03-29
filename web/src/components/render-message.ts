@@ -141,7 +141,7 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     `<span class="fe-time">${time}</span>` +
     `<span class="fe-type ${type}">[${type}]</span>` +
     `<span class="fe-content ${contentClass}">${escapeHtml(content)}${hasMore ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>' : ''}${isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : ''}</span>` +
-    (opts.showSessionId ? `<span class="fe-sid">${escapeHtml(opts.showSessionId.slice(0, 6))}</span>` : '');
+    (opts.showSessionId ? `<span class="fe-sid" title="${escapeHtml(opts.showSessionId)}">${escapeHtml(opts.showSessionId.slice(0, 12))}</span>` : '');
 
   if (hasMore) {
     let expanded = false;

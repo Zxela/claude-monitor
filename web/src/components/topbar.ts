@@ -193,7 +193,9 @@ function setVal(el: HTMLElement | null, text: string): void {
 function updateStats(): void {
   const stats = state.stats;
   if (!stats) return;
-  setVal(statActive, String(stats.activeSessions));
+  // Count only top-level active sessions (no subagents) to match sidebar
+  const activeTopLevel = Array.from(state.sessions.values()).filter(s => s.isActive && !s.parentId).length;
+  setVal(statActive, String(activeTopLevel));
   setVal(statCost, `$${stats.totalCost.toFixed(0)}`);
   setVal(statCache, stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—');
   setVal(statRate, stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/min` : '—');
