@@ -142,8 +142,6 @@
 /* Subagent indentation */
 .session-card.subagent {
   margin-left: 16px;
-  opacity: 0.85;
-  font-size: 0.95em;
 }
 
 .session-card.subagent::before { background: rgba(136, 0, 255, 0.4); }
@@ -351,8 +349,6 @@
 
 .session-card-compact.subagent {
   margin-left: 16px;
-  opacity: 0.85;
-  font-size: 0.95em;
 }
 .session-card-compact.subagent::before { background: rgba(136, 0, 255, 0.4); }
 

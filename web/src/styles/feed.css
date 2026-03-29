@@ -317,6 +317,21 @@
   opacity: 0.6;
 }
 
+/* Group hover highlighting — links tool_use + hooks + tool_result */
+.group-highlight { background: rgba(255, 204, 0, 0.06) !important; }
+
+/* Turn duration separator */
+.fe-content.turn-sep {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+/* Meta/skill expansion messages — dimmed */
+.feed-entry.is-meta { opacity: 0.35; }
+.feed-entry.is-meta:hover { opacity: 0.6; }
+
 /* Feed type filter bar */
 .feed-type-filters {
   display: flex;

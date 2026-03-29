@@ -14,6 +14,8 @@ import '../styles/feed.css';
 let container: HTMLElement | null = null;
 let feedContent: HTMLElement | null = null;
 let lastToolEntry: HTMLElement | null = null;
+let lastToolUseId: string | null = null;
+let currentHighlightGroup: string | null = null;
 let filterBar: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
 let scrollLockBtn: HTMLElement | null = null;
@@ -126,6 +128,19 @@ function renderFeedPanel(): void {
     autoScroll = atBottom;
     scrollLockBtn?.classList.toggle('visible', !atBottom);
   });
+  // Hover-based group highlighting: hovering any entry with a data-group-id
+  // highlights all entries in the same group (tool_use + hooks + tool_result).
+  feedContent.addEventListener('mouseover', (e) => {
+    const entry = (e.target as HTMLElement).closest<HTMLElement>('.feed-entry[data-group-id]');
+    if (!entry) { clearGroupHighlight(); return; }
+    const groupId = entry.dataset.groupId;
+    if (!groupId || groupId === currentHighlightGroup) return;
+    clearGroupHighlight();
+    currentHighlightGroup = groupId;
+    feedContent!.querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`)
+      .forEach(el => el.classList.add('group-highlight'));
+  });
+  feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
 
   // Scroll lock button — recreate on each render since container.innerHTML
@@ -333,6 +348,13 @@ async function loadMultiSessionEvents(): Promise<void> {
   }
 }
 
+function clearGroupHighlight(): void {
+  if (!currentHighlightGroup || !feedContent) return;
+  feedContent.querySelectorAll('.group-highlight')
+    .forEach(el => el.classList.remove('group-highlight'));
+  currentHighlightGroup = null;
+}
+
 function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}): void {
   if (!feedContent) return;
 
@@ -347,8 +369,9 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
     }
   }
 
-  // Suppress empty system messages (e.g. queue-operation/remove with no content).
-  if (!msg.role && !msg.contentPreview && !msg.fullContent) {
+  // Suppress empty system messages (e.g. queue-operation/remove with no content),
+  // but allow turn_duration summaries through — they're rendered as separators.
+  if (!msg.role && !msg.contentPreview && !msg.fullContent && msg.subtype !== 'turn_duration') {
     return;
   }
 
@@ -383,11 +406,19 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   if (type === 'tool_use') {
     entry.classList.add('tool-group-start');
     lastToolEntry = entry;
-  } else if ((type === 'hook' || type === 'tool_result') && lastToolEntry) {
-    // Hooks and results nest under the preceding tool_use
+    lastToolUseId = msg.toolUseId || null;
+    if (msg.toolUseId) entry.dataset.groupId = msg.toolUseId;
+  } else if (type === 'hook' && lastToolEntry) {
+    // Hooks nest under the preceding tool_use (small/supporting entries)
     entry.classList.add('tool-group-child');
+    if (lastToolUseId) entry.dataset.groupId = lastToolUseId;
+  } else if (type === 'tool_result' && lastToolEntry) {
+    // Tool results stay flat but link to their group via data attribute
+    if (msg.forToolUseId) entry.dataset.groupId = msg.forToolUseId;
+    else if (lastToolUseId) entry.dataset.groupId = lastToolUseId;
   } else {
     lastToolEntry = null;
+    lastToolUseId = null;
   }
 
   feedContent.appendChild(entry);

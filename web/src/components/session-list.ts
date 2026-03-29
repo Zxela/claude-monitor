@@ -151,7 +151,7 @@ function renderList(): void {
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
-  if (fcActive) fcActive.textContent = String(active.length);
+  if (fcActive) fcActive.textContent = String(active.filter(s => !s.parentId).length);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
   // Filter: top-level only, repo filter, and skip trivial sessions (no cost, no tokens, few messages)

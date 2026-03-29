@@ -60,7 +60,7 @@ function formatCommand(raw: string): string {
 export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): HTMLElement {
   const type = detectType(msg);
   const el = document.createElement('div');
-  el.className = `feed-entry type-${type}${msg.isError ? ' is-error' : ''}`;
+  el.className = `feed-entry type-${type}${msg.isError ? ' is-error' : ''}${msg.isMeta ? ' is-meta' : ''}`;
   el.dataset.type = type;
 
   const time = formatTime(msg.timestamp);
@@ -136,6 +136,16 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     }
   } else if (type === 'error') {
     content = truncate(rawText || detail || 'Error', 120);
+  } else if (type === 'system' && msg.subtype === 'turn_duration') {
+    const turnParts: string[] = [];
+    if (msg.durationMs != null) {
+      const secs = msg.durationMs / 1000;
+      turnParts.push(secs >= 60 ? `${(secs / 60).toFixed(1)}min` : `${secs.toFixed(1)}s`);
+    }
+    if (msg.turnMessageCount != null) turnParts.push(`${msg.turnMessageCount} messages`);
+    content = turnParts.length ? `Turn completed \u2014 ${turnParts.join(', ')}` : 'Turn completed';
+    contentClass = 'turn-sep';
+    fullContent = '';
   } else {
     content = truncate(rawText, 120);
     if (!content && type === 'assistant') content = '[thinking...]';
