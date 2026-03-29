@@ -105,6 +105,10 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
       const m = rawText.match(/^\[agent(?::\s*([^\]]*))?\]\s*(.*)/);
       if (m) { agentLabel = m[1]?.trim() || ''; agentBody = m[2]?.trim() || ''; }
     }
+    // Include agent type (e.g. "homerun:implementer") when available and not already in label
+    if (msg.agentType && agentLabel !== msg.agentType) {
+      agentLabel = msg.agentType + (agentLabel ? ` (${agentLabel})` : '');
+    }
     const display = agentLabel && agentBody ? `${agentLabel}: ${agentBody}` : agentLabel || agentBody;
     content = display ? `Agent: ${truncate(display, 80)}` : 'Agent';
     contentClass = 'tool';
@@ -126,6 +130,14 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   } else if (type === 'tool_result') {
     content = truncate(rawText || detail, 60);
     contentClass = 'result';
+    // Agent completion results carry agent-level stats
+    if (msg.agentDurationMs != null || msg.agentTokens != null) {
+      const parts: string[] = [];
+      if (msg.agentDurationMs != null) parts.push(`${(msg.agentDurationMs / 1000).toFixed(1)}s`);
+      if (msg.agentTokens != null) parts.push(`${msg.agentTokens} tok`);
+      if (msg.agentToolUseCount != null) parts.push(`${msg.agentToolUseCount} calls`);
+      if (parts.length) content += ` [${parts.join(' · ')}]`;
+    }
   } else if (type === 'error') {
     content = truncate(rawText || detail || 'Error', 120);
   } else {
@@ -137,10 +149,20 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   const hasMore = fullContent.length > content.length;
   const isAgentEntry = type === 'agent' && (msg.isAgent || msg.contentPreview?.startsWith('[agent'));
 
+  // Build metadata badges (duration, interrupted, truncated)
+  let badges = '';
+  if (msg.durationMs != null && msg.durationMs > 0) {
+    const dur = msg.durationMs >= 1000 ? `${(msg.durationMs / 1000).toFixed(1)}s` : `${msg.durationMs}ms`;
+    badges += `<span class="fe-duration">${dur}</span>`;
+  }
+  if (msg.interrupted) badges += '<span class="fe-badge fe-interrupted">interrupted</span>';
+  if (msg.truncated) badges += '<span class="fe-badge fe-truncated">truncated</span>';
+
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +
     `<span class="fe-type ${type}">[${type}]</span>` +
     `<span class="fe-content ${contentClass}">${escapeHtml(content)}${hasMore ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>' : ''}${isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : ''}</span>` +
+    badges +
     (opts.showSessionId ? `<span class="fe-sid" title="${escapeHtml(opts.showSessionId)}">${escapeHtml(opts.showSessionId.slice(0, 12))}</span>` : '');
 
   if (hasMore) {

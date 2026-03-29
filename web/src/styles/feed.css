@@ -287,6 +287,36 @@
   opacity: 0.5;
 }
 
+.fe-duration {
+  color: var(--text-dim);
+  font-size: 9px;
+  margin-left: 4px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.fe-badge {
+  font-size: 8px;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.fe-interrupted {
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  opacity: 0.8;
+}
+
+.fe-truncated {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  opacity: 0.6;
+}
+
 /* Feed type filter bar */
 .feed-type-filters {
   display: flex;

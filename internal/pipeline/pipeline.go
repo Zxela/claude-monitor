@@ -214,6 +214,12 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 	if msg.Model != "" {
 		s.Model = msg.Model
 	}
+	if msg.Version != "" && s.Version == "" {
+		s.Version = msg.Version
+	}
+	if msg.Entrypoint != "" && s.Entrypoint == "" {
+		s.Entrypoint = msg.Entrypoint
+	}
 
 	// Session naming
 	if msg.Type == "custom-title" && msg.ContentText != "" {

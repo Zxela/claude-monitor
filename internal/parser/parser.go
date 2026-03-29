@@ -29,6 +29,17 @@ type rawMessage struct {
 	AgentName   string          `json:"agentName"`
 	Data        rawProgressData `json:"data"`
 	Operation   string          `json:"operation"`
+	// Additional fields previously dropped.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	Subtype       string          `json:"subtype"`
+	IsMeta        bool            `json:"isMeta"`
+	Version       string          `json:"version"`
+	Entrypoint    string          `json:"entrypoint"`
+	DurationMs    *int64          `json:"durationMs"`     // system.turn_duration
+	MessageCount  *int            `json:"messageCount"`   // system.turn_duration
+	HookCount     *int            `json:"hookCount"`      // system.stop_hook_summary
+	HookInfos     json.RawMessage `json:"hookInfos"`      // system.stop_hook_summary
+	Level         string          `json:"level"`           // system.stop_hook_summary
 }
 
 type rawProgressData struct {
@@ -36,6 +47,19 @@ type rawProgressData struct {
 	HookEvent string `json:"hookEvent"`
 	HookName  string `json:"hookName"`
 	Command   string `json:"command"`
+}
+
+// rawToolResult extracts metadata from the toolUseResult field on user/tool_result lines.
+type rawToolResult struct {
+	DurationMs        *int64 `json:"durationMs"`
+	TotalDurationMs   *int64 `json:"totalDurationMs"`
+	TotalTokens       *int64 `json:"totalTokens"`
+	TotalToolUseCount *int   `json:"totalToolUseCount"`
+	AgentType         string `json:"agentType"`
+	Success           *bool  `json:"success"`
+	Interrupted       bool   `json:"interrupted"`
+	Truncated         bool   `json:"truncated"`
+	Stderr            string `json:"stderr"`
 }
 
 type rawInner struct {
@@ -98,6 +122,27 @@ type Event struct {
 	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
 	TeamName     string    `json:"teamName,omitempty"`     // team name for team agents
 	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
+	// Tool result metadata (from toolUseResult on user lines)
+	DurationMs      *int64  `json:"durationMs,omitempty"`
+	Success         *bool   `json:"success,omitempty"`
+	Stderr          string  `json:"stderr,omitempty"`
+	Interrupted     bool    `json:"interrupted,omitempty"`
+	Truncated       bool    `json:"truncated,omitempty"`
+	// Agent result metadata (from toolUseResult on agent completions)
+	AgentDurationMs   *int64 `json:"agentDurationMs,omitempty"`
+	AgentTokens       *int64 `json:"agentTokens,omitempty"`
+	AgentToolUseCount *int   `json:"agentToolUseCount,omitempty"`
+	AgentType         string `json:"agentType,omitempty"`
+	// System message metadata
+	Subtype          string `json:"subtype,omitempty"`
+	TurnMessageCount *int   `json:"turnMessageCount,omitempty"`
+	HookCount        *int   `json:"hookCount,omitempty"`
+	HookInfos        string `json:"hookInfos,omitempty"` // JSON string
+	Level            string `json:"level,omitempty"`
+	// Session-level metadata
+	IsMeta     bool   `json:"isMeta,omitempty"`
+	Version    string `json:"version,omitempty"`
+	Entrypoint string `json:"entrypoint,omitempty"`
 }
 
 // IsConversationTurn returns true if this message represents a real
@@ -189,6 +234,44 @@ func ParseLine(line []byte) (*Event, error) {
 	if raw.Type == "queue-operation" && raw.Operation == "enqueue" {
 		msg.Type = "user"
 		msg.Role = "user"
+	}
+
+	// Session-level metadata (carried on most JSONL lines).
+	msg.IsMeta = raw.IsMeta
+	msg.Version = raw.Version
+	msg.Entrypoint = raw.Entrypoint
+
+	// System message metadata (turn_duration, stop_hook_summary).
+	if raw.Type == "system" {
+		msg.Subtype = raw.Subtype
+		msg.DurationMs = raw.DurationMs
+		msg.TurnMessageCount = raw.MessageCount
+		msg.HookCount = raw.HookCount
+		if len(raw.HookInfos) > 0 {
+			msg.HookInfos = string(raw.HookInfos)
+		}
+		msg.Level = raw.Level
+	}
+
+	// Tool result metadata from toolUseResult (on user/tool_result lines).
+	if len(raw.ToolUseResult) > 0 {
+		var tr rawToolResult
+		if json.Unmarshal(raw.ToolUseResult, &tr) == nil {
+			msg.DurationMs = tr.DurationMs
+			if tr.Success != nil {
+				msg.Success = tr.Success
+				if !*tr.Success {
+					msg.IsError = true
+				}
+			}
+			msg.Interrupted = tr.Interrupted
+			msg.Truncated = tr.Truncated
+			msg.Stderr = tr.Stderr
+			msg.AgentDurationMs = tr.TotalDurationMs
+			msg.AgentTokens = tr.TotalTokens
+			msg.AgentToolUseCount = tr.TotalToolUseCount
+			msg.AgentType = tr.AgentType
+		}
 	}
 
 	// Extract hook data from progress messages.

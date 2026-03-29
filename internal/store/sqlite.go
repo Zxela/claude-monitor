@@ -17,6 +17,30 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// eventSelectCols is the column list used by all event SELECT queries.
+// Must match the scan order in scanEventRows().
+const eventSelectCols = `e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
+	COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
+	COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
+	e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
+	COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
+	COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
+	COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
+	e.timestamp,
+	e.duration_ms, e.success, COALESCE(e.stderr,''), e.interrupted, e.truncated,
+	e.agent_duration_ms, e.agent_tokens, e.agent_tool_use_count, COALESCE(e.agent_type,''),
+	COALESCE(e.subtype,''), e.turn_message_count, e.hook_count, COALESCE(e.hook_infos,''), COALESCE(e.level,''),
+	e.is_meta, COALESCE(e.version,''), COALESCE(e.entrypoint,'')`
+
+// sessionSelectCols is the column list used by all session SELECT queries.
+// Must match the scan order in scanSessionRows().
+const sessionSelectCols = `id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
+	COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
+	COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
+	total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+	message_count, event_count, error_count,
+	COALESCE(version,''), COALESCE(entrypoint,'')`
+
 // SessionRow represents a session as stored in the database.
 type SessionRow struct {
 	ID                  string  `json:"id"`
@@ -37,6 +61,8 @@ type SessionRow struct {
 	MessageCount        int     `json:"messageCount"`
 	EventCount          int     `json:"eventCount"`
 	ErrorCount          int     `json:"errorCount"`
+	Version             string  `json:"version,omitempty"`
+	Entrypoint          string  `json:"entrypoint,omitempty"`
 }
 
 // ToSession converts a SessionRow to a session.Session with default runtime fields.
@@ -58,6 +84,8 @@ func (r *SessionRow) ToSession() *session.Session {
 		GitBranch:           r.Branch,
 		Model:               r.Model,
 		TaskDescription:     r.TaskDescription,
+		Version:             r.Version,
+		Entrypoint:          r.Entrypoint,
 		IsActive:            false,
 		Status:              "idle",
 		CostRate:            0,
@@ -110,6 +138,24 @@ type EventRow struct {
 	ForToolUseID        string  `json:"forToolUseId,omitempty"`
 	IsAgent             bool    `json:"isAgent,omitempty"`
 	Timestamp           string  `json:"timestamp"`
+	// New fields from JSONL capture.
+	DurationMs        *int64  `json:"durationMs,omitempty"`
+	Success           *bool   `json:"success,omitempty"`
+	Stderr            string  `json:"stderr,omitempty"`
+	Interrupted       bool    `json:"interrupted,omitempty"`
+	Truncated         bool    `json:"truncated,omitempty"`
+	AgentDurationMs   *int64  `json:"agentDurationMs,omitempty"`
+	AgentTokens       *int64  `json:"agentTokens,omitempty"`
+	AgentToolUseCount *int    `json:"agentToolUseCount,omitempty"`
+	AgentType         string  `json:"agentType,omitempty"`
+	Subtype           string  `json:"subtype,omitempty"`
+	TurnMessageCount  *int    `json:"turnMessageCount,omitempty"`
+	HookCount         *int    `json:"hookCount,omitempty"`
+	HookInfos         string  `json:"hookInfos,omitempty"`
+	Level             string  `json:"level,omitempty"`
+	IsMeta            bool    `json:"isMeta,omitempty"`
+	Version           string  `json:"version,omitempty"`
+	Entrypoint        string  `json:"entrypoint,omitempty"`
 }
 
 // AggregateResult holds aggregate statistics across sessions.
@@ -225,8 +271,9 @@ func (d *DB) SaveSession(s *session.Session) error {
 	_, err := d.db.Exec(`INSERT INTO sessions
 		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
 		 started_at, ended_at, total_cost, input_tokens, output_tokens,
-		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
+		 version, entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 repo_id=excluded.repo_id,
 		 parent_id=excluded.parent_id,
@@ -244,12 +291,15 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 cache_creation_tokens=excluded.cache_creation_tokens,
 		 message_count=excluded.message_count,
 		 event_count=excluded.event_count,
-		 error_count=excluded.error_count`,
+		 error_count=excluded.error_count,
+		 version=excluded.version,
+		 entrypoint=excluded.entrypoint`,
 		s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
 		s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
 		s.TotalCost, s.InputTokens, s.OutputTokens,
 		s.CacheReadTokens, s.CacheCreationTokens,
 		s.MessageCount, s.EventCount, s.ErrorCount,
+		s.Version, s.Entrypoint,
 	)
 	return err
 }
@@ -262,12 +312,7 @@ func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := d.db.Query(`SELECT
-		id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
-		COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
-		COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
-		total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		message_count, event_count, error_count
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions ORDER BY ended_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -278,12 +323,7 @@ func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 
 // GetSession returns a single session by ID.
 func (d *DB) GetSession(id string) (*SessionRow, error) {
-	rows, err := d.db.Query(`SELECT
-		id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
-		COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
-		COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
-		total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		message_count, event_count, error_count
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
@@ -304,12 +344,7 @@ func (d *DB) ListSessionsByRepo(repoID string, limit, offset int) ([]SessionRow,
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := d.db.Query(`SELECT
-		id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
-		COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
-		COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
-		total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		message_count, event_count, error_count
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions WHERE repo_id = ? ORDER BY ended_at DESC LIMIT ? OFFSET ?`, repoID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -393,6 +428,7 @@ func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 			&r.TotalCost, &r.InputTokens, &r.OutputTokens,
 			&r.CacheReadTokens, &r.CacheCreationTokens,
 			&r.MessageCount, &r.EventCount, &r.ErrorCount,
+			&r.Version, &r.Entrypoint,
 		); err != nil {
 			return result, err
 		}
@@ -495,8 +531,13 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		(session_id, uuid, message_id, type, role, content_preview, tool_name, tool_detail,
 		 cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 		 model, is_error, stop_reason, hook_event, hook_name,
-		 tool_use_id, for_tool_use_id, is_agent, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 tool_use_id, for_tool_use_id, is_agent, timestamp,
+		 duration_ms, success, stderr, interrupted, truncated,
+		 agent_duration_ms, agent_tokens, agent_tool_use_count, agent_type,
+		 subtype, turn_message_count, hook_count, hook_infos, level,
+		 is_meta, version, entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, COALESCE(message_id, uuid)) DO UPDATE SET
 		 content_preview=excluded.content_preview,
 		 cost_usd=excluded.cost_usd,
@@ -506,7 +547,11 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 cache_creation_tokens=excluded.cache_creation_tokens,
 		 is_error=excluded.is_error,
 		 stop_reason=excluded.stop_reason,
-		 timestamp=excluded.timestamp`)
+		 timestamp=excluded.timestamp,
+		 duration_ms=excluded.duration_ms,
+		 success=excluded.success,
+		 interrupted=excluded.interrupted,
+		 truncated=excluded.truncated`)
 	if err != nil {
 		return fmt.Errorf("prepare event stmt: %w", err)
 	}
@@ -550,6 +595,10 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			ev.HookEvent, ev.HookName,
 			ev.ToolUseID, ev.ForToolUseID, ev.IsAgent,
 			ev.Timestamp.Format(time.RFC3339Nano),
+			ev.DurationMs, ev.Success, ev.Stderr, ev.Interrupted, ev.Truncated,
+			ev.AgentDurationMs, ev.AgentTokens, ev.AgentToolUseCount, ev.AgentType,
+			ev.Subtype, ev.TurnMessageCount, ev.HookCount, ev.HookInfos, ev.Level,
+			ev.IsMeta, ev.Version, ev.Entrypoint,
 		)
 		if err != nil {
 			return fmt.Errorf("insert event: %w", err)
@@ -595,15 +644,7 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := d.db.Query(`SELECT
-		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
-		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
-		COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
-		e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
-		COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
-		COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
-		COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
-		e.timestamp,
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,'')
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
@@ -619,15 +660,7 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 // ListPinnedEvents returns all error and agent events for a session, ordered chronologically.
 // These are "pinned" because they should always be visible regardless of the recent-events window.
 func (d *DB) ListPinnedEvents(sessionID string) ([]EventRow, error) {
-	rows, err := d.db.Query(`SELECT
-		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
-		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
-		COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
-		e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
-		COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
-		COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
-		COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
-		e.timestamp,
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,'')
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ? AND (e.is_error = 1 OR e.is_agent = 1 OR e.content_preview LIKE '[agent%')
@@ -644,15 +677,7 @@ func (d *DB) ListRecentEvents(sessionID string, n int) ([]EventRow, error) {
 	if n <= 0 {
 		n = 50
 	}
-	rows, err := d.db.Query(`SELECT
-		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
-		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
-		COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
-		e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
-		COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
-		COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
-		COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
-		e.timestamp,
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,'')
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
@@ -678,6 +703,9 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 	for rows.Next() {
 		var r EventRow
 		var fullContent string
+		var durationMs, agentDurationMs, agentTokens sql.NullInt64
+		var agentToolUseCount, turnMessageCount, hookCount sql.NullInt64
+		var success sql.NullBool
 		if err := rows.Scan(
 			&r.ID, &r.SessionID, &r.UUID, &r.MessageID,
 			&r.Type, &r.Role, &r.ContentPreview,
@@ -688,12 +716,37 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 			&r.HookEvent, &r.HookName,
 			&r.ToolUseID, &r.ForToolUseID, &r.IsAgent,
 			&r.Timestamp,
+			&durationMs, &success, &r.Stderr, &r.Interrupted, &r.Truncated,
+			&agentDurationMs, &agentTokens, &agentToolUseCount, &r.AgentType,
+			&r.Subtype, &turnMessageCount, &hookCount, &r.HookInfos, &r.Level,
+			&r.IsMeta, &r.Version, &r.Entrypoint,
 			&fullContent,
 		); err != nil {
 			return result, err
 		}
 		if fullContent != "" {
 			r.FullContent = fullContent
+		}
+		if durationMs.Valid {
+			v := durationMs.Int64; r.DurationMs = &v
+		}
+		if success.Valid {
+			v := success.Bool; r.Success = &v
+		}
+		if agentDurationMs.Valid {
+			v := agentDurationMs.Int64; r.AgentDurationMs = &v
+		}
+		if agentTokens.Valid {
+			v := agentTokens.Int64; r.AgentTokens = &v
+		}
+		if agentToolUseCount.Valid {
+			v := int(agentToolUseCount.Int64); r.AgentToolUseCount = &v
+		}
+		if turnMessageCount.Valid {
+			v := int(turnMessageCount.Int64); r.TurnMessageCount = &v
+		}
+		if hookCount.Valid {
+			v := int(hookCount.Int64); r.HookCount = &v
 		}
 		result = append(result, r)
 	}
@@ -707,15 +760,7 @@ func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := d.db.Query(`SELECT
-		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
-		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
-		COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
-		e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
-		COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
-		COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
-		COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
-		e.timestamp,
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		''
 		FROM events_fts fts
 		JOIN events e ON e.id = fts.rowid
@@ -734,15 +779,7 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := d.db.Query(`SELECT
-		e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
-		COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
-		COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
-		e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
-		COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
-		COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
-		COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
-		e.timestamp,
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,'')
 		FROM event_content ec
 		JOIN events e ON e.id = ec.event_id

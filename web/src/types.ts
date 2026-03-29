@@ -21,6 +21,8 @@ export interface Session {
   costRate: number;
   errorCount: number;
   taskDescription: string;
+  version?: string;
+  entrypoint?: string;
 }
 
 export interface GroupedSessions {
@@ -57,6 +59,27 @@ export interface Event {
   forToolUseId?: string;
   isAgent?: boolean;
   timestamp: string;
+  // Tool result metadata
+  durationMs?: number;
+  success?: boolean;
+  stderr?: string;
+  interrupted?: boolean;
+  truncated?: boolean;
+  // Agent result metadata
+  agentDurationMs?: number;
+  agentTokens?: number;
+  agentToolUseCount?: number;
+  agentType?: string;
+  // System message metadata
+  subtype?: string;
+  turnMessageCount?: number;
+  hookCount?: number;
+  hookInfos?: string;
+  level?: string;
+  // Session-level metadata
+  isMeta?: boolean;
+  version?: string;
+  entrypoint?: string;
 }
 
 export interface Stats {

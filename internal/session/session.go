@@ -55,6 +55,8 @@ type Session struct {
 	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
 	ErrorCount     int              `json:"errorCount"`
 	TaskDescription string          `json:"taskDescription"`
+	Version        string           `json:"version,omitempty"`
+	Entrypoint     string           `json:"entrypoint,omitempty"`
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
