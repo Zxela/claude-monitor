@@ -6,11 +6,12 @@ import { escapeHtml, sessionDisplayName } from '../utils';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
+let panel: HTMLElement | null = null;
 let feedEl: HTMLElement | null = null;
 let playBtn: HTMLElement | null = null;
 let scrubber: HTMLInputElement | null = null;
 let progressEl: HTMLElement | null = null;
-let es: EventSource | null = null;
+let playTimer: ReturnType<typeof setInterval> | null = null;
 let totalEvents = 0;
 let currentIndex = 0;
 let manifestEvents: ParsedMessage[] = [];
@@ -26,7 +27,8 @@ export function open(sessionId: string): void {
 }
 
 function close(): void {
-  stopStream();
+  stopPlayback();
+  if (panel) { panel.remove(); panel = null; }
   update({ replaySessionId: null, replayPlaying: false });
 }
 
@@ -36,8 +38,8 @@ function renderReplayPanel(sessionId: string): void {
   const session = state.sessions.get(sessionId);
   const name = session ? sessionDisplayName(session) : sessionId;
 
-  container.innerHTML = '';
-  const panel = document.createElement('div');
+  if (panel) panel.remove();
+  panel = document.createElement('div');
   panel.className = 'replay-panel';
   panel.innerHTML = `
     <div class="replay-header">
@@ -89,18 +91,18 @@ async function loadManifest(sessionId: string): Promise<void> {
 
 export function togglePlay(): void {
   if (state.replayPlaying) {
-    stopStream();
+    stopPlayback();
     update({ replayPlaying: false });
     if (playBtn) playBtn.textContent = '▶ PLAY';
   } else {
-    startStream();
+    startPlayback();
     update({ replayPlaying: true });
     if (playBtn) playBtn.textContent = '⏸ PAUSE';
   }
 }
 
 export function restart(): void {
-  stopStream();
+  stopPlayback();
   currentIndex = 0;
   if (feedEl) feedEl.innerHTML = '<div class="replay-empty">PRESS PLAY TO BEGIN</div>';
   if (scrubber) scrubber.value = '0';
@@ -111,60 +113,47 @@ export function restart(): void {
 
 function onScrub(): void {
   if (!scrubber) return;
-  stopStream();
+  stopPlayback();
   currentIndex = parseInt(scrubber.value, 10);
   update({ replayPlaying: false });
   if (playBtn) playBtn.textContent = '▶ PLAY';
   updateProgress();
 }
 
-function startStream(): void {
-  if (!state.replaySessionId) return;
-  const speed = (container?.querySelector('.replay-speed') as HTMLSelectElement)?.value ?? '1';
-  const url = `/api/sessions/${state.replaySessionId}/replay/stream?from=${currentIndex}&speed=${speed}`;
+function startPlayback(): void {
+  if (!state.replaySessionId || manifestEvents.length === 0) return;
+  const speed = parseFloat((container?.querySelector('.replay-speed') as HTMLSelectElement)?.value ?? '1');
 
   // Clear placeholder
   if (feedEl && currentIndex === 0) {
     feedEl.innerHTML = '';
   }
 
-  es = new EventSource(url);
+  // Calculate delay between events based on actual timestamps and speed
+  const baseDelay = Math.max(50, 200 / speed);
 
-  es.addEventListener('message', (e) => {
-    let data: { message?: unknown; index?: number };
-    try {
-      data = JSON.parse(e.data);
-    } catch {
-      console.warn('replay: failed to parse SSE message', e.data);
+  playTimer = setInterval(() => {
+    if (currentIndex >= totalEvents) {
+      stopPlayback();
+      update({ replayPlaying: false });
+      if (playBtn) playBtn.textContent = '▶ PLAY';
       return;
     }
-    if (data.message) {
-      const entry = renderFeedEntry(data.message as ParsedMessage);
-      feedEl?.appendChild(entry);
-      feedEl!.scrollTop = feedEl!.scrollHeight;
+    const evt = manifestEvents[currentIndex];
+    if (evt && feedEl) {
+      feedEl.appendChild(renderFeedEntry(evt));
+      feedEl.scrollTop = feedEl.scrollHeight;
     }
-    currentIndex = (data.index ?? currentIndex) + 1;
+    currentIndex++;
     if (scrubber) scrubber.value = String(currentIndex);
     updateProgress();
-  });
-
-  es.addEventListener('done', () => {
-    stopStream();
-    update({ replayPlaying: false });
-    if (playBtn) playBtn.textContent = '▶ PLAY';
-  });
-
-  es.onerror = () => {
-    stopStream();
-    update({ replayPlaying: false });
-    if (playBtn) playBtn.textContent = '▶ PLAY';
-  };
+  }, baseDelay);
 }
 
-function stopStream(): void {
-  if (es) {
-    es.close();
-    es = null;
+function stopPlayback(): void {
+  if (playTimer) {
+    clearInterval(playTimer);
+    playTimer = null;
   }
 }
 
@@ -176,7 +165,7 @@ function updateProgress(): void {
 
 export function stepForward(): void {
   if (!state.replaySessionId) return;
-  stopStream();
+  stopPlayback();
   update({ replayPlaying: false });
   if (playBtn) playBtn.textContent = '▶ PLAY';
   if (currentIndex < totalEvents) {
@@ -195,7 +184,7 @@ export function stepForward(): void {
 
 export function stepBackward(): void {
   if (!state.replaySessionId) return;
-  stopStream();
+  stopPlayback();
   update({ replayPlaying: false });
   if (playBtn) playBtn.textContent = '▶ PLAY';
   if (currentIndex > 0 && feedEl) {

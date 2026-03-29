@@ -310,31 +310,51 @@
 
 /* ======= Compact card (timeline groups) ======= */
 .session-card-compact {
-  padding: 4px 0 2px 0;
+  padding: 6px 10px 5px 10px;
+  margin-bottom: 3px;
   display: flex;
   flex-direction: column;
   cursor: pointer;
   font-size: 12px;
-  transition: background 0.15s;
-  border-left: 2px solid transparent;
+  transition: border-color 0.2s, background 0.2s;
+  background: #13131f;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Left accent bar matching expanded cards */
+.session-card-compact::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--border);
+  transition: background 0.2s;
 }
 
 .compact-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px 0 8px;
 }
 
-.session-card-compact:hover { background: var(--bg-hover); }
-.session-card-compact.selected { background: var(--bg-hover); border-left-color: var(--cyan); }
+.session-card-compact:hover { border-color: #444; background: #16162a; }
+.session-card-compact.selected {
+  border-color: var(--cyan);
+  background: rgba(68, 136, 255, 0.06);
+  box-shadow: 0 0 12px rgba(68, 136, 255, 0.1);
+}
+.session-card-compact.selected::before { background: var(--cyan); }
+.session-card-compact.active-card::before { background: var(--green); }
 
 .session-card-compact.subagent {
   margin-left: 16px;
-  border-left: 2px solid rgba(136, 0, 255, 0.3);
   opacity: 0.85;
   font-size: 0.95em;
 }
+.session-card-compact.subagent::before { background: rgba(136, 0, 255, 0.4); }
 
 .session-card-compact .session-name {
   flex: 1;
@@ -345,6 +365,7 @@
 }
 
 .session-card-compact .cost { color: var(--yellow); font-size: 11px; font-weight: 600; }
+.session-card-compact .cost-rate { color: var(--text-dim); font-size: 9px; opacity: 0.6; }
 .session-card-compact .duration { color: #44445a; font-size: 10px; }
 .session-card-compact .model {
   font-size: 9px;
@@ -357,7 +378,7 @@
 .session-card-compact .subagent-chevron { font-size: 9px; }
 
 .compact-task-desc {
-  padding: 0 10px 1px 18px;
+  padding: 0 0 1px 13px;
   font-size: 10px;
   color: var(--text-dim, #888);
   white-space: nowrap;
@@ -368,7 +389,7 @@
 .compact-meta {
   display: flex;
   gap: 8px;
-  padding: 1px 10px 3px 18px;
+  padding: 1px 0 0 13px;
   font-size: 10px;
   color: var(--text-dim, #666);
   align-items: center;

@@ -154,12 +154,12 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
     const idleChildren = children.filter(c => c.status === 'idle');
 
     for (const child of activeChildren) {
-      renderExpanded(child, container);
+      renderCompact(child, container);
     }
 
     if (showIdle) {
       for (const child of idleChildren) {
-        renderExpanded(child, container);
+        renderCompact(child, container);
       }
     }
 
@@ -195,6 +195,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
   if (!!session.parentId) el.classList.add('subagent');
+  if (session.isActive) el.classList.add('active-card');
 
   const dotClass = getDotClass(session);
 
@@ -225,6 +226,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription), 60))}</div>` : ''}
     <div class="compact-meta">
       <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
+      ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
       <span class="duration">${timeAgo(session.lastActive)}</span>
       <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
       ${session.errorCount > 0 ? `<span class="compact-stat-err">${session.errorCount} err</span>` : ''}

@@ -720,7 +720,7 @@ func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 		FROM events_fts fts
 		JOIN events e ON e.id = fts.rowid
 		WHERE events_fts MATCH ?
-		ORDER BY fts.rank
+		ORDER BY fts.rank * (1.0 + 10.0 / (1.0 + (julianday('now') - julianday(e.timestamp)) * 24.0))
 		LIMIT ?`, query, limit)
 	if err != nil {
 		return nil, err

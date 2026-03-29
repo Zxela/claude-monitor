@@ -200,7 +200,15 @@ func ParseLine(line []byte) (*Event, error) {
 		if i := len(raw.Data.HookEvent); i < len(raw.Data.HookName) && raw.Data.HookName[i] == ':' {
 			hookTool = raw.Data.HookName[i+1:]
 		}
-		msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+		// Include the hook command when available (shell command or "callback")
+		cmd := raw.Data.Command
+		if cmd != "" && cmd != "callback" {
+			msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+			msg.ToolDetail = cmd
+			msg.FullContent = cmd
+		} else {
+			msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+		}
 	}
 
 	// Skip content extraction for hook messages (contentText already set above).
@@ -305,10 +313,10 @@ func extractContent(raw json.RawMessage) contentInfo {
 			if info.text == "" {
 				info.text = fmt.Sprintf("[tool: %s]", b.Name)
 			}
-			// Store full input JSON as expandable content (only if text block didn't set it).
+			// Store full input JSON as expandable content (always, so users can expand tool calls).
 			if info.fullText == "" && len(b.Input) > 0 {
 				prettyInput, err := json.MarshalIndent(json.RawMessage(b.Input), "", "  ")
-				if err == nil && len(prettyInput) > maxContentPreview {
+				if err == nil {
 					info.fullText = string(prettyInput)
 				}
 			}

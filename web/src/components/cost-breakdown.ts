@@ -1,12 +1,19 @@
 import { state } from '../state';
 import { escapeHtml, sessionDisplayName } from '../utils';
 import { COLORS } from '../colors';
+import { dismiss as dismissBudget } from './budget-popover';
 import '../styles/views.css';
 
 let popover: HTMLElement | null = null;
 
+/** Close the cost breakdown if open. Called by other dialogs to avoid overlap. */
+export function dismiss(): void {
+  if (popover) { popover.remove(); popover = null; }
+}
+
 export function toggle(anchor: HTMLElement): void {
   if (popover) { popover.remove(); popover = null; return; }
+  dismissBudget();
 
   const stats = state.stats;
   if (!stats) return;

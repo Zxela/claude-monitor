@@ -27,6 +27,8 @@ const toolUseMap = new Map<string, string>(); // toolUseId -> displayType
 
 const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'command', 'hook', 'error'] as const;
 
+let multiSessionLoaded = false;
+
 export function render(mount: HTMLElement): void {
   container = mount;
 
@@ -41,6 +43,12 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   const sessionChanged = changed.has('selectedSessionId');
   const viewChanged = changed.has('view');
 
+  // When sessions first load, populate multi-session feed
+  if (changed.has('grouped') && !multiSessionLoaded && !state.selectedSessionId) {
+    multiSessionLoaded = true;
+    loadMultiSessionEvents();
+  }
+
   if (sessionChanged || viewChanged) {
     if (state.view !== 'list') return; // other views take over the mount
 
@@ -51,6 +59,8 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       // Back to multi-session mode
       renderFeedPanel();
       currentLoadSessionId = null;
+      multiSessionLoaded = false;
+      loadMultiSessionEvents();
     }
   }
 }
@@ -249,6 +259,7 @@ function applyFilters(): void {
   }
 }
 
+
 async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
@@ -286,6 +297,39 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     if (currentLoadSessionId === sessionId) {
       feedContent.innerHTML = '<div class="feed-empty">Failed to load messages</div>';
     }
+  }
+}
+
+/** Load recent events from all active sessions to populate the multi-session feed on mount. */
+async function loadMultiSessionEvents(): Promise<void> {
+  if (!feedContent) return;
+  if (state.selectedSessionId) return; // only for multi-session mode
+
+  const activeSessions = Array.from(state.sessions.values()).filter(s => s.isActive);
+  if (activeSessions.length === 0) return;
+
+  try {
+    // Fetch last 20 events from each active session
+    const perSession = await Promise.all(
+      activeSessions.map(async (sess) => {
+        const events = await fetchSessionEvents(sess.id, 20);
+        return events.map(e => ({ ...e, _sessionName: sessionDisplayName(sess) }));
+      })
+    );
+
+    const allEvents = perSession.flat()
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    // Deduplicate
+    const seen = new Set<string>();
+    for (const evt of allEvents) {
+      const key = `${evt.timestamp}|${evt.contentPreview ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      appendMessage(evt as ParsedMessage, { showSessionId: (evt as any)._sessionName });
+    }
+  } catch {
+    // Silently fail — live events will still flow in via WebSocket
   }
 }
 
@@ -339,9 +383,9 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   if (type === 'tool_use') {
     entry.classList.add('tool-group-start');
     lastToolEntry = entry;
-  } else if (type === 'tool_result' && lastToolEntry) {
-    entry.classList.add('tool-group-end');
-    lastToolEntry = null;
+  } else if ((type === 'hook' || type === 'tool_result') && lastToolEntry) {
+    // Hooks and results nest under the preceding tool_use
+    entry.classList.add('tool-group-child');
   } else {
     lastToolEntry = null;
   }

@@ -2,7 +2,7 @@
 import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe } from '../state';
-import { renderExpanded, renderCompact } from './session-card';
+import { renderCompact } from './session-card';
 import { isSessionActive } from '../utils';
 import '../styles/sessions.css';
 
@@ -173,7 +173,7 @@ function renderList(): void {
 
     const section = document.createElement('div');
     section.className = 'active-section';
-    for (const sess of activeSorted) renderExpanded(sess, section);
+    for (const sess of activeSorted) renderCompact(sess, section);
     listEl.appendChild(section);
   }
 

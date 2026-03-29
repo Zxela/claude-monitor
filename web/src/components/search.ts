@@ -100,7 +100,7 @@ function renderResults(): void {
           <span class="search-type-badge ${badgeType(result)}">${badgeType(result)}</span>
           <span class="search-result-time">${formatTime(result.timestamp)}</span>
         </div>
-        <div class="search-result-body">${highlightMatch(result.contentPreview, state.searchQuery)}</div>
+        <div class="search-result-body">${highlightMatch(searchPreview(result), state.searchQuery)}</div>
       `;
       el.addEventListener('click', () => {
         update({ selectedSessionId: sessionId, searchOpen: false, searchQuery: '' });
@@ -117,6 +117,22 @@ function renderResults(): void {
       dropdown.appendChild(more);
     }
   }
+}
+
+/** Build a useful preview string for search results.
+ *  For tool events with unhelpful contentPreview like "[tool: Bash]",
+ *  prefer toolDetail or toolName + toolDetail. */
+function searchPreview(r: Event): string {
+  const cp = r.contentPreview || '';
+  // If contentPreview is just a bracketed tag, prefer richer fields
+  if (cp.match(/^\[(?:tool|hook|agent):\s*\w+\]$/)) {
+    const name = r.toolName || '';
+    const detail = r.toolDetail || '';
+    if (name && detail) return `${name}: ${detail}`;
+    if (detail) return detail;
+    if (name) return name;
+  }
+  return cp;
 }
 
 function badgeType(r: Event): string {

@@ -2,9 +2,15 @@
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { loadSettings, saveSettings, getSettings, notify } from '../notifications';
+import { dismiss as dismissCostBreakdown } from './cost-breakdown';
 import '../styles/views.css';
 
 let popover: HTMLElement | null = null;
+
+/** Close the budget popover if open. Called by other dialogs to avoid overlap. */
+export function dismiss(): void {
+  if (popover) { popover.remove(); popover = null; }
+}
 let banner: HTMLElement | null = null;
 let costStatEl: HTMLElement | null = null;
 
@@ -55,6 +61,7 @@ function togglePopover(anchor: HTMLElement): void {
     popover = null;
     return;
   }
+  dismissCostBreakdown();
 
   popover = document.createElement('div');
   popover.className = 'budget-popover';

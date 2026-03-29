@@ -12,6 +12,8 @@ import { render as renderTimeline } from './components/timeline-view';
 import { render as renderBudget } from './components/budget-popover';
 import { render as renderReplay, open as openReplay, togglePlay as replayToggle, restart as replayRestart, stepForward as replayForward, stepBackward as replayBack } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
+import { dismiss as dismissCostBreakdown } from './components/cost-breakdown';
+import { dismiss as dismissBudget } from './components/budget-popover';
 import { init as initHash } from './hash';
 import { init as initOnboarding } from './components/onboarding';
 import { render as renderUpdateBanner } from './components/update-banner';
@@ -108,6 +110,8 @@ document.addEventListener('keydown', (e) => {
       break;
     }
     case 'Escape':
+      dismissCostBreakdown();
+      dismissBudget();
       update({ selectedSessionId: null, searchOpen: false });
       break;
     case 'ArrowDown': {

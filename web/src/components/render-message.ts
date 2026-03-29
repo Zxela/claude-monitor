@@ -8,6 +8,17 @@ export interface RenderOptions {
 
 type MessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'agent' | 'hook' | 'error' | 'command' | 'system';
 
+/** Strip MCP prefixes from tool names to get a readable short name.
+ *  e.g. "mcp__plugin_playwright_playwright__browser_click" → "browser_click"
+ *       "mcp__slack__post_message" → "post_message" */
+function shortToolName(name: string): string {
+  if (!name) return name;
+  // MCP tools: mcp__<server>__<action> or mcp__plugin_<name>_<name>__<action>
+  const mcpMatch = name.match(/^mcp__(?:plugin_\w+_\w+|[\w]+)__(.+)$/);
+  if (mcpMatch) return mcpMatch[1];
+  return name;
+}
+
 // Detect slash commands in user messages by looking for command XML tags.
 const COMMAND_RE = /<command-name>\s*\/?([^<]+)<\/command-name>/;
 const COMMAND_MSG_RE = /<command-message>([^<]*)<\/command-message>/;
@@ -75,8 +86,17 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     contentClass = 'command';
     fullContent = ''; // no expand needed — command is fully shown
   } else if (type === 'hook') {
-    content = rawText || msg.hookEvent || '';
+    // hookName has the full identifier like "PreToolUse:Bash" or "SessionStart:startup"
+    // detail has the command if it's a shell hook (not "callback")
+    const hookName = msg.hookName || '';
+    const hookCmd = detail || '';
+    if (hookCmd) {
+      content = `${hookName} — ${truncate(hookCmd, 70)}`;
+    } else {
+      content = hookName || msg.hookEvent || rawText || 'hook';
+    }
     contentClass = 'hook';
+    fullContent = hookCmd || '';
   } else if (type === 'agent') {
     // Extract agent name/description from content preview if toolDetail is missing (streaming race)
     let agentLabel = detail;
@@ -96,12 +116,15 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
       const m = rawText.match(/^\[tool:\s*([^\]]+)\]/);
       if (m) { name = m[1].trim(); rawText = rawText.replace(m[0], '').trim(); }
     }
-    const body = detail || rawText;
-    content = name && body ? `${name}: ${truncate(body, 80)}` : name || truncate(body, 80);
+    const short = shortToolName(name);
+    // Try to extract a readable summary from the JSON params
+    const summary = extractToolSummary(name, fullText) || detail || rawText;
+    content = short && summary ? `${short}: ${truncate(summary, 90)}` : short || truncate(summary, 90);
     contentClass = 'tool';
-    fullContent = body;
+    // Prefer full JSON input (from fullContent) for expand, fall back to detail/rawText
+    fullContent = formatToolExpand(name, fullText) || detail || rawText;
   } else if (type === 'tool_result') {
-    content = truncate(rawText || detail, 100);
+    content = truncate(rawText || detail, 60);
     contentClass = 'result';
   } else if (type === 'error') {
     content = truncate(rawText || detail || 'Error', 120);
@@ -185,6 +208,71 @@ function navigateToSubagent(msg: ParsedMessage): void {
 
   if (bestChild) {
     update({ selectedSessionId: bestChild });
+  }
+}
+
+/** Extract a short, human-readable one-line summary from tool_use JSON params. */
+function extractToolSummary(toolName: string, jsonStr: string): string {
+  if (!jsonStr) return '';
+  try {
+    const obj = JSON.parse(jsonStr);
+    // Standard Claude tools
+    if (toolName === 'Bash' && obj.description) return obj.description;
+    if (toolName === 'Bash' && obj.command) return `$ ${obj.command.slice(0, 100)}`;
+    if ((toolName === 'Read' || toolName === 'Write') && obj.file_path) return obj.file_path;
+    if (toolName === 'Edit' && obj.file_path) return obj.file_path;
+    if (toolName === 'Grep' && obj.pattern) return `/${obj.pattern}/${obj.path ? ' in ' + obj.path : ''}`;
+    if (toolName === 'Glob' && obj.pattern) return obj.pattern;
+    if (toolName === 'Agent' && obj.description) return obj.description;
+    if (toolName === 'Skill' && obj.skill) return obj.skill;
+    // MCP / generic tools — try common param patterns
+    if (obj.url) return obj.url;
+    if (obj.query) return obj.query;
+    if (obj.element && obj.ref) return `${obj.element} [${obj.ref}]`;
+    if (obj.expression) return truncate(obj.expression, 80);
+    if (obj.function) return truncate(obj.function, 80);
+    if (obj.filename) return obj.filename;
+    if (obj.file_path) return obj.file_path;
+    if (obj.command) return truncate(obj.command, 80);
+    if (obj.description) return obj.description;
+    // If it's a simple object with 1-2 keys, show them compactly
+    const keys = Object.keys(obj);
+    if (keys.length <= 2) return keys.map(k => `${k}: ${String(obj[k]).slice(0, 40)}`).join(', ');
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/** Format the full JSON input for tool_use expansion.
+ *  For Bash: shows description + actual command.
+ *  For other tools: shows pretty-printed JSON fields. */
+function formatToolExpand(toolName: string, jsonStr: string): string {
+  if (!jsonStr) return '';
+  try {
+    const obj = JSON.parse(jsonStr);
+    if (toolName === 'Bash' && obj.command) {
+      const desc = obj.description ? `# ${obj.description}\n` : '';
+      return `${desc}$ ${obj.command}`;
+    }
+    // For file tools, show path prominently
+    if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') && obj.file_path) {
+      const parts = [`file: ${obj.file_path}`];
+      if (obj.pattern) parts.push(`pattern: ${obj.pattern}`);
+      if (obj.old_string) parts.push(`old: ${obj.old_string.slice(0, 200)}`);
+      if (obj.new_string) parts.push(`new: ${obj.new_string.slice(0, 200)}`);
+      return parts.join('\n');
+    }
+    if ((toolName === 'Grep' || toolName === 'Glob') && obj.pattern) {
+      const parts = [`pattern: ${obj.pattern}`];
+      if (obj.path) parts.push(`path: ${obj.path}`);
+      if (obj.glob) parts.push(`glob: ${obj.glob}`);
+      return parts.join('\n');
+    }
+    // Default: compact JSON
+    return jsonStr;
+  } catch {
+    return jsonStr;
   }
 }
 
