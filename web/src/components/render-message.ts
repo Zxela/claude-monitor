@@ -105,10 +105,6 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
       const m = rawText.match(/^\[agent(?::\s*([^\]]*))?\]\s*(.*)/);
       if (m) { agentLabel = m[1]?.trim() || ''; agentBody = m[2]?.trim() || ''; }
     }
-    // Include agent type (e.g. "homerun:implementer") when available and not already in label
-    if (msg.agentType && agentLabel !== msg.agentType) {
-      agentLabel = msg.agentType + (agentLabel ? ` (${agentLabel})` : '');
-    }
     const display = agentLabel && agentBody ? `${agentLabel}: ${agentBody}` : agentLabel || agentBody;
     content = display ? `Agent: ${truncate(display, 80)}` : 'Agent';
     contentClass = 'tool';

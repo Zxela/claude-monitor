@@ -306,8 +306,8 @@
 }
 
 .fe-interrupted {
-  color: var(--warning);
-  border: 1px solid var(--warning);
+  color: var(--orange);
+  border: 1px solid var(--orange);
   opacity: 0.8;
 }
 

@@ -308,7 +308,7 @@ func ParseLine(line []byte) (*Event, error) {
 		msg.ToolUseID = ci.toolUseID
 		msg.ForToolUseID = ci.forToolUseID
 		msg.IsAgent = msg.ToolName == "Agent"
-		msg.IsError = ci.isError
+		msg.IsError = msg.IsError || ci.isError
 		// Also detect error indicators in content text when not already flagged.
 		if !msg.IsError && msg.ForToolUseID != "" {
 			lower := strings.ToLower(ci.text)

@@ -550,8 +550,21 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 timestamp=excluded.timestamp,
 		 duration_ms=excluded.duration_ms,
 		 success=excluded.success,
+		 stderr=excluded.stderr,
 		 interrupted=excluded.interrupted,
-		 truncated=excluded.truncated`)
+		 truncated=excluded.truncated,
+		 agent_duration_ms=excluded.agent_duration_ms,
+		 agent_tokens=excluded.agent_tokens,
+		 agent_tool_use_count=excluded.agent_tool_use_count,
+		 agent_type=excluded.agent_type,
+		 subtype=excluded.subtype,
+		 turn_message_count=excluded.turn_message_count,
+		 hook_count=excluded.hook_count,
+		 hook_infos=excluded.hook_infos,
+		 level=excluded.level,
+		 is_meta=excluded.is_meta,
+		 version=excluded.version,
+		 entrypoint=excluded.entrypoint`)
 	if err != nil {
 		return fmt.Errorf("prepare event stmt: %w", err)
 	}
