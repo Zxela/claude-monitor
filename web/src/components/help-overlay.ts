@@ -28,10 +28,6 @@ export function toggle(): void {
       <div class="help-row"><span>Graph view</span><kbd>g</kbd></div>
       <div class="help-row"><span>History view</span><kbd>h</kbd></div>
       <div class="help-row"><span>Help</span><kbd>?</kbd></div>
-      <h3>Replay Controls</h3>
-      <div class="help-row"><span>Play / pause</span><kbd>Space</kbd></div>
-      <div class="help-row"><span>Restart</span><kbd>R</kbd></div>
-      <div class="help-row"><span>Step backward / forward</span><kbd>←→</kbd></div>
     </div>
   `;
 

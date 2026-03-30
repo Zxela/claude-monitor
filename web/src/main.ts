@@ -10,14 +10,12 @@ import { render as renderGraphView } from './components/graph-view';
 import { render as renderHistoryView } from './components/history-view';
 import { render as renderTimeline } from './components/timeline-view';
 import { render as renderBudget } from './components/budget-popover';
-import { render as renderReplay, open as openReplay, togglePlay as replayToggle, restart as replayRestart, stepForward as replayForward, stepBackward as replayBack } from './components/replay';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { dismiss as dismissCostBreakdown } from './components/cost-breakdown';
 import { dismiss as dismissBudget } from './components/budget-popover';
 import { init as initHash } from './hash';
 import { init as initOnboarding } from './components/onboarding';
 import { render as renderUpdateBanner } from './components/update-banner';
-import { expandedParents } from './components/session-card';
 
 // Mount components
 const topbarMount = document.getElementById('topbar-mount')!;
@@ -33,7 +31,6 @@ renderFeedPanel(feedMount);
 renderGraphView(feedMount);
 renderHistoryView(feedMount);
 renderTimeline(feedMount);
-renderReplay(feedMount);
 
 // Search dropdown
 const searchBox = topbarMount.querySelector<HTMLElement>('.search-box');
@@ -70,10 +67,6 @@ subscribe((_state, changed) => {
   if (changed.has('version')) {
     sbVersion.textContent = `CLAUDE MONITOR ${state.version}`;
   }
-  // Handle replay trigger from history view
-  if (changed.has('replaySessionId') && state.replaySessionId) {
-    openReplay(state.replaySessionId);
-  }
 });
 
 function getVisibleSessionIds(): string[] {
@@ -95,20 +88,6 @@ document.addEventListener('keydown', (e) => {
     case '?':
       toggleHelp();
       break;
-    case ' ': {
-      if (state.replaySessionId) {
-        e.preventDefault();
-        replayToggle();
-      }
-      break;
-    }
-    case 'r':
-    case 'R': {
-      if (state.replaySessionId) {
-        replayRestart();
-      }
-      break;
-    }
     case 'Escape':
       dismissCostBreakdown();
       dismissBudget();
@@ -139,20 +118,14 @@ document.addEventListener('keydown', (e) => {
       break;
     }
     case 'ArrowRight': {
-      if (state.replaySessionId) {
-        replayForward();
-      } else if (state.focusedSessionId) {
-        expandedParents.add(state.focusedSessionId);
-        update({ renderVersion: state.renderVersion + 1 });
+      if (state.focusedSessionId) {
+        update({ selectedSessionId: state.focusedSessionId });
       }
       break;
     }
     case 'ArrowLeft': {
-      if (state.replaySessionId) {
-        replayBack();
-      } else if (state.focusedSessionId) {
-        expandedParents.delete(state.focusedSessionId);
-        update({ renderVersion: state.renderVersion + 1 });
+      if (state.focusedSessionId) {
+        update({ selectedSessionId: state.selectedSessionId === state.focusedSessionId ? null : state.focusedSessionId });
       }
       break;
     }

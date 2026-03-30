@@ -137,6 +137,30 @@ function renderList(): void {
     else older.push(sess);
   }
 
+  // Auto-reveal: if a session is selected, ensure its group is visible
+  if (state.selectedSessionId) {
+    const sel = state.sessions.get(state.selectedSessionId);
+    // Find the parent if this is a subagent
+    const target = sel?.parentId ? state.sessions.get(sel.parentId) ?? sel : sel;
+    if (target && !isSessionActive(target.lastActive)) {
+      const ms = new Date(target.lastActive).getTime();
+      let groupKey: string | null = null;
+      if (now - ms < 3600_000) groupKey = 'lastHour';
+      else if (ms >= todayStart.getTime()) groupKey = 'today';
+      else if (ms >= yesterdayStart.getTime()) groupKey = 'yesterday';
+      else if (ms >= weekStart.getTime()) groupKey = 'thisWeek';
+      else groupKey = 'older';
+
+      // Switch to 'all' filter if the group isn't visible under current filter
+      if (activeFilter === 'active' || (activeFilter === 'recent' && groupKey !== 'lastHour' && groupKey !== 'today')) {
+        activeFilter = 'all';
+        updateFilterBar();
+      }
+      // Uncollapse the group
+      if (groupKey) collapsedGroups.delete(groupKey);
+    }
+  }
+
   // Save scroll + render
   const scrollTop = listEl.scrollTop;
   listEl.innerHTML = '';
@@ -173,7 +197,27 @@ function renderList(): void {
 
     const section = document.createElement('div');
     section.className = 'active-section';
-    for (const sess of activeSorted) renderCompact(sess, section);
+    // Build parent→children map for inline subagent display
+    const activeChildrenOf = new Map<string, Session[]>();
+    for (const s of active) {
+      if (s.parentId) {
+        const list = activeChildrenOf.get(s.parentId) ?? [];
+        list.push(s);
+        activeChildrenOf.set(s.parentId, list);
+      }
+    }
+    for (const sess of activeSorted) {
+      renderCompact(sess, section);
+      const children = activeChildrenOf.get(sess.id);
+      if (children && children.length > 0) {
+        const familyIds = new Set([sess.id, ...children.map(c => c.id)]);
+        if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
+          // Active parents: only show active children
+          const activeOnly = sort([...children]).filter(c => c.isActive);
+          for (const child of activeOnly) renderCompact(child, section);
+        }
+      }
+    }
     listEl.appendChild(section);
   }
 
@@ -222,7 +266,26 @@ function renderList(): void {
     const items = document.createElement('div');
     items.className = 'time-group-items';
     const visible = needsTruncation ? filtered.slice(0, MAX_VISIBLE) : filtered;
-    for (const sess of visible) renderCompact(sess, items);
+    // Build parent→children map for inline subagent display
+    const childrenOf = new Map<string, Session[]>();
+    for (const s of sessions) {
+      if (s.parentId) {
+        const list = childrenOf.get(s.parentId) ?? [];
+        list.push(s);
+        childrenOf.set(s.parentId, list);
+      }
+    }
+    for (const sess of visible) {
+      renderCompact(sess, items);
+      // For inactive parents: show children inline when this family is selected
+      const children = childrenOf.get(sess.id);
+      if (children && children.length > 0) {
+        const familyIds = new Set([sess.id, ...children.map(c => c.id)]);
+        if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
+          for (const child of sort([...children])) renderCompact(child, items);
+        }
+      }
+    }
 
     if (needsTruncation) {
       const btn = document.createElement('button');
@@ -237,4 +300,10 @@ function renderList(): void {
   }
 
   listEl.scrollTop = scrollTop;
+
+  // Scroll selected session into view
+  if (state.selectedSessionId) {
+    const selected = listEl.querySelector<HTMLElement>(`.selected`);
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
 }

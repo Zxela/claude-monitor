@@ -171,7 +171,6 @@ function updateHeader(): void {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
       <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">${escapeHtml(name)}</span>
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
-      ${!isLive ? '<span class="replay-btn" role="button" tabindex="0" aria-label="Replay session" style="margin-left:4px;color:var(--purple,#a855f7);font-size:9px;cursor:pointer;border:1px solid rgba(168,85,247,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">▶ REPLAY</span>' : ''}
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
@@ -191,22 +190,6 @@ function updateHeader(): void {
         if (state.selectedSessionId) openTimeline(state.selectedSessionId);
       }
     });
-    if (!isLive) {
-      const replayBtn = headerEl.querySelector('.replay-btn');
-      replayBtn?.addEventListener('click', () => {
-        if (state.selectedSessionId) {
-          update({ replaySessionId: state.selectedSessionId });
-        }
-      });
-      replayBtn?.addEventListener('keydown', (e) => {
-        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
-          e.preventDefault();
-          if (state.selectedSessionId) {
-            update({ replaySessionId: state.selectedSessionId });
-          }
-        }
-      });
-    }
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
       <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">ALL SESSIONS</span>`;

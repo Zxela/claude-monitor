@@ -214,23 +214,20 @@ function navigateToSubagent(msg: ParsedMessage): void {
   const parentId = state.selectedSessionId;
   if (!parentId) return;
 
-  const parent = state.sessions.get(parentId);
-  if (!parent?.children?.length) return;
-
   const msgTime = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
 
-  // Find the child session closest in time to this agent call
+  // Find child sessions by scanning for parentId match
+  // (children array is only populated for live sessions, not DB-loaded ones)
   let bestChild: string | null = null;
   let bestDelta = Infinity;
 
-  for (const childId of parent.children) {
-    const child = state.sessions.get(childId);
-    if (!child) continue;
+  for (const child of state.sessions.values()) {
+    if (child.parentId !== parentId) continue;
     const childStart = new Date(child.startedAt).getTime();
     const delta = Math.abs(childStart - msgTime);
     if (delta < bestDelta) {
       bestDelta = delta;
-      bestChild = childId;
+      bestChild = child.id;
     }
   }
 
