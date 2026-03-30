@@ -5,6 +5,7 @@
   width: 500px;
   max-height: 60vh;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-top: none;
@@ -26,6 +27,7 @@
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.1s;
+  overflow: hidden;
 }
 
 .search-result:hover { background: var(--bg-hover); }
@@ -35,17 +37,31 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .search-result-session {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .search-result-project {
   font-size: 11px;
   color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 10;
+  max-width: 200px;
 }
 
 .search-result-time {
@@ -137,6 +153,7 @@
 }
 
 .feed-entry:hover { background: rgba(255,255,255,0.03); }
+.feed-entry.search-highlight { background: rgba(210,153,34,0.15); border-left-color: var(--yellow); transition: background 1s ease-out; }
 
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(6px); }

@@ -62,6 +62,7 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   const el = document.createElement('div');
   el.className = `feed-entry type-${type}${msg.isError ? ' is-error' : ''}${msg.isMeta ? ' is-meta' : ''}`;
   el.dataset.type = type;
+  if ((msg as any).id != null) el.dataset.eventId = String((msg as any).id);
 
   const time = formatTime(msg.timestamp);
   let rawText = msg.contentPreview || '';

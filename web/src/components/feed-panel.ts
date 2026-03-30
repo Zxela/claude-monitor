@@ -291,6 +291,21 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     for (const msg of merged) {
       appendMessage(msg as ParsedMessage);
     }
+
+    // Auto-expand and scroll to search-highlighted event
+    if (state.searchHighlightEventId != null && feedContent) {
+      const target = feedContent.querySelector<HTMLElement>(`[data-event-id="${state.searchHighlightEventId}"]`);
+      if (target) {
+        // Expand the content if it has an expand button
+        const expandBtn = target.querySelector<HTMLElement>('.fe-expand');
+        if (expandBtn) expandBtn.click();
+        // Highlight briefly
+        target.classList.add('search-highlight');
+        target.scrollIntoView({ block: 'center' });
+        setTimeout(() => target.classList.remove('search-highlight'), 3000);
+      }
+      update({ searchHighlightEventId: null });
+    }
   } catch {
     if (currentLoadSessionId === sessionId) {
       feedContent.innerHTML = '<div class="feed-empty">Failed to load messages</div>';
