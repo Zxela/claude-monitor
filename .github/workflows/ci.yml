@@ -129,6 +129,11 @@ jobs:
             --notes-file /tmp/release-notes.md \
             --target "${MERGE_SHA}"
 
+          # Mark release PR as tagged so release-please doesn't block on it
+          gh pr edit ${PR_NUMBER} --repo ${{ github.repository }} \
+            --remove-label "autorelease: pending" \
+            --add-label "autorelease: tagged" || true
+
           echo "release_created=true" >> $GITHUB_OUTPUT
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
