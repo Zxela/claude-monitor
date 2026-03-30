@@ -169,6 +169,28 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     }
   });
 
+  // Error count click — filter feed to errors only
+  const errEl = el.querySelector('.compact-stat-err');
+  if (errEl) {
+    errEl.setAttribute('role', 'button');
+    errEl.setAttribute('tabindex', '0');
+    (errEl as HTMLElement).style.cursor = 'pointer';
+    const filterErrors = (e: Event) => {
+      e.stopPropagation();
+      update({
+        selectedSessionId: session.id,
+        feedTypeFilters: { user: false, assistant: false, tool_use: false, tool_result: false, agent: false, hook: false, error: true },
+      });
+    };
+    errEl.addEventListener('click', filterErrors);
+    errEl.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        filterErrors(e);
+      }
+    });
+  }
+
   container.appendChild(el);
 
   return el;

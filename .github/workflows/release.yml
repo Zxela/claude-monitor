@@ -108,3 +108,40 @@ jobs:
             dist/*.tar.gz \
             dist/checksums.txt \
             --repo ${{ github.repository }}
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.create-release.outputs.tag_name }}"
+          VERSION_NUM="${VERSION#v}"
+
+          # Read checksums
+          DARWIN_AMD64=$(grep darwin-amd64 dist/checksums.txt | awk '{print $1}')
+          DARWIN_ARM64=$(grep darwin-arm64 dist/checksums.txt | awk '{print $1}')
+          LINUX_AMD64=$(grep linux-amd64 dist/checksums.txt | awk '{print $1}')
+          LINUX_ARM64=$(grep linux-arm64 dist/checksums.txt | awk '{print $1}')
+
+          # Update formula in-place
+          sed -i "s/version \".*\"/version \"${VERSION_NUM}\"/" Formula/claude-monitor.rb
+          sed -i "/darwin-amd64/{n;s/sha256 \".*\"/sha256 \"${DARWIN_AMD64}\"/}" Formula/claude-monitor.rb
+          sed -i "/darwin-arm64/{n;s/sha256 \".*\"/sha256 \"${DARWIN_ARM64}\"/}" Formula/claude-monitor.rb
+          sed -i "/linux-amd64/{n;s/sha256 \".*\"/sha256 \"${LINUX_AMD64}\"/}" Formula/claude-monitor.rb
+          sed -i "/linux-arm64/{n;s/sha256 \".*\"/sha256 \"${LINUX_ARM64}\"/}" Formula/claude-monitor.rb
+
+          # Update formula in this repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/claude-monitor.rb
+          git commit -m "chore: update Homebrew formula for ${VERSION}" || true
+          git push origin HEAD:main || true
+
+          # Also update the Homebrew tap repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/Zxela/homebrew-tap.git /tmp/tap
+          cp Formula/claude-monitor.rb /tmp/tap/Formula/claude-monitor.rb
+          cd /tmp/tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/claude-monitor.rb
+          git commit -m "Update claude-monitor to ${VERSION}" || true
+          git push origin main || true
