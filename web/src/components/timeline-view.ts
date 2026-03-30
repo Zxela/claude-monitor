@@ -7,7 +7,7 @@ interface TimelineEvent {
   timestamp: string;
   type: string;
   role: string;
-  contentText: string;
+  contentPreview: string;
   toolName?: string;
   costUSD: number;
 }
@@ -16,10 +16,10 @@ const TYPE_COLORS: Record<string, string> = {
   user: '#5588ff',
   assistant: '#33dd99',
   tool_use: '#ddcc44',
-  tool_result: '#44cccc',
-  hook: '#aa77dd',
-  error: '#dd4455',
-  system: '#444',
+  tool_result: '#55dddd',
+  hook: '#bb88ee',
+  error: '#ee5566',
+  system: '#667788',
 };
 
 const LANE_LABELS = ['User', 'Assistant', 'Tools'];
@@ -133,13 +133,13 @@ function draw(): void {
   const topY = 30;
 
   // Draw lane backgrounds
-  ctx.fillStyle = 'rgba(255,255,255,0.02)';
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
   for (let i = 0; i < 3; i++) {
     if (i % 2 === 0) ctx.fillRect(0, topY + i * laneH, w, laneH);
   }
 
   // Draw lane labels
-  ctx.fillStyle = '#44445a';
+  ctx.fillStyle = '#8888aa';
   ctx.font = '10px monospace';
   ctx.textAlign = 'left';
   for (let i = 0; i < LANE_LABELS.length; i++) {
@@ -151,7 +151,7 @@ function draw(): void {
   const t0 = new Date(events[0].timestamp).getTime();
 
   // Draw time axis labels
-  ctx.fillStyle = '#44445a';
+  ctx.fillStyle = '#8888aa';
   ctx.font = '9px monospace';
   ctx.textAlign = 'center';
   const step = Math.max(1000, Math.pow(10, Math.floor(Math.log10(1 / pixelsPerMs * 100))));
@@ -219,7 +219,7 @@ function draw(): void {
     if (x + barW < 0 || x > w) continue;
 
     ctx.fillStyle = span.color;
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.85;
 
     // Round corners for wider bars
     if (barW > 6) {
@@ -233,7 +233,7 @@ function draw(): void {
     // Label inside bar if wide enough
     if (barW > 40) {
       const label = span.events.length > 1 ? `${span.label} (${span.events.length})` : span.label;
-      ctx.fillStyle = '#000';
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.font = '9px monospace';
       ctx.textAlign = 'left';
       ctx.fillText(label.slice(0, Math.floor(barW / 6)), x + 3, y + barH / 2 + 3);
@@ -288,7 +288,7 @@ function onMouseMove(e: MouseEvent): void {
   if (evt) {
     canvas.style.cursor = 'pointer';
     const time = new Date(evt.timestamp).toLocaleTimeString();
-    const content = (evt.contentText || '').slice(0, 80);
+    const content = (evt.contentPreview || '').slice(0, 80);
     tooltip.innerHTML = `<div><b>${time}</b> [${evt.type || evt.role}]</div>
       ${evt.toolName ? `<div>${escapeHtml(evt.toolName)}</div>` : ''}
       <div style="color:var(--text-dim)">${escapeHtml(content)}</div>

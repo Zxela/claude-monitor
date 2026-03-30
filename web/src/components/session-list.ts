@@ -2,7 +2,7 @@
 import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe } from '../state';
-import { renderExpanded, renderCompact } from './session-card';
+import { renderCompact } from './session-card';
 import { isSessionActive } from '../utils';
 import '../styles/sessions.css';
 
@@ -11,7 +11,7 @@ let listEl: HTMLElement | null = null;
 let lastRenderTime = 0;
 const MAX_VISIBLE = 15;
 const showAllGroups = new Set<string>();
-const collapsedGroups = new Set<string>(['lastHour', 'today', 'yesterday', 'thisWeek', 'older']);
+const collapsedGroups = new Set<string>(['yesterday', 'thisWeek', 'older']);
 let activeFilter: 'active' | 'recent' | 'all' = 'recent';
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -24,9 +24,9 @@ export function render(container: HTMLElement): void {
   const filterBar = document.createElement('div');
   filterBar.className = 'session-filter-bar';
   filterBar.innerHTML = `
-    <button data-filter="active">Active <span id="fc-active"></span></button>
-    <button data-filter="recent" class="active">Recent <span id="fc-recent"></span></button>
-    <button data-filter="all">All <span id="fc-all"></span></button>
+    <button data-filter="active">ACTIVE (<span id="fc-active"></span>)</button>
+    <button data-filter="recent" class="active">RECENT (<span id="fc-recent"></span>)</button>
+    <button data-filter="all">ALL (<span id="fc-all"></span>)</button>
   `;
   filterBar.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -70,7 +70,7 @@ function updateFilterBar(): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('projectFilter')) {
+  if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('repoFilter')) {
     renderList();
   }
   if (changed.has('sessions')) {
@@ -137,29 +137,34 @@ function renderList(): void {
     else older.push(sess);
   }
 
-  // Update filter counts
-  const recentCount = active.length + [...lastHour, ...today].filter(s => new Date(s.lastActive).getTime() > recentCutoff).length;
-  const totalCount = state.sessions.size;
-  const fcActive = el?.querySelector('#fc-active');
-  const fcRecent = el?.querySelector('#fc-recent');
-  const fcAll = el?.querySelector('#fc-all');
-  if (fcActive) fcActive.textContent = String(active.length);
-  if (fcRecent) fcRecent.textContent = String(recentCount);
-  if (fcAll) fcAll.textContent = String(totalCount);
-
   // Save scroll + render
   const scrollTop = listEl.scrollTop;
   listEl.innerHTML = '';
 
-  const filter = state.projectFilter;
-  const topLevel = (sessions: Session[]) =>
-    (filter ? sessions.filter(s => s.projectName === filter || s.sessionName === filter) : sessions)
-      .filter(s => !s.isSubagent);
+  const filter = state.repoFilter;
+
+  // Update filter counts — only count top-level, non-trivial sessions (no subagents) to match group display
+  const isTrivialCount = (s: Session) => s.totalCost === 0 && (s.inputTokens + s.outputTokens + s.cacheReadTokens) === 0 && s.messageCount < 4;
+  const topLevelFilter = (s: Session) => !s.parentId && !isTrivialCount(s) && (!filter || s.cwd === filter || s.sessionName === filter);
+  const recentCount = active.length + [...lastHour, ...today].filter(s => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff).length;
+  const totalCount = Array.from(state.sessions.values()).filter(topLevelFilter).length;
+  const fcActive = el?.querySelector('#fc-active');
+  const fcRecent = el?.querySelector('#fc-recent');
+  const fcAll = el?.querySelector('#fc-all');
+  if (fcActive) fcActive.textContent = String(active.filter(s => !s.parentId).length);
+  if (fcRecent) fcRecent.textContent = String(recentCount);
+  if (fcAll) fcAll.textContent = String(totalCount);
+  // Filter: top-level only, repo filter, and skip trivial sessions (no cost, no tokens, few messages)
+  const isTrivial = (s: Session) => s.totalCost === 0 && (s.inputTokens + s.outputTokens + s.cacheReadTokens) === 0 && s.messageCount < 4;
+  const topLevel = (sessions: Session[], includeTrivial = false) =>
+    (filter ? sessions.filter(s => s.cwd === filter || s.sessionName === filter) : sessions)
+      .filter(s => !s.parentId)
+      .filter(s => includeTrivial || !isTrivial(s));
   const sort = (sessions: Session[]) =>
     sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 
-  // Active Now
-  const activeSorted = sort(topLevel(active));
+  // Active Now (always show active sessions, even trivial ones)
+  const activeSorted = sort(topLevel(active, true));
   if (activeSorted.length > 0) {
     const header = document.createElement('div');
     header.className = 'active-section-header';
@@ -168,22 +173,28 @@ function renderList(): void {
 
     const section = document.createElement('div');
     section.className = 'active-section';
-    for (const sess of activeSorted) renderExpanded(sess, section);
+    for (const sess of activeSorted) renderCompact(sess, section);
     listEl.appendChild(section);
   }
 
   // Time groups
   if (activeFilter === 'active') {
+    if (activeSorted.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'time-group-empty';
+      empty.textContent = 'NO ACTIVE SESSIONS';
+      listEl.appendChild(empty);
+    }
     listEl.scrollTop = scrollTop;
     return;
   }
 
   const groups: [string, string, Session[]][] = [
-    ['lastHour', 'Last hour', lastHour],
-    ['today', 'Today', today],
-    ['yesterday', 'Yesterday', yesterday],
-    ['thisWeek', 'This week', thisWeek],
-    ['older', 'Older', older],
+    ['lastHour', 'LAST HOUR', lastHour],
+    ['today', 'TODAY', today],
+    ['yesterday', 'YESTERDAY', yesterday],
+    ['thisWeek', 'THIS WEEK', thisWeek],
+    ['older', 'OLDER', older],
   ];
 
   for (const [key, label, sessions] of groups) {
@@ -216,7 +227,7 @@ function renderList(): void {
     if (needsTruncation) {
       const btn = document.createElement('button');
       btn.className = 'show-all-btn';
-      btn.textContent = `Show all ${filtered.length} sessions`;
+      btn.textContent = `SHOW ALL ${filtered.length} SESSIONS`;
       btn.addEventListener('click', (e) => { e.stopPropagation(); showAllGroups.add(key); renderList(); });
       items.appendChild(btn);
     }

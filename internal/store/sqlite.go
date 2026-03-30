@@ -1,52 +1,199 @@
-// Package store provides persistent storage for session history using SQLite.
+// Package store provides persistent storage using SQLite for the v2 data model.
 package store
 
 import (
+	"compress/gzip"
+	"bytes"
 	"database/sql"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 
+	"github.com/zxela-claude/claude-monitor/internal/parser"
+	"github.com/zxela-claude/claude-monitor/internal/repo"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store/migrations"
 
 	_ "modernc.org/sqlite"
 )
 
-// HistoryRow represents a single row in the session_history table.
-type HistoryRow struct {
-	ID              string  `json:"id"`
-	ProjectName     string  `json:"projectName"`
-	SessionName     string  `json:"sessionName"`
-	TotalCost       float64 `json:"totalCost"`
-	InputTokens     int64   `json:"inputTokens"`
-	OutputTokens    int64   `json:"outputTokens"`
+// eventSelectCols is the column list used by all event SELECT queries.
+// Must match the scan order in scanEventRows().
+const eventSelectCols = `e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
+	COALESCE(e.type,''), COALESCE(e.role,''), COALESCE(e.content_preview,''),
+	COALESCE(e.tool_name,''), COALESCE(e.tool_detail,''),
+	e.cost_usd, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens,
+	COALESCE(e.model,''), e.is_error, COALESCE(e.stop_reason,''),
+	COALESCE(e.hook_event,''), COALESCE(e.hook_name,''),
+	COALESCE(e.tool_use_id,''), COALESCE(e.for_tool_use_id,''), e.is_agent,
+	e.timestamp,
+	e.duration_ms, e.success, COALESCE(e.stderr,''), e.interrupted, e.truncated,
+	e.agent_duration_ms, e.agent_tokens, e.agent_tool_use_count, COALESCE(e.agent_type,''),
+	COALESCE(e.subtype,''), e.turn_message_count, e.hook_count, COALESCE(e.hook_infos,''), COALESCE(e.level,''),
+	e.is_meta, COALESCE(e.version,''), COALESCE(e.entrypoint,'')`
+
+// sessionSelectCols is the column list used by all session SELECT queries.
+// Must match the scan order in scanSessionRows().
+const sessionSelectCols = `id, COALESCE(repo_id,''), COALESCE(parent_id,''), COALESCE(session_name,''),
+	COALESCE(task_description,''), COALESCE(cwd,''), COALESCE(branch,''),
+	COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
+	total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+	message_count, event_count, error_count,
+	COALESCE(version,''), COALESCE(entrypoint,'')`
+
+// SessionRow represents a session as stored in the database.
+type SessionRow struct {
+	ID                  string  `json:"id"`
+	RepoID              string  `json:"repoId"`
+	ParentID            string  `json:"parentId"`
+	SessionName         string  `json:"sessionName"`
+	TaskDescription     string  `json:"taskDescription"`
+	CWD                 string  `json:"cwd"`
+	Branch              string  `json:"branch"`
+	Model               string  `json:"model"`
+	StartedAt           string  `json:"startedAt"`
+	EndedAt             string  `json:"endedAt"`
+	TotalCost           float64 `json:"totalCost"`
+	InputTokens         int64   `json:"inputTokens"`
+	OutputTokens        int64   `json:"outputTokens"`
 	CacheReadTokens     int64   `json:"cacheReadTokens"`
 	CacheCreationTokens int64   `json:"cacheCreationTokens"`
-	CacheHitPct         float64 `json:"cacheHitPct"`
 	MessageCount        int     `json:"messageCount"`
-	ErrorCount      int     `json:"errorCount"`
-	StartedAt       string  `json:"startedAt"`
-	EndedAt         string  `json:"endedAt"`
-	DurationSeconds float64 `json:"durationSeconds"`
-	Model           string  `json:"model"`
-	CWD             string  `json:"cwd"`
-	GitBranch       string  `json:"gitBranch"`
-	TaskDescription string  `json:"taskDescription"`
-	ParentID        string  `json:"parentId"`
+	EventCount          int     `json:"eventCount"`
+	ErrorCount          int     `json:"errorCount"`
+	Version             string  `json:"version,omitempty"`
+	Entrypoint          string  `json:"entrypoint,omitempty"`
 }
 
-// DB wraps a sql.DB connection to the history SQLite database.
+// ToSession converts a SessionRow to a session.Session with default runtime fields.
+func (r *SessionRow) ToSession() *session.Session {
+	s := &session.Session{
+		ID:                  r.ID,
+		RepoID:              r.RepoID,
+		SessionName:         r.SessionName,
+		TotalCost:           r.TotalCost,
+		InputTokens:         r.InputTokens,
+		OutputTokens:        r.OutputTokens,
+		CacheReadTokens:     r.CacheReadTokens,
+		CacheCreationTokens: r.CacheCreationTokens,
+		MessageCount:        r.MessageCount,
+		EventCount:          r.EventCount,
+		ErrorCount:          r.ErrorCount,
+		ParentID:            r.ParentID,
+		CWD:                 r.CWD,
+		GitBranch:           r.Branch,
+		Model:               r.Model,
+		TaskDescription:     r.TaskDescription,
+		Version:             r.Version,
+		Entrypoint:          r.Entrypoint,
+		IsActive:            false,
+		Status:              "idle",
+		CostRate:            0,
+	}
+	if r.StartedAt != "" {
+		if t, err := time.Parse(time.RFC3339, r.StartedAt); err == nil {
+			s.StartedAt = t
+		}
+	}
+	if r.EndedAt != "" {
+		if t, err := time.Parse(time.RFC3339, r.EndedAt); err == nil {
+			s.LastActive = t
+		}
+	}
+	return s
+}
+
+// SessionRowsToSessions converts a slice of SessionRow to session.Session.
+func SessionRowsToSessions(rows []SessionRow) []*session.Session {
+	result := make([]*session.Session, len(rows))
+	for i := range rows {
+		result[i] = rows[i].ToSession()
+	}
+	return result
+}
+
+// EventRow represents a single event as stored in the database.
+type EventRow struct {
+	ID                  int64   `json:"id"`
+	SessionID           string  `json:"sessionId"`
+	UUID                string  `json:"uuid,omitempty"`
+	MessageID           string  `json:"messageId,omitempty"`
+	Type                string  `json:"type"`
+	Role                string  `json:"role"`
+	ContentPreview      string  `json:"contentPreview"`
+	FullContent         string  `json:"fullContent,omitempty"`
+	ToolName            string  `json:"toolName,omitempty"`
+	ToolDetail          string  `json:"toolDetail,omitempty"`
+	CostUSD             float64 `json:"costUSD"`
+	InputTokens         int64   `json:"inputTokens"`
+	OutputTokens        int64   `json:"outputTokens"`
+	CacheReadTokens     int64   `json:"cacheReadTokens"`
+	CacheCreationTokens int64   `json:"cacheCreationTokens"`
+	Model               string  `json:"model,omitempty"`
+	IsError             bool    `json:"isError"`
+	StopReason          string  `json:"stopReason,omitempty"`
+	HookEvent           string  `json:"hookEvent,omitempty"`
+	HookName            string  `json:"hookName,omitempty"`
+	ToolUseID           string  `json:"toolUseId,omitempty"`
+	ForToolUseID        string  `json:"forToolUseId,omitempty"`
+	IsAgent             bool    `json:"isAgent,omitempty"`
+	Timestamp           string  `json:"timestamp"`
+	// New fields from JSONL capture.
+	DurationMs        *int64  `json:"durationMs,omitempty"`
+	Success           *bool   `json:"success,omitempty"`
+	Stderr            string  `json:"stderr,omitempty"`
+	Interrupted       bool    `json:"interrupted,omitempty"`
+	Truncated         bool    `json:"truncated,omitempty"`
+	AgentDurationMs   *int64  `json:"agentDurationMs,omitempty"`
+	AgentTokens       *int64  `json:"agentTokens,omitempty"`
+	AgentToolUseCount *int    `json:"agentToolUseCount,omitempty"`
+	AgentType         string  `json:"agentType,omitempty"`
+	Subtype           string  `json:"subtype,omitempty"`
+	TurnMessageCount  *int    `json:"turnMessageCount,omitempty"`
+	HookCount         *int    `json:"hookCount,omitempty"`
+	HookInfos         string  `json:"hookInfos,omitempty"`
+	Level             string  `json:"level,omitempty"`
+	IsMeta            bool    `json:"isMeta,omitempty"`
+	Version           string  `json:"version,omitempty"`
+	Entrypoint        string  `json:"entrypoint,omitempty"`
+}
+
+// AggregateResult holds aggregate statistics across sessions.
+type AggregateResult struct {
+	TotalCost           float64            `json:"totalCost"`
+	InputTokens         int64              `json:"inputTokens"`
+	OutputTokens        int64              `json:"outputTokens"`
+	CacheReadTokens     int64              `json:"cacheReadTokens"`
+	CacheCreationTokens int64              `json:"cacheCreationTokens"`
+	SessionCount        int                `json:"sessionCount"`
+	CostByModel         map[string]float64 `json:"costByModel"`
+	CostByRepo          map[string]float64 `json:"costByRepo"`
+}
+
+// StorageInfo holds database storage statistics.
+type StorageInfo struct {
+	TotalSizeBytes  int64 `json:"totalSizeBytes"`
+	HotContentBytes int64 `json:"hotContentBytes"`
+	WarmContentBytes int64 `json:"warmContentBytes"`
+	EventCount       int64 `json:"eventCount"`
+}
+
+// DB wraps a sql.DB connection to the SQLite database.
 type DB struct {
 	db *sql.DB
 }
 
-// Open opens a SQLite database at the given path and creates the schema if needed.
+// Open opens a SQLite database at the given path and runs pending migrations.
 func Open(path string) (*DB, error) {
 	sqlDB, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	// Enable WAL mode for better concurrency.
+	// SQLite only supports one writer at a time. Limit the pool to one
+	// connection to avoid "database is locked" errors from concurrent writes
+	// across goroutines (pipeline flush, retention compaction, HTTP handlers).
+	sqlDB.SetMaxOpenConns(1)
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		sqlDB.Close()
 		return nil, err
@@ -68,92 +215,221 @@ func (d *DB) Ping() error {
 	return d.db.Ping()
 }
 
-// SaveSession upserts a session into the history table.
+// --- Repos ---
+
+// UpsertRepo inserts or updates a repo record.
+func (d *DB) UpsertRepo(r *repo.Repo) error {
+	_, err := d.db.Exec(`INSERT INTO repos (id, name, url, first_seen) VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url`,
+		r.ID, r.Name, r.URL, time.Now().Format(time.RFC3339))
+	return err
+}
+
+// UpsertCwdRepo persists a cwd → repo_id mapping.
+func (d *DB) UpsertCwdRepo(cwd, repoID string) error {
+	_, err := d.db.Exec(`INSERT INTO cwd_repos (cwd, repo_id) VALUES (?, ?)
+		ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id`, cwd, repoID)
+	return err
+}
+
+// LoadCwdRepos returns all persisted cwd → repo_id mappings.
+func (d *DB) LoadCwdRepos() (map[string]string, error) {
+	rows, err := d.db.Query(`SELECT cwd, repo_id FROM cwd_repos`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]string)
+	for rows.Next() {
+		var cwd, repoID string
+		if err := rows.Scan(&cwd, &repoID); err != nil {
+			return nil, err
+		}
+		result[cwd] = repoID
+	}
+	return result, rows.Err()
+}
+
+// ClearCwdRepos deletes all cwd → repo_id mappings.
+func (d *DB) ClearCwdRepos() error {
+	_, err := d.db.Exec(`DELETE FROM cwd_repos`)
+	return err
+}
+
+// --- Sessions ---
+
+// SaveSession upserts a session into the sessions table from live session state.
 func (d *DB) SaveSession(s *session.Session) error {
 	var endedAt string
-	var duration float64
+	var startedAt string
 	if !s.LastActive.IsZero() {
 		endedAt = s.LastActive.Format(time.RFC3339)
 	}
-	if !s.StartedAt.IsZero() && !s.LastActive.IsZero() {
-		duration = s.LastActive.Sub(s.StartedAt).Seconds()
-	}
-	var startedAt string
 	if !s.StartedAt.IsZero() {
 		startedAt = s.StartedAt.Format(time.RFC3339)
 	}
 
-	var cacheHitPct float64
-	totalInput := s.InputTokens + s.CacheReadTokens + s.CacheCreationTokens
-	if totalInput > 0 {
-		cacheHitPct = float64(s.CacheReadTokens) / float64(totalInput) * 100
-	}
-
-	_, err := d.db.Exec(`INSERT INTO session_history
-		(id, project_name, session_name, total_cost, input_tokens, output_tokens,
-		 cache_read_tokens, cache_creation_tokens, cache_hit_pct, message_count, error_count,
-		 started_at, ended_at, duration_seconds, model, cwd, git_branch, task_description, parent_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := d.db.Exec(`INSERT INTO sessions
+		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
+		 started_at, ended_at, total_cost, input_tokens, output_tokens,
+		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
+		 version, entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
-		 project_name=excluded.project_name,
+		 repo_id=excluded.repo_id,
+		 parent_id=excluded.parent_id,
 		 session_name=excluded.session_name,
+		 task_description=excluded.task_description,
+		 cwd=excluded.cwd,
+		 branch=excluded.branch,
+		 model=excluded.model,
+		 started_at=excluded.started_at,
+		 ended_at=excluded.ended_at,
 		 total_cost=excluded.total_cost,
 		 input_tokens=excluded.input_tokens,
 		 output_tokens=excluded.output_tokens,
 		 cache_read_tokens=excluded.cache_read_tokens,
 		 cache_creation_tokens=excluded.cache_creation_tokens,
-		 cache_hit_pct=excluded.cache_hit_pct,
 		 message_count=excluded.message_count,
+		 event_count=excluded.event_count,
 		 error_count=excluded.error_count,
-		 started_at=excluded.started_at,
-		 ended_at=excluded.ended_at,
-		 duration_seconds=excluded.duration_seconds,
-		 model=excluded.model,
-		 cwd=excluded.cwd,
-		 git_branch=excluded.git_branch,
-		 task_description=excluded.task_description,
-		 parent_id=excluded.parent_id`,
-		s.ID, s.ProjectName, s.SessionName, s.TotalCost,
-		s.InputTokens, s.OutputTokens, s.CacheReadTokens, s.CacheCreationTokens,
-		cacheHitPct, s.MessageCount, s.ErrorCount,
-		startedAt, endedAt, duration,
-		s.Model, s.CWD, s.GitBranch, s.TaskDescription, s.ParentID,
+		 version=excluded.version,
+		 entrypoint=excluded.entrypoint`,
+		s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
+		s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
+		s.TotalCost, s.InputTokens, s.OutputTokens,
+		s.CacheReadTokens, s.CacheCreationTokens,
+		s.MessageCount, s.EventCount, s.ErrorCount,
+		s.Version, s.Entrypoint,
 	)
 	return err
 }
 
-// ListHistory returns historical session rows ordered by ended_at descending.
-func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
+// ListSessions returns sessions ordered by ended_at descending.
+func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := d.db.Query(`SELECT
-		id, project_name, session_name, total_cost, input_tokens, output_tokens,
-		cache_read_tokens, COALESCE(cache_creation_tokens, 0), COALESCE(cache_hit_pct, 0),
-		message_count, error_count,
-		started_at, ended_at, duration_seconds, model, cwd, git_branch,
-		task_description, parent_id
-		FROM session_history
-		ORDER BY ended_at DESC
-		LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+		FROM sessions ORDER BY ended_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSessionRows(rows)
+}
 
-	var result []HistoryRow
+// GetSession returns a single session by ID.
+func (d *DB) GetSession(id string) (*SessionRow, error) {
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+		FROM sessions WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result, err := scanSessionRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return &result[0], nil
+}
+
+// ListSessionsByRepo returns sessions for a given repo, ordered by ended_at descending.
+func (d *DB) ListSessionsByRepo(repoID string, limit, offset int) ([]SessionRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+		FROM sessions WHERE repo_id = ? ORDER BY ended_at DESC LIMIT ? OFFSET ?`, repoID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
+// AggregateStatsByRepo returns aggregate statistics for a single repo.
+func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
+	r := &AggregateResult{
+		CostByModel: make(map[string]float64),
+		CostByRepo:  make(map[string]float64),
+	}
+	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
+		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
+		FROM sessions WHERE repo_id = ?`, repoID).Scan(
+		&r.TotalCost, &r.InputTokens, &r.OutputTokens,
+		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	modelRows, err := d.db.Query(`SELECT COALESCE(model,''), SUM(total_cost)
+		FROM sessions WHERE repo_id = ? GROUP BY model`, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer modelRows.Close()
+	for modelRows.Next() {
+		var model string
+		var cost float64
+		if err := modelRows.Scan(&model, &cost); err != nil {
+			return nil, err
+		}
+		if model != "" {
+			r.CostByModel[model] = cost
+		}
+	}
+	r.CostByRepo[repoID] = r.TotalCost
+	return r, nil
+}
+
+// ListRepos returns all repos with their names.
+type RepoRow struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	URL       string  `json:"url,omitempty"`
+	TotalCost float64 `json:"totalCost"`
+}
+
+func (d *DB) ListRepos() ([]RepoRow, error) {
+	rows, err := d.db.Query(`SELECT r.id, r.name, COALESCE(r.url,''),
+		COALESCE(SUM(s.total_cost), 0)
+		FROM repos r LEFT JOIN sessions s ON s.repo_id = r.id
+		GROUP BY r.id ORDER BY COALESCE(SUM(s.total_cost),0) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []RepoRow
 	for rows.Next() {
-		var r HistoryRow
+		var r RepoRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.TotalCost); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
+	var result []SessionRow
+	for rows.Next() {
+		var r SessionRow
 		if err := rows.Scan(
-			&r.ID, &r.ProjectName, &r.SessionName, &r.TotalCost,
-			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
-			&r.CacheCreationTokens, &r.CacheHitPct, &r.MessageCount, &r.ErrorCount,
+			&r.ID, &r.RepoID, &r.ParentID, &r.SessionName,
+			&r.TaskDescription, &r.CWD, &r.Branch, &r.Model,
 			&r.StartedAt, &r.EndedAt,
-			&r.DurationSeconds, &r.Model, &r.CWD, &r.GitBranch,
-			&r.TaskDescription, &r.ParentID,
+			&r.TotalCost, &r.InputTokens, &r.OutputTokens,
+			&r.CacheReadTokens, &r.CacheCreationTokens,
+			&r.MessageCount, &r.EventCount, &r.ErrorCount,
+			&r.Version, &r.Entrypoint,
 		); err != nil {
 			return result, err
 		}
@@ -162,38 +438,24 @@ func (d *DB) ListHistory(limit, offset int) ([]HistoryRow, error) {
 	return result, rows.Err()
 }
 
-// AggregateResult holds aggregate statistics across sessions.
-type AggregateResult struct {
-	TotalCost           float64            `json:"totalCost"`
-	InputTokens         int64              `json:"inputTokens"`
-	OutputTokens        int64              `json:"outputTokens"`
-	CacheReadTokens     int64              `json:"cacheReadTokens"`
-	CacheCreationTokens int64              `json:"cacheCreationTokens"`
-	SessionCount        int                `json:"sessionCount"`
-	CostByModel         map[string]float64 `json:"costByModel"`
-}
-
-// AggregateStats returns aggregate statistics for top-level sessions.
-// When since is the zero value, all sessions are included.
+// AggregateStats returns aggregate statistics. Includes ALL sessions (no parent filter).
 func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
-	r := &AggregateResult{CostByModel: make(map[string]float64)}
-
-	var sumQuery string
-	var sumArgs []interface{}
-	if since.IsZero() {
-		sumQuery = `SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
-			COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
-			COALESCE(SUM(COALESCE(cache_creation_tokens,0)),0), COUNT(*)
-			FROM session_history WHERE parent_id = ''`
-	} else {
-		sumQuery = `SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
-			COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
-			COALESCE(SUM(COALESCE(cache_creation_tokens,0)),0), COUNT(*)
-			FROM session_history WHERE parent_id = '' AND started_at >= ?`
-		sumArgs = append(sumArgs, since.Format(time.RFC3339))
+	r := &AggregateResult{
+		CostByModel: make(map[string]float64),
+		CostByRepo:  make(map[string]float64),
 	}
 
-	err := d.db.QueryRow(sumQuery, sumArgs...).Scan(
+	var where string
+	var args []interface{}
+	if !since.IsZero() {
+		where = ` WHERE started_at >= ?`
+		args = append(args, since.Format(time.RFC3339))
+	}
+
+	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
+		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
+		FROM sessions`+where, args...).Scan(
 		&r.TotalCost, &r.InputTokens, &r.OutputTokens,
 		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount,
 	)
@@ -201,75 +463,482 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 		return nil, err
 	}
 
-	var modelQuery string
-	var modelArgs []interface{}
-	if since.IsZero() {
-		modelQuery = `SELECT model, SUM(total_cost) FROM session_history WHERE parent_id = '' GROUP BY model`
-	} else {
-		modelQuery = `SELECT model, SUM(total_cost) FROM session_history WHERE parent_id = '' AND started_at >= ? GROUP BY model`
-		modelArgs = append(modelArgs, since.Format(time.RFC3339))
-	}
-
-	rows, err := d.db.Query(modelQuery, modelArgs...)
+	// Cost by model
+	modelRows, err := d.db.Query(`SELECT COALESCE(model,''), SUM(total_cost)
+		FROM sessions`+where+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	for rows.Next() {
+	defer modelRows.Close()
+	for modelRows.Next() {
 		var model string
 		var cost float64
-		if err := rows.Scan(&model, &cost); err != nil {
+		if err := modelRows.Scan(&model, &cost); err != nil {
 			return nil, err
 		}
-		r.CostByModel[model] = cost
+		if model != "" {
+			r.CostByModel[model] = cost
+		}
 	}
 
-	return r, rows.Err()
+	// Cost by repo
+	repoRows, err := d.db.Query(`SELECT COALESCE(repo_id,''), SUM(total_cost)
+		FROM sessions`+where+` GROUP BY repo_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer repoRows.Close()
+	for repoRows.Next() {
+		var repoID string
+		var cost float64
+		if err := repoRows.Scan(&repoID, &cost); err != nil {
+			return nil, err
+		}
+		if repoID != "" {
+			r.CostByRepo[repoID] = cost
+		}
+	}
+
+	return r, nil
 }
 
-// SessionSnapshot holds a point-in-time snapshot of a session's cost and token data.
-type SessionSnapshot struct {
-	TotalCost           float64
-	InputTokens         int64
-	OutputTokens        int64
-	CacheReadTokens     int64
-	CacheCreationTokens int64
+// --- Events ---
+
+// EventBatch holds events to be persisted in a single transaction.
+type EventBatch struct {
+	Events []EventInsert
 }
 
-// GetSessionSnapshots returns snapshots for the given session IDs.
-func (d *DB) GetSessionSnapshots(ids []string) (map[string]SessionSnapshot, error) {
-	result := make(map[string]SessionSnapshot)
-	if len(ids) == 0 {
-		return result, nil
+// EventInsert holds data for a single event to insert.
+type EventInsert struct {
+	SessionID   string
+	Event       *parser.Event
+	FullContent string // goes to event_content table
+}
+
+// PersistBatch inserts a batch of events and updates session aggregates in a single transaction.
+func (d *DB) PersistBatch(batch *EventBatch) error {
+	if len(batch.Events) == 0 {
+		return nil
 	}
 
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin batch: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventStmt, err := tx.Prepare(`INSERT INTO events
+		(session_id, uuid, message_id, type, role, content_preview, tool_name, tool_detail,
+		 cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+		 model, is_error, stop_reason, hook_event, hook_name,
+		 tool_use_id, for_tool_use_id, is_agent, timestamp,
+		 duration_ms, success, stderr, interrupted, truncated,
+		 agent_duration_ms, agent_tokens, agent_tool_use_count, agent_type,
+		 subtype, turn_message_count, hook_count, hook_infos, level,
+		 is_meta, version, entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id, COALESCE(message_id, uuid)) DO UPDATE SET
+		 content_preview=excluded.content_preview,
+		 cost_usd=excluded.cost_usd,
+		 input_tokens=excluded.input_tokens,
+		 output_tokens=excluded.output_tokens,
+		 cache_read_tokens=excluded.cache_read_tokens,
+		 cache_creation_tokens=excluded.cache_creation_tokens,
+		 is_error=excluded.is_error,
+		 stop_reason=excluded.stop_reason,
+		 timestamp=excluded.timestamp,
+		 duration_ms=excluded.duration_ms,
+		 success=excluded.success,
+		 stderr=excluded.stderr,
+		 interrupted=excluded.interrupted,
+		 truncated=excluded.truncated,
+		 agent_duration_ms=excluded.agent_duration_ms,
+		 agent_tokens=excluded.agent_tokens,
+		 agent_tool_use_count=excluded.agent_tool_use_count,
+		 agent_type=excluded.agent_type,
+		 subtype=excluded.subtype,
+		 turn_message_count=excluded.turn_message_count,
+		 hook_count=excluded.hook_count,
+		 hook_infos=excluded.hook_infos,
+		 level=excluded.level,
+		 is_meta=excluded.is_meta,
+		 version=excluded.version,
+		 entrypoint=excluded.entrypoint`)
+	if err != nil {
+		return fmt.Errorf("prepare event stmt: %w", err)
+	}
+	defer eventStmt.Close()
+
+	contentStmt, err := tx.Prepare(`INSERT INTO event_content (event_id, tier, content) VALUES (?, 'hot', ?)
+		ON CONFLICT(event_id) DO UPDATE SET content=excluded.content`)
+	if err != nil {
+		return fmt.Errorf("prepare content stmt: %w", err)
+	}
+	defer contentStmt.Close()
+
+	// FTS5 uses INSERT OR REPLACE to handle both new inserts and updates.
+	ftsStmt, err := tx.Prepare(`INSERT OR REPLACE INTO events_fts(rowid, content_preview, tool_name, tool_detail)
+		VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare fts stmt: %w", err)
+	}
+	defer ftsStmt.Close()
+
+	// For upserts, LastInsertId is unreliable — look up the actual ID.
+	lookupStmt, err := tx.Prepare(`SELECT id FROM events WHERE session_id = ? AND COALESCE(message_id, uuid) = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare lookup stmt: %w", err)
+	}
+	defer lookupStmt.Close()
+
+	for _, ei := range batch.Events {
+		ev := ei.Event
+		var messageID *string
+		if ev.MessageID != "" {
+			messageID = &ev.MessageID
+		}
+
+		result, err := eventStmt.Exec(
+			ei.SessionID, ev.UUID, messageID, ev.Type, ev.Role,
+			ev.ContentText, ev.ToolName, ev.ToolDetail,
+			ev.CostUSD, ev.InputTokens, ev.OutputTokens,
+			ev.CacheReadTokens, ev.CacheCreationTokens,
+			ev.Model, ev.IsError, ev.StopReason,
+			ev.HookEvent, ev.HookName,
+			ev.ToolUseID, ev.ForToolUseID, ev.IsAgent,
+			ev.Timestamp.Format(time.RFC3339Nano),
+			ev.DurationMs, ev.Success, ev.Stderr, ev.Interrupted, ev.Truncated,
+			ev.AgentDurationMs, ev.AgentTokens, ev.AgentToolUseCount, ev.AgentType,
+			ev.Subtype, ev.TurnMessageCount, ev.HookCount, ev.HookInfos, ev.Level,
+			ev.IsMeta, ev.Version, ev.Entrypoint,
+		)
+		if err != nil {
+			return fmt.Errorf("insert event: %w", err)
+		}
+
+		// Resolve the actual event ID for content and FTS association.
+		// ON CONFLICT may fire for any upsert, so LastInsertId is unreliable.
+		// Look up by the dedup key: message_id if present, else uuid.
+		var eventID int64
+		dedupKey := ev.UUID
+		if ev.MessageID != "" {
+			dedupKey = ev.MessageID
+		}
+		if dedupKey != "" {
+			if err := lookupStmt.QueryRow(ei.SessionID, dedupKey).Scan(&eventID); err != nil {
+				return fmt.Errorf("lookup event id: %w", err)
+			}
+		} else {
+			eventID, err = result.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("get last insert id: %w", err)
+			}
+		}
+
+		// Insert/update full content if present
+		if ei.FullContent != "" {
+			if _, err := contentStmt.Exec(eventID, ei.FullContent); err != nil {
+				return fmt.Errorf("insert content: %w", err)
+			}
+		}
+
+		// Update FTS5 index
+		if _, err := ftsStmt.Exec(eventID, ev.ContentText, ev.ToolName, ev.ToolDetail); err != nil {
+			return fmt.Errorf("insert fts: %w", err)
+		}
 	}
 
-	query := `SELECT id, total_cost, input_tokens, output_tokens, cache_read_tokens,
-		COALESCE(cache_creation_tokens,0) FROM session_history
-		WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+	return tx.Commit()
+}
 
-	rows, err := d.db.Query(query, args...)
+// ListEvents returns events for a session, ordered by timestamp.
+func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+		COALESCE(ec.content,'')
+		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
+		WHERE e.session_id = ?
+		ORDER BY e.timestamp ASC
+		LIMIT ? OFFSET ?`, sessionID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanEventRows(rows)
+}
 
-	for rows.Next() {
-		var id string
-		var s SessionSnapshot
-		if err := rows.Scan(&id, &s.TotalCost, &s.InputTokens, &s.OutputTokens,
-			&s.CacheReadTokens, &s.CacheCreationTokens); err != nil {
-			return nil, err
-		}
-		result[id] = s
+// ListPinnedEvents returns all error and agent events for a session, ordered chronologically.
+// These are "pinned" because they should always be visible regardless of the recent-events window.
+func (d *DB) ListPinnedEvents(sessionID string) ([]EventRow, error) {
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+		COALESCE(ec.content,'')
+		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
+		WHERE e.session_id = ? AND (e.is_error = 1 OR e.is_agent = 1 OR e.content_preview LIKE '[agent%')
+		ORDER BY e.timestamp ASC`, sessionID)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+	return scanEventRows(rows)
+}
 
+// ListRecentEvents returns the last N events for a session.
+func (d *DB) ListRecentEvents(sessionID string, n int) ([]EventRow, error) {
+	if n <= 0 {
+		n = 50
+	}
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+		COALESCE(ec.content,'')
+		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
+		WHERE e.session_id = ?
+		ORDER BY e.timestamp DESC
+		LIMIT ?`, sessionID, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result, err := scanEventRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Reverse to chronological order
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result, nil
+}
+
+func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
+	var result []EventRow
+	for rows.Next() {
+		var r EventRow
+		var fullContent string
+		var durationMs, agentDurationMs, agentTokens sql.NullInt64
+		var agentToolUseCount, turnMessageCount, hookCount sql.NullInt64
+		var success sql.NullBool
+		if err := rows.Scan(
+			&r.ID, &r.SessionID, &r.UUID, &r.MessageID,
+			&r.Type, &r.Role, &r.ContentPreview,
+			&r.ToolName, &r.ToolDetail,
+			&r.CostUSD, &r.InputTokens, &r.OutputTokens,
+			&r.CacheReadTokens, &r.CacheCreationTokens,
+			&r.Model, &r.IsError, &r.StopReason,
+			&r.HookEvent, &r.HookName,
+			&r.ToolUseID, &r.ForToolUseID, &r.IsAgent,
+			&r.Timestamp,
+			&durationMs, &success, &r.Stderr, &r.Interrupted, &r.Truncated,
+			&agentDurationMs, &agentTokens, &agentToolUseCount, &r.AgentType,
+			&r.Subtype, &turnMessageCount, &hookCount, &r.HookInfos, &r.Level,
+			&r.IsMeta, &r.Version, &r.Entrypoint,
+			&fullContent,
+		); err != nil {
+			return result, err
+		}
+		if fullContent != "" {
+			r.FullContent = fullContent
+		}
+		if durationMs.Valid {
+			v := durationMs.Int64; r.DurationMs = &v
+		}
+		if success.Valid {
+			v := success.Bool; r.Success = &v
+		}
+		if agentDurationMs.Valid {
+			v := agentDurationMs.Int64; r.AgentDurationMs = &v
+		}
+		if agentTokens.Valid {
+			v := agentTokens.Int64; r.AgentTokens = &v
+		}
+		if agentToolUseCount.Valid {
+			v := int(agentToolUseCount.Int64); r.AgentToolUseCount = &v
+		}
+		if turnMessageCount.Valid {
+			v := int(turnMessageCount.Int64); r.TurnMessageCount = &v
+		}
+		if hookCount.Valid {
+			v := int(hookCount.Int64); r.HookCount = &v
+		}
+		result = append(result, r)
+	}
 	return result, rows.Err()
 }
+
+// --- Search ---
+
+// SearchFTS searches the FTS5 index for matching events.
+func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	// Wrap in double quotes to treat as a literal phrase, escaping any
+	// internal double quotes. This prevents FTS5 syntax errors from
+	// user-supplied queries (e.g. unbalanced quotes, bare operators).
+	safe := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+		''
+		FROM events_fts fts
+		JOIN events e ON e.id = fts.rowid
+		WHERE events_fts MATCH ?
+		ORDER BY fts.rank * (1.0 + 10.0 / (1.0 + (julianday('now') - julianday(e.timestamp)) * 24.0))
+		LIMIT ?`, safe, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEventRows(rows)
+}
+
+// SearchFullContent scans event_content for a substring match (slower, for key leak detection etc).
+func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+		COALESCE(ec.content,'')
+		FROM event_content ec
+		JOIN events e ON e.id = ec.event_id
+		WHERE ec.content LIKE ?
+		ORDER BY e.timestamp DESC
+		LIMIT ?`, "%"+query+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEventRows(rows)
+}
+
+// --- Settings ---
+
+// GetSetting returns a setting value by key.
+func (d *DB) GetSetting(key string) (string, error) {
+	var value string
+	err := d.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	return value, err
+}
+
+// SetSetting upserts a setting.
+func (d *DB) SetSetting(key, value string) error {
+	_, err := d.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+// AllSettings returns all settings as a map.
+func (d *DB) AllSettings() (map[string]string, error) {
+	rows, err := d.db.Query(`SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		result[k] = v
+	}
+	return result, rows.Err()
+}
+
+// --- Retention ---
+
+// CompactHotToWarm compresses event_content older than hotDays into gzip BLOBs.
+func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
+	cutoff := time.Now().AddDate(0, 0, -hotDays).Format(time.RFC3339)
+
+	rows, err := d.db.Query(`SELECT ec.event_id, ec.content FROM event_content ec
+		JOIN events e ON e.id = ec.event_id
+		WHERE ec.tier = 'hot' AND ec.content IS NOT NULL AND e.timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type compactEntry struct {
+		eventID int64
+		data    []byte
+	}
+	var entries []compactEntry
+
+	for rows.Next() {
+		var eventID int64
+		var content string
+		if err := rows.Scan(&eventID, &content); err != nil {
+			return 0, err
+		}
+		var buf bytes.Buffer
+		w := gzip.NewWriter(&buf)
+		if _, err := io.WriteString(w, content); err != nil {
+			w.Close()
+			continue
+		}
+		w.Close()
+		entries = append(entries, compactEntry{eventID: eventID, data: buf.Bytes()})
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	if len(entries) == 0 {
+		return 0, nil
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE event_content SET tier='warm', content=NULL, compressed=? WHERE event_id=?`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
+		if _, err := stmt.Exec(e.data, e.eventID); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int64(len(entries)), nil
+}
+
+// CompactWarmToCold deletes event_content older than warmDays.
+func (d *DB) CompactWarmToCold(warmDays int) (int64, error) {
+	cutoff := time.Now().AddDate(0, 0, -warmDays).Format(time.RFC3339)
+	result, err := d.db.Exec(`DELETE FROM event_content WHERE event_id IN (
+		SELECT ec.event_id FROM event_content ec
+		JOIN events e ON e.id = ec.event_id
+		WHERE e.timestamp < ?)`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// StorageInfo returns storage statistics.
+func (d *DB) StorageInfo() (*StorageInfo, error) {
+	info := &StorageInfo{}
+
+	// Total DB size via page_count * page_size
+	if err := d.db.QueryRow(`SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&info.TotalSizeBytes); err != nil {
+		// Fallback: just count events
+		info.TotalSizeBytes = 0
+	}
+
+	d.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&info.EventCount)
+	d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes)
+	d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes)
+
+	return info, nil
+}
+

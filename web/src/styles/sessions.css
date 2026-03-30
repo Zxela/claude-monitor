@@ -55,12 +55,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 5px 10px 3px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   color: var(--text-dim);
   cursor: pointer;
   user-select: none;
   border-bottom: 1px solid var(--border);
+  letter-spacing: 1px;
 }
 
 .time-group-header:hover { color: var(--text); }
@@ -74,17 +75,29 @@
 
 .time-group-collapsed .time-group-items { display: none; }
 
+.time-group-empty {
+  padding: 24px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-align: center;
+  opacity: 0.4;
+}
+
 .show-all-btn {
   display: block;
   width: 100%;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 9px;
   color: var(--cyan);
   cursor: pointer;
   background: none;
   border: none;
   font-family: var(--font-mono);
   text-align: left;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
 }
 
 .show-all-btn:hover { color: var(--text); }
@@ -129,8 +142,6 @@
 /* Subagent indentation */
 .session-card.subagent {
   margin-left: 16px;
-  opacity: 0.85;
-  font-size: 0.95em;
 }
 
 .session-card.subagent::before { background: rgba(136, 0, 255, 0.4); }
@@ -297,31 +308,49 @@
 
 /* ======= Compact card (timeline groups) ======= */
 .session-card-compact {
-  padding: 4px 0 2px 0;
+  padding: 6px 10px 5px 10px;
+  margin-bottom: 3px;
   display: flex;
   flex-direction: column;
   cursor: pointer;
   font-size: 12px;
-  transition: background 0.15s;
-  border-left: 2px solid transparent;
+  transition: border-color 0.2s, background 0.2s;
+  background: #13131f;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Left accent bar matching expanded cards */
+.session-card-compact::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--border);
+  transition: background 0.2s;
 }
 
 .compact-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px 0 8px;
 }
 
-.session-card-compact:hover { background: var(--bg-hover); }
-.session-card-compact.selected { background: var(--bg-hover); border-left-color: var(--cyan); }
+.session-card-compact:hover { border-color: #444; background: #16162a; }
+.session-card-compact.selected {
+  border-color: var(--cyan);
+  background: rgba(68, 136, 255, 0.06);
+  box-shadow: 0 0 12px rgba(68, 136, 255, 0.1);
+}
+.session-card-compact.selected::before { background: var(--cyan); }
+.session-card-compact.active-card::before { background: var(--green); }
 
 .session-card-compact.subagent {
   margin-left: 16px;
-  border-left: 2px solid rgba(136, 0, 255, 0.3);
-  opacity: 0.85;
-  font-size: 0.95em;
 }
+.session-card-compact.subagent::before { background: rgba(136, 0, 255, 0.4); }
 
 .session-card-compact .session-name {
   flex: 1;
@@ -332,6 +361,7 @@
 }
 
 .session-card-compact .cost { color: var(--yellow); font-size: 11px; font-weight: 600; }
+.session-card-compact .cost-rate { color: var(--text-dim); font-size: 9px; opacity: 0.6; }
 .session-card-compact .duration { color: #44445a; font-size: 10px; }
 .session-card-compact .model {
   font-size: 9px;
@@ -344,7 +374,7 @@
 .session-card-compact .subagent-chevron { font-size: 9px; }
 
 .compact-task-desc {
-  padding: 0 10px 1px 18px;
+  padding: 0 0 1px 13px;
   font-size: 10px;
   color: var(--text-dim, #888);
   white-space: nowrap;
@@ -355,7 +385,7 @@
 .compact-meta {
   display: flex;
   gap: 8px;
-  padding: 1px 10px 3px 18px;
+  padding: 1px 0 0 13px;
   font-size: 10px;
   color: var(--text-dim, #666);
   align-items: center;
@@ -375,11 +405,15 @@
 /* Idle subagent toggle */
 .idle-toggle {
   margin-left: 20px;
-  padding: 2px 8px;
-  font-size: 10px;
+  padding: 3px 8px;
+  font-size: 9px;
   color: var(--text-dim);
   cursor: pointer;
-  opacity: 0.6;
+  opacity: 0.5;
+  letter-spacing: 0.5px;
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
 }
 
 .idle-toggle:hover { opacity: 1; color: var(--text); }

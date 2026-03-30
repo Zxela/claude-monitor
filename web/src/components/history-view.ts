@@ -1,26 +1,34 @@
 // web/src/components/history-view.ts
-import type { HistoryRow } from '../types';
+import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchHistory } from '../api';
-import { formatDurationSecs, formatTokens } from '../utils';
+import { fetchSessions } from '../api';
+import { formatDurationSecs, formatTokens, sessionDisplayName } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
-let data: HistoryRow[] = [];
-let sortCol = 'endedAt';
+let data: Session[] = [];
+let sortCol = 'lastActive';
 let sortAsc = false;
 const collapsedParents = new Set<string>();
 
-type Column = { key: string; label: string; cls?: string; fmt: (r: HistoryRow) => string };
+type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
 
 const COLUMNS: Column[] = [
-  { key: 'endedAt', label: 'Date', cls: 'col-dim', fmt: r => r.endedAt ? new Date(r.endedAt).toLocaleString() : '' },
-  { key: 'projectName', label: 'Name', fmt: r => r.sessionName || r.projectName || r.id },
+  { key: 'lastActive', label: 'Date', cls: 'col-dim', fmt: r => r.lastActive ? new Date(r.lastActive).toLocaleString() : '' },
+  { key: 'projectName', label: 'Name', fmt: r => sessionDisplayName(r) },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
-  { key: 'durationSeconds', label: 'Duration', cls: 'col-dim', fmt: r => formatDurationSecs(r.durationSeconds) },
+  { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: r => {
+    if (!r.startedAt || !r.lastActive) return '';
+    const secs = (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000;
+    return formatDurationSecs(secs);
+  }},
   { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0)) },
-  { key: 'cacheHitPct', label: 'Cache%', cls: 'col-cache', fmt: r => r.cacheHitPct > 0 ? `${Math.round(r.cacheHitPct)}%` : '' },
+  { key: 'cache', label: 'Cache%', cls: 'col-cache', fmt: r => {
+    const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
+    if (total === 0) return '';
+    return `${Math.round(r.cacheReadTokens / total * 100)}%`;
+  }},
   { key: 'messageCount', label: 'Msgs', fmt: r => String(r.messageCount) },
   { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: r => r.errorCount > 0 ? String(r.errorCount) : '' },
   { key: 'model', label: 'Model', cls: 'col-model', fmt: r => (r.model || '').replace('claude-', '') },
@@ -34,8 +42,13 @@ export function render(mount: HTMLElement): void {
 let historyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('view') && state.view === 'history') {
-    loadData();
+  if (changed.has('view')) {
+    if (state.view === 'history') {
+      loadData();
+    } else {
+      // Clear any pending refresh timer when leaving history view
+      if (historyRefreshTimer) { clearTimeout(historyRefreshTimer); historyRefreshTimer = null; }
+    }
   }
   if (changed.has('historyShowSubagents') && state.view === 'history') {
     show();
@@ -48,8 +61,12 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 }
 
 async function loadData(): Promise<void> {
+  if (state.view !== 'history') return; // Guard against stale timer callbacks
   try {
-    data = await fetchHistory(200, 0);
+    const raw = await fetchSessions(200, 0);
+    // Filter out trivial sessions (no cost, no tokens, few messages)
+    data = raw.filter(s => s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3);
+    if (state.view !== 'history') return; // Re-check after async
     show();
   } catch (err) {
     console.error('Failed to load history:', err);
@@ -70,10 +87,10 @@ function exportCsv(): void {
 }
 
 /** Group rows: parents first (sorted), children grouped under their parent */
-function groupRows(rows: HistoryRow[]): { parent: HistoryRow; children: HistoryRow[] }[] {
-  const childrenByParent = new Map<string, HistoryRow[]>();
-  const parents: HistoryRow[] = [];
-  const rowById = new Map<string, HistoryRow>();
+function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] {
+  const childrenByParent = new Map<string, Session[]>();
+  const parents: Session[] = [];
+  const rowById = new Map<string, Session>();
 
   for (const row of rows) {
     rowById.set(row.id, row);
@@ -135,7 +152,7 @@ function show(): void {
   toolbar.className = 'history-toolbar';
 
   const exportBtn = document.createElement('button');
-  exportBtn.textContent = 'Export CSV';
+  exportBtn.textContent = 'EXPORT CSV';
   exportBtn.style.cssText = 'padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
   exportBtn.addEventListener('click', exportCsv);
   toolbar.appendChild(exportBtn);
@@ -153,7 +170,7 @@ function show(): void {
       update({ historyShowSubagents: !checkbox.checked });
     });
     toggleLabel.appendChild(checkbox);
-    toggleLabel.append(' Minimize all');
+    toggleLabel.append(' MINIMIZE ALL');
     toolbar.appendChild(toggleLabel);
   }
 
@@ -253,7 +270,7 @@ function show(): void {
   container.appendChild(wrapper);
 }
 
-function createRow(row: HistoryRow, isChild: boolean): HTMLTableRowElement {
+function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
   const tr = document.createElement('tr');
   if (isChild) tr.className = 'history-child-row';
 
@@ -275,21 +292,21 @@ function createRow(row: HistoryRow, isChild: boolean): HTMLTableRowElement {
   return tr;
 }
 
-function sortData(rows: HistoryRow[]): HistoryRow[] {
+function sortData(rows: Session[]): Session[] {
   return rows.sort((a, b) => {
     let va: number | string, vb: number | string;
     switch (sortCol) {
       case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0); vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0); break;
-      case 'projectName': va = (a.sessionName || a.projectName || '').toLowerCase(); vb = (b.sessionName || b.projectName || '').toLowerCase(); break;
+      case 'projectName': va = sessionDisplayName(a).toLowerCase(); vb = sessionDisplayName(b).toLowerCase(); break;
       case 'model': va = a.model || ''; vb = b.model || ''; break;
-      case 'endedAt': va = a.endedAt || ''; vb = b.endedAt || ''; break;
+      case 'lastActive': va = a.lastActive || ''; vb = b.lastActive || ''; break;
       default: {
-        const numericAccessors: Record<string, (r: HistoryRow) => number> = {
+        const numericAccessors: Record<string, (r: Session) => number> = {
           totalCost: r => r.totalCost,
-          durationSeconds: r => r.durationSeconds,
+          duration: r => r.startedAt && r.lastActive ? (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000 : 0,
           messageCount: r => r.messageCount,
           errorCount: r => r.errorCount,
-          cacheHitPct: r => r.cacheHitPct,
+          cache: r => { const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return t > 0 ? r.cacheReadTokens / t * 100 : 0; },
         };
         const accessor = numericAccessors[sortCol];
         va = accessor ? accessor(a) : 0;

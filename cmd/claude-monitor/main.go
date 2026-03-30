@@ -18,16 +18,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/zxela-claude/claude-monitor/internal/docker"
-	"github.com/zxela-claude/claude-monitor/internal/eventproc"
 	"github.com/zxela-claude/claude-monitor/internal/hub"
 	"github.com/zxela-claude/claude-monitor/internal/parser"
-	"github.com/zxela-claude/claude-monitor/internal/replay"
-	"github.com/zxela-claude/claude-monitor/internal/search"
+	"github.com/zxela-claude/claude-monitor/internal/pipeline"
+	"github.com/zxela-claude/claude-monitor/internal/repo"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store"
 	"github.com/zxela-claude/claude-monitor/internal/store/migrations"
@@ -56,9 +54,9 @@ var staticFiles embed.FS
 
 // broadcastEvent is the envelope sent to WebSocket clients.
 type broadcastEvent struct {
-	Event   string          `json:"event"`
-	Session *session.Session `json:"session"`
-	Message *parser.ParsedMessage `json:"message,omitempty"`
+	Event   string           `json:"event"`
+	Session *session.Session `json:"session,omitempty"`
+	Data    *parser.Event    `json:"data,omitempty"`
 }
 
 // repeatable is a flag.Value that accumulates multiple --watch values.
@@ -142,30 +140,13 @@ func handleMigrate(args []string) {
 }
 
 
-// sessionFinder can locate JSONL files for sessions not in the live store.
-var sessionFinder interface {
-	FindSessionFile(sessionID string) string
-}
-
-// requireSession looks up a session by path parameter "id", validates it has a
-// file path, and writes an HTTP error if not. Falls back to searching watched
-// paths for historical sessions not in the live store.
+// requireSession looks up a session by path parameter "id" and writes an HTTP
+// error if not found.
 func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
 	id := r.PathValue("id")
 	sess, ok := store.Get(id)
 	if !ok {
-		// Try to find the JSONL file on disk for historical sessions.
-		if sessionFinder != nil {
-			if filePath := sessionFinder.FindSessionFile(id); filePath != "" {
-				// Return transient session — do NOT persist to live store.
-				return &session.Session{ID: id, FilePath: filePath}, true
-			}
-		}
 		writeJSONError(w, "session not found", http.StatusNotFound)
-		return nil, false
-	}
-	if sess.FilePath == "" {
-		writeJSONError(w, "session file not available", http.StatusBadRequest)
 		return nil, false
 	}
 	return sess, true
@@ -280,10 +261,9 @@ Examples:
 	}
 
 	sessionStore := session.NewStore()
-	searchIdx := search.New()
 	h := hub.NewHub()
 
-	// Open SQLite history database.
+	// Open SQLite database.
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("cannot determine home directory: %v", err)
@@ -294,39 +274,53 @@ Examples:
 	}
 	historyDB, err := store.Open(filepath.Join(dbDir, "history.db"))
 	if err != nil {
-		log.Fatalf("cannot open history database: %v", err)
+		log.Fatalf("cannot open database: %v", err)
 	}
 	defer historyDB.Close()
 
-	// Track which sessions were previously active for inactivity transition detection.
-	// mu protects prevActive and savedToHistory from concurrent goroutine access.
-	var mu sync.Mutex
-	prevActive := make(map[string]bool)
+	// Repo resolver with persisted cwd→repo cache.
+	resolver := repo.NewResolver()
+	if cached, err := historyDB.LoadCwdRepos(); err == nil {
+		resolver.LoadCache(cached)
+	}
 
 	w, err := watcher.New([]string(extraPaths))
 	if err != nil {
 		log.Fatalf("failed to create watcher: %v", err)
 	}
 
-	proc := eventproc.New(sessionStore)
-	sessionFinder = w // allow requireSession to find historical JSONL files
-
-	// processAndIndex runs the event processor and feeds the search index.
-	processAndIndex := func(ev watcher.Event) (*parser.ParsedMessage, *session.Session, bool) {
-		res := proc.Process(ev)
-		if res.Message != nil && res.Session != nil {
-			displayName := res.Session.ProjectName
-			if res.Session.SessionName != "" {
-				displayName = res.Session.SessionName
-			}
-			searchIdx.Add(ev.SessionID, displayName, res.Session.ProjectName, *res.Message)
+	// Create pipeline with broadcast callback.
+	pipe := pipeline.New(sessionStore, historyDB, resolver, func(event *parser.Event, sess *session.Session, isNew, sendDetail bool) {
+		// Always send session_update
+		eventType := "session_update"
+		if isNew {
+			eventType = "session_new"
 		}
-		return res.Message, res.Session, res.IsNew
-	}
+		payload, err := json.Marshal(broadcastEvent{
+			Event:   eventType,
+			Session: sess,
+		})
+		if err == nil {
+			h.Broadcast(payload)
+		}
 
-	// Bootstrap callback: process historical lines for stats only (no broadcast).
+		// Send full event detail for meaningful events
+		if sendDetail {
+			detail, err := json.Marshal(broadcastEvent{
+				Event:   "event",
+				Session: sess,
+				Data:    event,
+			})
+			if err == nil {
+				h.Broadcast(detail)
+			}
+		}
+	})
+	defer pipe.Stop()
+
+	// Bootstrap callback: process through pipeline (no broadcast — handled internally).
 	w.SetBootstrapCallback(func(ev watcher.Event) {
-		processAndIndex(ev)
+		pipe.Process(ev)
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -388,107 +382,46 @@ Examples:
 		}
 	}
 
-	// Immediately persist all inactive sessions from bootstrap to history DB.
-	savedToHistory := make(map[string]bool)
-	mu.Lock()
-	{
-		saved := 0
-		for _, sess := range sessionStore.All() {
-			if !sess.IsActive && sess.MessageCount > 0 {
-				if err := historyDB.SaveSession(sess); err != nil {
-					log.Printf("history save error for %s: %v", sess.ID, err)
-				} else {
-					saved++
-				}
-				savedToHistory[sess.ID] = true
-			}
-			prevActive[sess.ID] = sess.IsActive
-		}
-		if saved > 0 {
-			log.Printf("persisted %d sessions to history on startup", saved)
-		}
-	}
-	mu.Unlock()
-
-	// Periodic goroutine: persist history on inactivity transitions.
+	// Process watcher events through the pipeline.
+	// The pipeline handles: parse → resolve repo → apply session → broadcast + batch persist.
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		for ev := range events {
+			pipe.Process(ev)
+		}
+	}()
+
+	// Retention compaction — runs hourly, compresses/deletes old event content.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				mu.Lock()
-				for _, sess := range sessionStore.All() {
-					nowActive := sess.IsActive
-					wasActive := prevActive[sess.ID]
-
-					// Save on active→inactive transition
-					shouldSave := wasActive && !nowActive
-					// Also save inactive sessions we haven't persisted yet
-					// (catches sessions that went inactive before this server started)
-					if !nowActive && !savedToHistory[sess.ID] && sess.MessageCount > 0 {
-						shouldSave = true
+				hotDays := 30
+				warmDays := 90
+				if v, err := historyDB.GetSetting("retention_hot_days"); err == nil {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						hotDays = n
 					}
-
-					if shouldSave {
-						if err := historyDB.SaveSession(sess); err != nil {
-							log.Printf("history save error for %s: %v", sess.ID, err)
-						}
-						savedToHistory[sess.ID] = true
+				}
+				if v, err := historyDB.GetSetting("retention_warm_days"); err == nil {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						warmDays = n
 					}
-					prevActive[sess.ID] = nowActive
 				}
-				// Prevent unbounded growth: clear the map when it gets too large.
-				// Sessions will simply be re-saved (idempotent upsert) on the next tick.
-				if len(savedToHistory) > 1000 {
-					savedToHistory = make(map[string]bool)
+				if compressed, err := historyDB.CompactHotToWarm(hotDays); err != nil {
+					log.Printf("retention compact hot→warm error: %v", err)
+				} else if compressed > 0 {
+					log.Printf("retention: compressed %d event content entries (hot→warm)", compressed)
 				}
-				mu.Unlock()
-			}
-		}
-	}()
-
-	// Process watcher events: parse, update store, broadcast.
-	go func() {
-		for ev := range events {
-			msg, sess, isNew := processAndIndex(ev)
-			if msg == nil {
-				continue
-			}
-
-			// Don't broadcast historical data — only used for bootstrapping stats.
-			if ev.Bootstrap {
-				continue
-			}
-
-			eventType := "message"
-			if isNew {
-				eventType = "session_new"
-			}
-
-			broadcastMsg := msg
-			if eventType == "message" {
-				if msg.Role == "assistant" && msg.StopReason == "" && msg.ToolName == "" {
-					// Skip intermediate streaming chunks (no stop_reason, no tool)
-					broadcastMsg = nil
-				} else if !msg.IsConversationMessage() && msg.ContentText == "" {
-					// Skip empty non-conversation messages
-					broadcastMsg = nil
+				if deleted, err := historyDB.CompactWarmToCold(warmDays); err != nil {
+					log.Printf("retention compact warm→cold error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("retention: deleted %d event content entries (warm→cold)", deleted)
 				}
 			}
-
-			payload, err := json.Marshal(broadcastEvent{
-				Event:   eventType,
-				Session: sess,
-				Message: broadcastMsg,
-			})
-			if err != nil {
-				log.Printf("marshal error: %v", err)
-				continue
-			}
-			h.Broadcast(payload)
 		}
 	}()
 
@@ -507,95 +440,156 @@ Examples:
 		hub.ServeWs(h, w, r)
 	})
 
-	// History REST API.
-	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) {
-		limitStr := r.URL.Query().Get("limit")
-		limit := 50
-		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-		offsetStr := r.URL.Query().Get("offset")
-		offset := 0
-		if n, err := strconv.Atoi(offsetStr); err == nil && n >= 0 {
-			offset = n
-		}
-		rows, err := historyDB.ListHistory(limit, offset)
-		if err != nil {
-			log.Printf("history list error: %v", err)
-			writeJSONError(w, "failed to retrieve history", http.StatusInternalServerError)
+	// Unified sessions endpoint — replaces /api/sessions, /api/sessions/grouped, /api/history.
+	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+
+		// ?active=true — return only live active sessions
+		if q.Get("active") == "true" {
+			sessions := sessionStore.All()
+			var active []*session.Session
+			for _, s := range sessions {
+				if s.IsActive {
+					active = append(active, s)
+				}
+			}
+			if active == nil {
+				active = []*session.Session{}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(active)
 			return
 		}
-		if rows == nil {
-			rows = []store.HistoryRow{}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(rows); err != nil {
-			log.Printf("json encode: %v", err)
-		}
-	})
 
-	// Sessions REST API.
-	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
-		sessions := sessionStore.All()
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(sessions); err != nil {
-			log.Printf("api/sessions encode error: %v", err)
-		}
-	})
+		// ?group=activity — return time-bucketed sessions
+		// Merges live sessions (for active status) with DB sessions (for history).
+		if q.Get("group") == "activity" {
+			now := time.Now()
+			hourAgo := now.Add(-1 * time.Hour)
+			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			yesterdayStart := todayStart.Add(-24 * time.Hour)
+			weekday := int(now.Weekday())
+			if weekday == 0 { weekday = 7 }
+			weekStart := todayStart.AddDate(0, 0, -(weekday - 1))
 
-	// Time-bucketed sessions for the new navigation UI.
-	mux.HandleFunc("GET /api/sessions/grouped", func(w http.ResponseWriter, r *http.Request) {
-		sessions := sessionStore.All()
-		now := time.Now()
-		hourAgo := now.Add(-1 * time.Hour)
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		yesterdayStart := todayStart.Add(-24 * time.Hour)
-		weekStart := todayStart.Add(-time.Duration(now.Weekday()) * 24 * time.Hour)
-
-		type grouped struct {
-			Active    []*session.Session `json:"active"`
-			LastHour  []*session.Session `json:"lastHour"`
-			Today     []*session.Session `json:"today"`
-			Yesterday []*session.Session `json:"yesterday"`
-			ThisWeek  []*session.Session `json:"thisWeek"`
-			Older     []*session.Session `json:"older"`
-		}
-		g := grouped{
-			Active:    []*session.Session{},
-			LastHour:  []*session.Session{},
-			Today:     []*session.Session{},
-			Yesterday: []*session.Session{},
-			ThisWeek:  []*session.Session{},
-			Older:     []*session.Session{},
-		}
-
-		for _, s := range sessions {
-			if s.IsActive {
-				g.Active = append(g.Active, s)
-				continue
+			type grouped struct {
+				Active    []*session.Session `json:"active"`
+				LastHour  []*session.Session `json:"lastHour"`
+				Today     []*session.Session `json:"today"`
+				Yesterday []*session.Session `json:"yesterday"`
+				ThisWeek  []*session.Session `json:"thisWeek"`
+				Older     []*session.Session `json:"older"`
 			}
-			la := s.LastActive
-			switch {
-			case la.After(hourAgo):
-				g.LastHour = append(g.LastHour, s)
-			case la.After(todayStart):
-				g.Today = append(g.Today, s)
-			case la.After(yesterdayStart):
-				g.Yesterday = append(g.Yesterday, s)
-			case la.After(weekStart):
-				g.ThisWeek = append(g.ThisWeek, s)
-			default:
-				g.Older = append(g.Older, s)
+			g := grouped{
+				Active: []*session.Session{}, LastHour: []*session.Session{},
+				Today: []*session.Session{}, Yesterday: []*session.Session{},
+				ThisWeek: []*session.Session{}, Older: []*session.Session{},
 			}
+
+			// Start with live sessions (have real-time status).
+			seen := make(map[string]bool)
+			for _, s := range sessionStore.All() {
+				seen[s.ID] = true
+				if s.IsActive {
+					g.Active = append(g.Active, s)
+					continue
+				}
+				la := s.LastActive
+				switch {
+				case la.After(hourAgo):
+					g.LastHour = append(g.LastHour, s)
+				case la.After(todayStart):
+					g.Today = append(g.Today, s)
+				case la.After(yesterdayStart):
+					g.Yesterday = append(g.Yesterday, s)
+				case la.After(weekStart):
+					g.ThisWeek = append(g.ThisWeek, s)
+				default:
+					g.Older = append(g.Older, s)
+				}
+			}
+
+			// Fill in from DB for sessions not in the live store.
+			if dbRows, err := historyDB.ListSessions(500, 0); err == nil {
+				for _, row := range dbRows {
+					if seen[row.ID] {
+						continue
+					}
+					s := row.ToSession()
+					la := s.LastActive
+					switch {
+					case la.After(hourAgo):
+						g.LastHour = append(g.LastHour, s)
+					case la.After(todayStart):
+						g.Today = append(g.Today, s)
+					case la.After(yesterdayStart):
+						g.Yesterday = append(g.Yesterday, s)
+					case la.After(weekStart):
+						g.ThisWeek = append(g.ThisWeek, s)
+					default:
+						g.Older = append(g.Older, s)
+					}
+				}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(g)
+			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(g); err != nil {
-			log.Printf("json encode: %v", err)
+		// Default: paginated list from DB, with optional ?repo= filter
+		limit := 50
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
+			limit = n
 		}
+		offset := 0
+		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
+			offset = n
+		}
+		var rows []store.SessionRow
+		var err error
+		if repoID := q.Get("repo"); repoID != "" {
+			rows, err = historyDB.ListSessionsByRepo(repoID, limit, offset)
+		} else {
+			rows, err = historyDB.ListSessions(limit, offset)
+		}
+		if err != nil {
+			log.Printf("list sessions error: %v", err)
+			writeJSONError(w, "failed to list sessions", http.StatusInternalServerError)
+			return
+		}
+		sessions := store.SessionRowsToSessions(rows)
+		if sessions == nil {
+			sessions = []*session.Session{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
 	})
 
-	// Aggregate stats endpoint — merges SQLite history with live active sessions.
+	// Single session by ID.
+	mux.HandleFunc("GET /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		// Try live store first
+		if sess, ok := sessionStore.Get(id); ok {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(sess)
+			return
+		}
+		// Fall back to DB
+		row, err := historyDB.GetSession(id)
+		if err != nil {
+			writeJSONError(w, "failed to get session", http.StatusInternalServerError)
+			return
+		}
+		if row == nil {
+			writeJSONError(w, "session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(row.ToSession())
+	})
+
+	// Aggregate stats — reads from DB (pipeline keeps it up to date).
 	mux.HandleFunc("GET /api/stats", func(w http.ResponseWriter, r *http.Request) {
 		type statsResponse struct {
 			TotalCost           float64            `json:"totalCost"`
@@ -608,9 +602,9 @@ Examples:
 			CacheHitPct         float64            `json:"cacheHitPct"`
 			CostRate            float64            `json:"costRate"`
 			CostByModel         map[string]float64 `json:"costByModel"`
+			CostByRepo          map[string]float64 `json:"costByRepo"`
 		}
 
-		// Parse window query param.
 		now := time.Now()
 		var since time.Time
 		switch r.URL.Query().Get("window") {
@@ -618,22 +612,27 @@ Examples:
 			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		case "week":
 			weekday := int(now.Weekday())
-			if weekday == 0 {
-				weekday = 7
-			}
+			if weekday == 0 { weekday = 7 }
 			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -(weekday - 1))
 		case "month":
 			since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		default:
-			// "all" or empty — zero time, no filter.
 		}
 
-		// Get SQLite aggregates for the window.
 		agg, err := historyDB.AggregateStats(since)
 		if err != nil {
 			log.Printf("stats aggregate error: %v", err)
 			writeJSONError(w, "failed to compute stats", http.StatusInternalServerError)
 			return
+		}
+
+		// Count active sessions and compute cost rate from live store.
+		var activeSessions int
+		var costRate float64
+		for _, sess := range sessionStore.All() {
+			if sess.IsActive {
+				activeSessions++
+				costRate += sess.CostRate
+			}
 		}
 
 		resp := statsResponse{
@@ -643,110 +642,74 @@ Examples:
 			CacheReadTokens:     agg.CacheReadTokens,
 			CacheCreationTokens: agg.CacheCreationTokens,
 			SessionCount:        agg.SessionCount,
+			ActiveSessions:      activeSessions,
+			CostRate:            costRate,
 			CostByModel:         agg.CostByModel,
+			CostByRepo:          agg.CostByRepo,
 		}
-		if resp.CostByModel == nil {
-			resp.CostByModel = make(map[string]float64)
-		}
+		if resp.CostByModel == nil { resp.CostByModel = make(map[string]float64) }
+		if resp.CostByRepo == nil { resp.CostByRepo = make(map[string]float64) }
 
-		// Collect active top-level sessions within the window.
-		allSessions := sessionStore.All()
-		var activeSessions []*session.Session
-		var activeIDs []string
-		for _, sess := range allSessions {
-			if sess.IsSubagent {
-				continue
-			}
-			if !sess.IsActive {
-				continue
-			}
-			// Filter by window: session must have started within the window.
-			if !since.IsZero() && sess.StartedAt.Before(since) {
-				continue
-			}
-			activeSessions = append(activeSessions, sess)
-			activeIDs = append(activeIDs, sess.ID)
-		}
-
-		// Get last-saved snapshots for active sessions.
-		snapshots, err := historyDB.GetSessionSnapshots(activeIDs)
-		if err != nil {
-			log.Printf("stats snapshot error: %v", err)
-			writeJSONError(w, "failed to compute stats", http.StatusInternalServerError)
-			return
-		}
-
-		// Merge active session deltas into the aggregate.
-		for _, sess := range activeSessions {
-			if snap, ok := snapshots[sess.ID]; ok {
-				// Session is in SQLite — add only the delta (live - saved).
-				delta := sess.TotalCost - snap.TotalCost
-				resp.TotalCost += delta
-				resp.InputTokens += sess.InputTokens - snap.InputTokens
-				resp.OutputTokens += sess.OutputTokens - snap.OutputTokens
-				resp.CacheReadTokens += sess.CacheReadTokens - snap.CacheReadTokens
-				resp.CacheCreationTokens += sess.CacheCreationTokens - snap.CacheCreationTokens
-				if delta != 0 && sess.Model != "" {
-					resp.CostByModel[sess.Model] += delta
-				}
-			} else {
-				// Session not in SQLite — add full live values.
-				resp.TotalCost += sess.TotalCost
-				resp.InputTokens += sess.InputTokens
-				resp.OutputTokens += sess.OutputTokens
-				resp.CacheReadTokens += sess.CacheReadTokens
-				resp.CacheCreationTokens += sess.CacheCreationTokens
-				resp.SessionCount++
-				if sess.Model != "" {
-					resp.CostByModel[sess.Model] += sess.TotalCost
-				}
-			}
-			resp.CostRate += sess.CostRate
-		}
-
-		resp.ActiveSessions = len(activeSessions)
-
-		// Compute derived cache hit percentage.
 		totalInput := resp.InputTokens + resp.CacheReadTokens + resp.CacheCreationTokens
 		if totalInput > 0 {
 			resp.CacheHitPct = float64(resp.CacheReadTokens) / float64(totalInput) * 100
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.Printf("json encode stats: %v", err)
-		}
+		json.NewEncoder(w).Encode(resp)
 	})
 
-	// Distinct project names with session counts.
-	mux.HandleFunc("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
-		sessions := sessionStore.All()
-		counts := make(map[string]int)
-		for _, s := range sessions {
-			name := s.ProjectName
-			if name == "" {
-				name = s.ProjectDir
-			}
-			counts[name]++
+	// Repos endpoint — replaces /api/projects.
+	mux.HandleFunc("GET /api/repos", func(w http.ResponseWriter, r *http.Request) {
+		repos, err := historyDB.ListRepos()
+		if err != nil {
+			writeJSONError(w, "failed to list repos", http.StatusInternalServerError)
+			return
 		}
-
-		type projectEntry struct {
-			Name  string `json:"name"`
-			Count int    `json:"count"`
+		if repos == nil {
+			repos = []store.RepoRow{}
 		}
-		result := make([]projectEntry, 0, len(counts))
-		for name, count := range counts {
-			result = append(result, projectEntry{Name: name, Count: count})
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(result); err != nil {
-			log.Printf("json encode: %v", err)
-		}
+		json.NewEncoder(w).Encode(repos)
 	})
 
-	// Cross-session search — uses the in-memory search index instead of
-	// reading every JSONL file from disk.
+	// Per-repo stats.
+	mux.HandleFunc("GET /api/repos/{id}/stats", func(w http.ResponseWriter, r *http.Request) {
+		repoID := r.PathValue("id")
+		agg, err := historyDB.AggregateStatsByRepo(repoID)
+		if err != nil {
+			writeJSONError(w, "failed to get repo stats", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(agg)
+	})
+
+	// Sessions for a repo.
+	mux.HandleFunc("GET /api/repos/{id}/sessions", func(w http.ResponseWriter, r *http.Request) {
+		repoID := r.PathValue("id")
+		limit := 50
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+			limit = n
+		}
+		offset := 0
+		if n, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && n >= 0 {
+			offset = n
+		}
+		rows, err := historyDB.ListSessionsByRepo(repoID, limit, offset)
+		if err != nil {
+			writeJSONError(w, "failed to list repo sessions", http.StatusInternalServerError)
+			return
+		}
+		sessions := store.SessionRowsToSessions(rows)
+		if sessions == nil {
+			sessions = []*session.Session{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
+	})
+
+	// Search — FTS5 on preview + tool_detail.
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("q")
 		if query == "" {
@@ -754,140 +717,173 @@ Examples:
 			w.Write([]byte("[]"))
 			return
 		}
-		limitStr := r.URL.Query().Get("limit")
 		limit := 50
-		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 200 {
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
 			limit = n
 		}
-
-		results := searchIdx.Search(query, limit)
+		results, err := historyDB.SearchFTS(query, limit)
+		if err != nil {
+			log.Printf("search error: %v", err)
+			writeJSONError(w, "search failed", http.StatusInternalServerError)
+			return
+		}
 		if results == nil {
-			results = []search.Entry{}
+			results = []store.EventRow{}
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(results); err != nil {
-			log.Printf("json encode: %v", err)
-		}
+		json.NewEncoder(w).Encode(results)
 	})
 
-	// Recent messages for a session — returns last N parsed messages for feed population.
-	mux.HandleFunc("GET /api/sessions/{id}/recent", func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireSession(sessionStore, w, r)
-		if !ok {
+	// Full content search (slower, for key leak detection).
+	mux.HandleFunc("GET /api/search/full", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]"))
 			return
 		}
-		events, err := replay.ReadFile(sess.FilePath)
-		if err != nil && len(events) == 0 {
-			log.Printf("read session file %s: %v", sess.FilePath, err)
-			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
-			return
-		}
-
-		// Filter to meaningful messages only
-		var filtered []replay.Event
-		for _, ev := range events {
-			if ev.ContentText == "" && ev.ToolName == "" && ev.HookEvent == "" {
-				continue
-			}
-			if ev.ContentText == "[thinking...]" {
-				continue
-			}
-			// Include conversation messages, hooks, and agent/skill calls
-			isHook := ev.HookEvent != ""
-			if !ev.IsConversationMessage() && !isHook {
-				continue
-			}
-			filtered = append(filtered, ev)
-		}
-
-		// Return last 50
 		limit := 50
-		if len(filtered) > limit {
-			filtered = filtered[len(filtered)-limit:]
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+			limit = n
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(filtered); err != nil {
-			log.Printf("json encode: %v", err)
-		}
-	})
-
-	// Replay SSE stream route — registered BEFORE the manifest route.
-	mux.HandleFunc("GET /api/sessions/{id}/replay/stream", func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireSession(sessionStore, w, r)
-		if !ok {
-			return
-		}
-		events, err := replay.ReadFile(sess.FilePath)
+		results, err := historyDB.SearchFullContent(query, limit)
 		if err != nil {
-			log.Printf("read session file %s: %v", sess.FilePath, err)
-			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
+			log.Printf("full search error: %v", err)
+			writeJSONError(w, "search failed", http.StatusInternalServerError)
 			return
 		}
-		from, _ := strconv.Atoi(r.URL.Query().Get("from"))
-		speed, _ := strconv.ParseFloat(r.URL.Query().Get("speed"), 64)
-		replay.Stream(w, r, events, replay.StreamParams{FromIndex: from, Speed: speed})
+		if results == nil {
+			results = []store.EventRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
 	})
 
-	// Replay manifest — returns all events with timestamps for the scrubber.
-	mux.HandleFunc("GET /api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireSession(sessionStore, w, r)
-		if !ok {
-			return
-		}
+	// Events for a session — from DB.
+	mux.HandleFunc("GET /api/sessions/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		q := r.URL.Query()
 
-		w.Header().Set("Content-Type", "application/json")
-
-		// Return cached JSON if available (invalidated on each new message).
-		if cached, hit := sessionStore.GetReplayJSON(id); hit {
-			w.Write(cached)
-			return
-		}
-
-		events, scanErr := replay.ReadFile(sess.FilePath)
-		if scanErr != nil && len(events) == 0 {
-			log.Printf("read session file %s: %v", sess.FilePath, scanErr)
-			writeJSONError(w, "failed to read session file", http.StatusInternalServerError)
-			return
-		}
-
-		type manifestEvent struct {
-			Index       int       `json:"index"`
-			Timestamp   time.Time `json:"timestamp"`
-			Type        string    `json:"type"`
-			Role        string    `json:"role"`
-			ContentText string    `json:"contentText"`
-			ToolName    string    `json:"toolName,omitempty"`
-			CostUSD     float64   `json:"costUSD"`
-		}
-		out := make([]manifestEvent, len(events))
-		for i, e := range events {
-			out[i] = manifestEvent{
-				Index:       e.Index,
-				Timestamp:   e.Timestamp,
-				Type:        e.Type,
-				Role:        e.Role,
-				ContentText: e.ContentText,
-				ToolName:    e.ToolName,
-				CostUSD:     e.CostUSD,
+		// ?pinned=true — all error + agent events (always visible regardless of window)
+		if q.Get("pinned") == "true" || q.Get("errors") == "true" {
+			events, err := historyDB.ListPinnedEvents(id)
+			if err != nil {
+				writeJSONError(w, "failed to list events", http.StatusInternalServerError)
+				return
 			}
-		}
-		data, err := json.Marshal(map[string]any{
-			"sessionId": id,
-			"events":    out,
-		})
-		if err != nil {
-			log.Printf("json marshal replay manifest: %v", err)
-			writeJSONError(w, "failed to encode replay data", http.StatusInternalServerError)
+			if events == nil {
+				events = []store.EventRow{}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(events)
 			return
 		}
-		// Only cache if the file was fully read (no scanner errors).
-		if scanErr == nil {
-			sessionStore.SetReplayJSON(id, data)
+
+		// ?last=N — most recent N events
+		if lastStr := q.Get("last"); lastStr != "" {
+			n := 50
+			if v, err := strconv.Atoi(lastStr); err == nil && v > 0 {
+				n = v
+			}
+			events, err := historyDB.ListRecentEvents(id, n)
+			if err != nil {
+				writeJSONError(w, "failed to list events", http.StatusInternalServerError)
+				return
+			}
+			if events == nil {
+				events = []store.EventRow{}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(events)
+			return
 		}
-		w.Write(data)
+
+		limit := 100
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+			limit = n
+		}
+		offset := 0
+		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
+			offset = n
+		}
+		events, err := historyDB.ListEvents(id, limit, offset)
+		if err != nil {
+			writeJSONError(w, "failed to list events", http.StatusInternalServerError)
+			return
+		}
+		if events == nil {
+			events = []store.EventRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(events)
+	})
+
+	// Replay — returns events from DB for playback.
+	mux.HandleFunc("GET /api/sessions/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		events, err := historyDB.ListEvents(id, 10000, 0)
+		if err != nil {
+			writeJSONError(w, "failed to list events", http.StatusInternalServerError)
+			return
+		}
+		if events == nil {
+			events = []store.EventRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"sessionId": id,
+			"events":    events,
+		})
+	})
+
+	// Settings API.
+	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		settings, err := historyDB.AllSettings()
+		if err != nil {
+			writeJSONError(w, "failed to get settings", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(settings)
+	})
+
+	mux.HandleFunc("PUT /api/settings/{key}", func(w http.ResponseWriter, r *http.Request) {
+		key := r.PathValue("key")
+		var body struct {
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSONError(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if err := historyDB.SetSetting(key, body.Value); err != nil {
+			writeJSONError(w, "failed to update setting", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	})
+
+	// Storage info.
+	mux.HandleFunc("GET /api/storage", func(w http.ResponseWriter, r *http.Request) {
+		info, err := historyDB.StorageInfo()
+		if err != nil {
+			writeJSONError(w, "failed to get storage info", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(info)
+	})
+
+	// Cache clear endpoint.
+	mux.HandleFunc("DELETE /api/cache/repos", func(w http.ResponseWriter, r *http.Request) {
+		resolver.ClearCache()
+		if err := historyDB.ClearCwdRepos(); err != nil {
+			writeJSONError(w, "failed to clear cache", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
 
 	// Stop session (Docker container).
@@ -898,9 +894,9 @@ Examples:
 			writeJSONError(w, "session not found", http.StatusNotFound)
 			return
 		}
-		// Extract container name from projectName (format: "container / project")
+		// Extract container name from sessionName (format: "container / project")
 		containerName := ""
-		if parts := strings.SplitN(sess.ProjectName, " / ", 2); len(parts) == 2 {
+		if parts := strings.SplitN(sess.SessionName, " / ", 2); len(parts) == 2 {
 			containerName = parts[0]
 		}
 		if containerName == "" || dc == nil {
@@ -974,23 +970,8 @@ Examples:
 		log.Printf("received signal %s, shutting down", sig)
 		cancel()
 
-		// Flush unsaved sessions to history before shutting down.
-		mu.Lock()
-		flushed := 0
-		for _, sess := range sessionStore.All() {
-			if !savedToHistory[sess.ID] && sess.MessageCount > 0 {
-				if err := historyDB.SaveSession(sess); err != nil {
-					log.Printf("shutdown history save error for %s: %v", sess.ID, err)
-				} else {
-					flushed++
-				}
-				savedToHistory[sess.ID] = true
-			}
-		}
-		mu.Unlock()
-		if flushed > 0 {
-			log.Printf("flushed %d sessions to history on shutdown", flushed)
-		}
+		// Pipeline.Stop() flushes remaining events and saves sessions.
+		// (Called via deferred pipe.Stop() in main)
 
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutCancel()

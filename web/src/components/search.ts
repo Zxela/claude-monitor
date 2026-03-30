@@ -1,4 +1,4 @@
-import type { SearchResult } from '../types';
+import type { Event } from '../types';
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { fetchSearch } from '../api';
@@ -72,11 +72,14 @@ function renderResults(): void {
     return;
   }
 
-  const groups = new Map<string, { name: string; project: string; results: SearchResult[] }>();
-  for (const r of state.searchResults) {
+  const groups = new Map<string, { name: string; project: string; results: Event[] }>();
+  for (const r of state.searchResults as unknown as Event[]) {
     let group = groups.get(r.sessionId);
     if (!group) {
-      group = { name: r.sessionName, project: r.projectName, results: [] };
+      const sess = state.sessions.get(r.sessionId);
+      const name = sess?.sessionName || r.sessionId.slice(0, 8);
+      const project = sess?.cwd || '';
+      group = { name, project, results: [] };
       groups.set(r.sessionId, group);
     }
     group.results.push(r);
@@ -97,7 +100,7 @@ function renderResults(): void {
           <span class="search-type-badge ${badgeType(result)}">${badgeType(result)}</span>
           <span class="search-result-time">${formatTime(result.timestamp)}</span>
         </div>
-        <div class="search-result-body">${highlightMatch(result.contentText, state.searchQuery)}</div>
+        <div class="search-result-body">${highlightMatch(searchPreview(result), state.searchQuery)}</div>
       `;
       el.addEventListener('click', () => {
         update({ selectedSessionId: sessionId, searchOpen: false, searchQuery: '' });
@@ -116,7 +119,23 @@ function renderResults(): void {
   }
 }
 
-function badgeType(r: SearchResult): string {
+/** Build a useful preview string for search results.
+ *  For tool events with unhelpful contentPreview like "[tool: Bash]",
+ *  prefer toolDetail or toolName + toolDetail. */
+function searchPreview(r: Event): string {
+  const cp = r.contentPreview || '';
+  // If contentPreview is just a bracketed tag, prefer richer fields
+  if (cp.match(/^\[(?:tool|hook|agent):\s*\w+\]$/)) {
+    const name = r.toolName || '';
+    const detail = r.toolDetail || '';
+    if (name && detail) return `${name}: ${detail}`;
+    if (detail) return detail;
+    if (name) return name;
+  }
+  return cp;
+}
+
+function badgeType(r: Event): string {
   if (r.isError) return 'error';
   if (r.toolName) return 'tool';
   return r.role || 'assistant';

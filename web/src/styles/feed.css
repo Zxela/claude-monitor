@@ -117,7 +117,9 @@
   justify-content: center;
   height: 100%;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
 }
 
 /* Feed entries */
@@ -141,18 +143,50 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Feed entry type-specific left borders */
-.feed-entry.type-user        { border-left-color: rgba(68,136,255,0.3); }
-.feed-entry.type-assistant   { border-left-color: rgba(0,255,136,0.25); }
-.feed-entry.type-tool_use    { border-left-color: rgba(255,204,0,0.3); }
-.feed-entry.type-agent       { border-left-color: rgba(255,136,68,0.35); }
-.feed-entry.type-tool_result { border-left-color: rgba(0,204,255,0.25); }
-.feed-entry.type-command     { border-left-color: rgba(160,160,180,0.3); }
-.feed-entry.type-hook        { border-left-color: rgba(204,136,255,0.3); }
-.feed-entry.type-error       { border-left-color: rgba(255,68,68,0.4); background: rgba(221,68,85,0.04); }
-.feed-entry.is-error         { border-left-color: var(--red) !important; background: rgba(221,68,85,0.06); }
+/* === Visual hierarchy: user/assistant are primary, tools are secondary === */
+
+/* High signal — user input stands out */
+.feed-entry.type-user {
+  border-left-color: rgba(68,136,255,0.6);
+  background: rgba(68,136,255,0.04);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.feed-entry.type-user .fe-content { color: #99bbff; }
+
+/* High signal — assistant responses */
+.feed-entry.type-assistant {
+  border-left-color: rgba(0,255,136,0.4);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/* High signal — errors */
+.feed-entry.type-error { border-left-color: rgba(255,68,68,0.5); background: rgba(221,68,85,0.04); }
+.feed-entry.is-error   { border-left-color: var(--red) !important; background: rgba(221,68,85,0.06); }
 .feed-entry.is-error .fe-content { color: var(--red); }
 .feed-entry.is-error .fe-type { color: var(--red); font-weight: 600; }
+
+/* High signal — agent spawns */
+.feed-entry.type-agent {
+  border-left-color: rgba(255,136,68,0.5);
+  background: rgba(255,136,68,0.03);
+}
+
+/* Medium signal — tools doing work */
+.feed-entry.type-tool_use    { border-left-color: rgba(255,204,0,0.3); }
+
+/* Medium signal — commands */
+.feed-entry.type-command     { border-left-color: rgba(160,160,180,0.4); }
+
+/* Hooks — distinct purple identity, same size as other entries */
+.feed-entry.type-hook {
+  border-left-color: rgba(168,85,247,0.4);
+  background: rgba(168,85,247,0.03);
+}
+
+/* Low signal — tool output (readable but recessed) */
+.feed-entry.type-tool_result { border-left-color: rgba(0,204,255,0.15); }
 
 .feed-entry.expanded { align-items: flex-start; }
 .feed-entry.expanded .fe-content {
@@ -208,9 +242,9 @@
 
 .fe-content.dim    { color: var(--text-dim); }
 .fe-content.tool   { color: var(--yellow); }
-.fe-content.result { color: var(--cyan); opacity: 0.85; }
-.fe-content.command { color: #9999bb; font-family: var(--font-mono); }
-.fe-content.hook   { color: var(--purple); opacity: 0.7; font-size: 11px; }
+.fe-content.result { color: #667788; font-size: 11px; }
+.fe-content.command { color: #aabbdd; font-family: var(--font-mono); }
+.fe-content.hook   { color: #bb99dd; }
 
 .fe-expand {
   display: inline;
@@ -253,6 +287,51 @@
   opacity: 0.5;
 }
 
+.fe-duration {
+  color: var(--text-dim);
+  font-size: 9px;
+  margin-left: 4px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.fe-badge {
+  font-size: 8px;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.fe-interrupted {
+  color: var(--orange);
+  border: 1px solid var(--orange);
+  opacity: 0.8;
+}
+
+.fe-truncated {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  opacity: 0.6;
+}
+
+/* Group hover highlighting — links tool_use + hooks + tool_result */
+.group-highlight { background: rgba(255, 204, 0, 0.06) !important; }
+
+/* Turn duration separator */
+.fe-content.turn-sep {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+/* Meta/skill expansion messages — dimmed */
+.feed-entry.is-meta { opacity: 0.35; }
+.feed-entry.is-meta:hover { opacity: 0.6; }
+
 /* Feed type filter bar */
 .feed-type-filters {
   display: flex;
@@ -283,6 +362,7 @@
 .feed-filter-btn[data-type="tool_use"].active { background: rgba(221,204,68,0.2); color: #ddcc44; border-color: #ddcc44; }
 .feed-filter-btn[data-type="tool_result"].active { background: rgba(68,204,204,0.2); color: #44cccc; border-color: #44cccc; }
 .feed-filter-btn[data-type="agent"].active { background: rgba(221,136,68,0.2); color: #dd8844; border-color: #dd8844; }
+.feed-filter-btn[data-type="command"].active { background: rgba(136,170,204,0.2); color: #88aacc; border-color: #88aacc; }
 .feed-filter-btn[data-type="hook"].active { background: rgba(170,119,221,0.2); color: #aa77dd; border-color: #aa77dd; }
 .feed-filter-btn[data-type="error"].active { background: rgba(221,68,85,0.2); color: #dd4455; border-color: #dd4455; }
 
@@ -405,19 +485,32 @@
 
 .scroll-lock-btn.visible { display: block; }
 
+/* Tool call grouping: tool_use is parent, hooks + result nest under it */
 .feed-entry.tool-group-start {
   margin-bottom: 0;
   border-bottom: none;
-  border-radius: 3px 3px 0 0;
 }
-.feed-entry.tool-group-end {
+.feed-entry.tool-group-child {
   margin-top: 0;
   padding-left: 28px;
-  border-radius: 0 0 3px 3px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  border-bottom: none;
   font-size: 11px;
-  opacity: 0.75;
-  border-left: 2px solid rgba(0,204,255,0.2);
+  border-left-color: rgba(255,204,0,0.15);
 }
+.feed-entry.tool-group-child .fe-time { color: #33334a; }
+.feed-entry.tool-group-child:last-child,
+.feed-entry.tool-group-child + .feed-entry:not(.tool-group-child) { border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+/* Tool results: compact and secondary but still readable */
+.feed-entry.type-tool_result {
+  padding-top: 2px;
+  padding-bottom: 2px;
+  font-size: 11px;
+}
+.feed-entry.type-tool_result .fe-time { color: #33334a; }
+.feed-entry.type-tool_result .fe-type { color: #446666; }
 
 
 /* Feed header button classes (replacing inline styles) */

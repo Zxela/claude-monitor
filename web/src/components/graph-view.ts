@@ -2,7 +2,7 @@
 import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { escapeHtml } from '../utils';
+import { escapeHtml, sessionDisplayName } from '../utils';
 import '../styles/views.css';
 
 interface GraphNode {
@@ -73,7 +73,7 @@ function show(): void {
   for (const mode of ['graph', 'sequence'] as const) {
     const btn = document.createElement('button');
     btn.className = `graph-mode-btn${graphMode === mode ? ' active' : ''}`;
-    btn.textContent = mode === 'graph' ? 'Graph' : 'Sequence';
+    btn.textContent = mode === 'graph' ? 'GRAPH' : 'SEQUENCE';
     btn.addEventListener('click', () => {
       graphMode = mode;
       show();
@@ -121,8 +121,8 @@ function renderSequence(wrapper: HTMLElement): void {
 
   if (sessions.length === 0) {
     const empty = document.createElement('div');
-    empty.style.cssText = 'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 12px;';
-    empty.textContent = 'No active sessions';
+    empty.style.cssText = 'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 10px; letter-spacing: 1px; opacity: 0.4;';
+    empty.textContent = 'NO ACTIVE SESSIONS';
     list.appendChild(empty);
   }
 
@@ -133,7 +133,7 @@ function renderSequence(wrapper: HTMLElement): void {
     entry.style.paddingLeft = `${12 + depth * 24}px`;
 
     const time = sess.startedAt ? new Date(sess.startedAt).toLocaleTimeString() : '';
-    const name = sess.sessionName || sess.projectName || sess.id.slice(0, 8);
+    const name = sessionDisplayName(sess);
     const cost = `$${sess.totalCost.toFixed(2)}`;
     const statusClass = sess.isActive
       ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
@@ -219,7 +219,7 @@ function rebuildNodes(): void {
     const color = sess.isActive
       ? (sess.status === 'thinking' ? '#ffcc00' : sess.status === 'tool_use' ? '#4488ff' : '#00ff88')
       : '#44445a';
-    const label = (sess.sessionName || sess.projectName || sess.id).substring(0, 16);
+    const label = (sessionDisplayName(sess)).substring(0, 16);
 
     return {
       id: sess.id,

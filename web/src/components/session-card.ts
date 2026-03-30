@@ -1,7 +1,7 @@
 // web/src/components/session-card.ts
 import type { Session } from '../types';
 import { state, update } from '../state';
-import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo } from '../utils';
+import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo, sessionDisplayName, stripInternalTags } from '../utils';
 import { getLastTool } from '../tool-tracker';
 
 function getCostTier(cost: number): string {
@@ -29,12 +29,12 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   el.dataset.sessionId = session.id;
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
-  if (session.isSubagent) el.classList.add('subagent');
+  if (!!session.parentId) el.classList.add('subagent');
   if (session.isActive) el.classList.add('active-card');
 
   const dotClass = getDotClass(session);
 
-  const displayName = session.sessionName || session.projectName || session.id;
+  const displayName = sessionDisplayName(session);
   const statusClass = `status-${session.status}`;
   const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
@@ -60,7 +60,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
             ? '<span class="session-status-badge status-live">LIVE</span>'
             : ''}
       </div>
-      <div class="session-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription || '', 80))}</div>
+      <div class="session-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription || ''))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription || ''), 80))}</div>
       <div class="session-stats">
         <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
         ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
@@ -68,7 +68,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       <div class="session-card-details">
         <div class="session-stats">
           <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens + session.cacheCreationTokens)} tok</span>
-          <span class="cache">${session.cacheHitPct.toFixed(0)}%</span>
+          <span class="cache">${Math.round((session.cacheReadTokens / Math.max(1, session.inputTokens + session.cacheReadTokens + session.cacheCreationTokens)) * 100).toFixed(0)}%</span>
           ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
         </div>
         <div class="session-meta">
@@ -154,12 +154,12 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
     const idleChildren = children.filter(c => c.status === 'idle');
 
     for (const child of activeChildren) {
-      renderExpanded(child, container);
+      renderCompact(child, container);
     }
 
     if (showIdle) {
       for (const child of idleChildren) {
-        renderExpanded(child, container);
+        renderCompact(child, container);
       }
     }
 
@@ -169,8 +169,8 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       toggle.type = 'button';
       toggle.className = 'idle-toggle';
       toggle.textContent = showIdle
-        ? `Hide ${idleChildren.length} idle`
-        : `Show ${idleChildren.length} idle`;
+        ? `HIDE ${idleChildren.length} IDLE`
+        : `SHOW ${idleChildren.length} IDLE`;
       const toggleIdle = (e: Event) => {
         e.stopPropagation();
         if (showIdleChildren.has(session.id)) {
@@ -194,11 +194,12 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   el.dataset.sessionId = session.id;
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
-  if (session.isSubagent) el.classList.add('subagent');
+  if (!!session.parentId) el.classList.add('subagent');
+  if (session.isActive) el.classList.add('active-card');
 
   const dotClass = getDotClass(session);
 
-  const displayName = session.sessionName || session.projectName || session.id;
+  const displayName = sessionDisplayName(session);
   const childCount = (session.children ?? []).filter(id => state.sessions.has(id)).length;
   const isExpanded = expandedParents.has(session.id);
 
@@ -222,9 +223,10 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
         ? `<span class="session-status-badge ${compactStatusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
         : ''}
     </div>
-    ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(session.taskDescription)}">${escapeHtml(truncate(session.taskDescription, 60))}</div>` : ''}
+    ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription), 60))}</div>` : ''}
     <div class="compact-meta">
       <span class="cost ${getCostTier(session.totalCost)}">$${session.totalCost.toFixed(2)}</span>
+      ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
       <span class="duration">${timeAgo(session.lastActive)}</span>
       <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
       ${session.errorCount > 0 ? `<span class="compact-stat-err">${session.errorCount} err</span>` : ''}
@@ -295,8 +297,8 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       toggle.type = 'button';
       toggle.className = 'idle-toggle';
       toggle.textContent = showIdle
-        ? `Hide ${idleChildren.length} idle`
-        : `Show ${idleChildren.length} idle`;
+        ? `HIDE ${idleChildren.length} IDLE`
+        : `SHOW ${idleChildren.length} IDLE`;
       const toggleIdle = (e: Event) => {
         e.stopPropagation();
         if (showIdleChildren.has(session.id)) {
@@ -321,7 +323,7 @@ export function renderDot(session: Session): HTMLElement {
   dot.dataset.sessionId = session.id;
   dot.classList.add(getDotClass(session));
 
-  dot.title = session.sessionName || session.projectName || session.id;
+  dot.title = sessionDisplayName(session);
 
   dot.addEventListener('click', () => {
     const updates: Record<string, unknown> = { selectedSessionId: session.id };

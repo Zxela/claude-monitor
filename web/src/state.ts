@@ -1,4 +1,4 @@
-import type { Session, GroupedSessions, SearchResult, Stats } from './types';
+import type { Session, GroupedSessions, Event, Stats } from './types';
 import type { StatsWindow } from './api';
 
 export interface AppState {
@@ -6,9 +6,9 @@ export interface AppState {
   grouped: GroupedSessions | null;
   selectedSessionId: string | null;
   view: 'list' | 'graph' | 'history';
-  projectFilter: string | null;
+  repoFilter: string | null;
   searchQuery: string;
-  searchResults: SearchResult[];
+  searchResults: Event[];
   searchLoading: boolean;
   searchError: boolean;
   searchOpen: boolean;
@@ -57,7 +57,7 @@ export const state: AppState = {
   grouped: null,
   selectedSessionId: null,
   view: 'list',
-  projectFilter: null,
+  repoFilter: null,
   searchQuery: '',
   searchResults: [],
   searchLoading: false,

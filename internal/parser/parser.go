@@ -28,6 +28,18 @@ type rawMessage struct {
 	TeamName    string          `json:"teamName"`
 	AgentName   string          `json:"agentName"`
 	Data        rawProgressData `json:"data"`
+	Operation   string          `json:"operation"`
+	// Additional fields previously dropped.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	Subtype       string          `json:"subtype"`
+	IsMeta        bool            `json:"isMeta"`
+	Version       string          `json:"version"`
+	Entrypoint    string          `json:"entrypoint"`
+	DurationMs    *int64          `json:"durationMs"`     // system.turn_duration
+	MessageCount  *int            `json:"messageCount"`   // system.turn_duration
+	HookCount     *int            `json:"hookCount"`      // system.stop_hook_summary
+	HookInfos     json.RawMessage `json:"hookInfos"`      // system.stop_hook_summary
+	Level         string          `json:"level"`           // system.stop_hook_summary
 }
 
 type rawProgressData struct {
@@ -35,6 +47,19 @@ type rawProgressData struct {
 	HookEvent string `json:"hookEvent"`
 	HookName  string `json:"hookName"`
 	Command   string `json:"command"`
+}
+
+// rawToolResult extracts metadata from the toolUseResult field on user/tool_result lines.
+type rawToolResult struct {
+	DurationMs        *int64 `json:"durationMs"`
+	TotalDurationMs   *int64 `json:"totalDurationMs"`
+	TotalTokens       *int64 `json:"totalTokens"`
+	TotalToolUseCount *int   `json:"totalToolUseCount"`
+	AgentType         string `json:"agentType"`
+	Success           *bool  `json:"success"`
+	Interrupted       bool   `json:"interrupted"`
+	Truncated         bool   `json:"truncated"`
+	Stderr            string `json:"stderr"`
 }
 
 type rawInner struct {
@@ -65,12 +90,12 @@ type contentBlock struct {
 	IsError   bool            `json:"is_error,omitempty"`    // for tool_result blocks: true when tool errored
 }
 
-// ParsedMessage is the normalised representation of one JSONL line.
-type ParsedMessage struct {
+// Event is the normalised representation of one JSONL line.
+type Event struct {
 	Type         string    `json:"type"`
 	MessageID    string    `json:"messageId,omitempty"`
 	Role         string    `json:"role"`
-	ContentText  string    `json:"contentText"`            // extracted plain-text preview (truncated)
+	ContentText  string    `json:"contentPreview"`         // extracted plain-text preview (truncated)
 	FullContent  string    `json:"fullContent,omitempty"`  // full untruncated content (for expand)
 	ToolName     string    `json:"toolName,omitempty"`
 	CostUSD      float64   `json:"costUSD"`
@@ -97,12 +122,33 @@ type ParsedMessage struct {
 	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
 	TeamName     string    `json:"teamName,omitempty"`     // team name for team agents
 	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
+	// Tool result metadata (from toolUseResult on user lines)
+	DurationMs      *int64  `json:"durationMs,omitempty"`
+	Success         *bool   `json:"success,omitempty"`
+	Stderr          string  `json:"stderr,omitempty"`
+	Interrupted     bool    `json:"interrupted,omitempty"`
+	Truncated       bool    `json:"truncated,omitempty"`
+	// Agent result metadata (from toolUseResult on agent completions)
+	AgentDurationMs   *int64 `json:"agentDurationMs,omitempty"`
+	AgentTokens       *int64 `json:"agentTokens,omitempty"`
+	AgentToolUseCount *int   `json:"agentToolUseCount,omitempty"`
+	AgentType         string `json:"agentType,omitempty"`
+	// System message metadata
+	Subtype          string `json:"subtype,omitempty"`
+	TurnMessageCount *int   `json:"turnMessageCount,omitempty"`
+	HookCount        *int   `json:"hookCount,omitempty"`
+	HookInfos        string `json:"hookInfos,omitempty"` // JSON string
+	Level            string `json:"level,omitempty"`
+	// Session-level metadata
+	IsMeta     bool   `json:"isMeta,omitempty"`
+	Version    string `json:"version,omitempty"`
+	Entrypoint string `json:"entrypoint,omitempty"`
 }
 
-// IsConversationMessage returns true if this message represents a real
+// IsConversationTurn returns true if this message represents a real
 // conversation event (user or assistant turn), as opposed to metadata lines
 // like progress, system, file-history-snapshot, agent-name, etc.
-func (m *ParsedMessage) IsConversationMessage() bool {
+func (m *Event) IsConversationTurn() bool {
 	switch m.Type {
 	case "assistant", "user", "human":
 		return true
@@ -147,8 +193,8 @@ func computeCost(model string, usage rawUsage) float64 {
 		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
 }
 
-// ParseLine unmarshals a single JSONL line and returns a ParsedMessage.
-func ParseLine(line []byte) (*ParsedMessage, error) {
+// ParseLine unmarshals a single JSONL line and returns an Event.
+func ParseLine(line []byte) (*Event, error) {
 	var raw rawMessage
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil, fmt.Errorf("json unmarshal: %w", err)
@@ -160,7 +206,7 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 
 	cost := computeCost(raw.Message.Model, usage)
 
-	msg := &ParsedMessage{
+	msg := &Event{
 		Type:         raw.Type,
 		MessageID:    raw.Message.ID,
 		Role:         raw.Message.Role,
@@ -184,6 +230,50 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 	if raw.Message.StopReason != nil {
 		msg.StopReason = *raw.Message.StopReason
 	}
+	// Treat queue-operation/enqueue as a user message (real-time user input).
+	if raw.Type == "queue-operation" && raw.Operation == "enqueue" {
+		msg.Type = "user"
+		msg.Role = "user"
+	}
+
+	// Session-level metadata (carried on most JSONL lines).
+	msg.IsMeta = raw.IsMeta
+	msg.Version = raw.Version
+	msg.Entrypoint = raw.Entrypoint
+
+	// System message metadata (turn_duration, stop_hook_summary).
+	if raw.Type == "system" {
+		msg.Subtype = raw.Subtype
+		msg.DurationMs = raw.DurationMs
+		msg.TurnMessageCount = raw.MessageCount
+		msg.HookCount = raw.HookCount
+		if len(raw.HookInfos) > 0 {
+			msg.HookInfos = string(raw.HookInfos)
+		}
+		msg.Level = raw.Level
+	}
+
+	// Tool result metadata from toolUseResult (on user/tool_result lines).
+	if len(raw.ToolUseResult) > 0 {
+		var tr rawToolResult
+		if json.Unmarshal(raw.ToolUseResult, &tr) == nil {
+			msg.DurationMs = tr.DurationMs
+			if tr.Success != nil {
+				msg.Success = tr.Success
+				if !*tr.Success {
+					msg.IsError = true
+				}
+			}
+			msg.Interrupted = tr.Interrupted
+			msg.Truncated = tr.Truncated
+			msg.Stderr = tr.Stderr
+			msg.AgentDurationMs = tr.TotalDurationMs
+			msg.AgentTokens = tr.TotalTokens
+			msg.AgentToolUseCount = tr.TotalToolUseCount
+			msg.AgentType = tr.AgentType
+		}
+	}
+
 	// Extract hook data from progress messages.
 	if raw.Type == "progress" && raw.Data.Type == "hook_progress" {
 		msg.HookEvent = raw.Data.HookEvent
@@ -193,7 +283,15 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		if i := len(raw.Data.HookEvent); i < len(raw.Data.HookName) && raw.Data.HookName[i] == ':' {
 			hookTool = raw.Data.HookName[i+1:]
 		}
-		msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+		// Include the hook command when available (shell command or "callback")
+		cmd := raw.Data.Command
+		if cmd != "" && cmd != "callback" {
+			msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+			msg.ToolDetail = cmd
+			msg.FullContent = cmd
+		} else {
+			msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+		}
 	}
 
 	// Skip content extraction for hook messages (contentText already set above).
@@ -210,7 +308,7 @@ func ParseLine(line []byte) (*ParsedMessage, error) {
 		msg.ToolUseID = ci.toolUseID
 		msg.ForToolUseID = ci.forToolUseID
 		msg.IsAgent = msg.ToolName == "Agent"
-		msg.IsError = ci.isError
+		msg.IsError = msg.IsError || ci.isError
 		// Also detect error indicators in content text when not already flagged.
 		if !msg.IsError && msg.ForToolUseID != "" {
 			lower := strings.ToLower(ci.text)
@@ -298,10 +396,10 @@ func extractContent(raw json.RawMessage) contentInfo {
 			if info.text == "" {
 				info.text = fmt.Sprintf("[tool: %s]", b.Name)
 			}
-			// Store full input JSON as expandable content (only if text block didn't set it).
+			// Store full input JSON as expandable content (always, so users can expand tool calls).
 			if info.fullText == "" && len(b.Input) > 0 {
 				prettyInput, err := json.MarshalIndent(json.RawMessage(b.Input), "", "  ")
-				if err == nil && len(prettyInput) > maxContentPreview {
+				if err == nil {
 					info.fullText = string(prettyInput)
 				}
 			}

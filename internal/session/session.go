@@ -13,9 +13,6 @@ const activeThreshold = 30 * time.Second
 // Subagents that finish their task emit end_turn then stop writing — no need to wait 30s.
 const subagentWaitingThreshold = 5 * time.Second
 
-// maxReplayCacheSize caps the number of entries in the replay cache to prevent unbounded growth.
-const maxReplayCacheSize = 100
-
 // maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
 const maxSeenMessageIDs = 10000
 
@@ -31,18 +28,16 @@ type MessageCosts struct {
 
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
-	ID           string    `json:"id"`
-	ProjectDir   string    `json:"projectDir"`
-	ProjectName  string    `json:"projectName"`
-	SessionName  string    `json:"sessionName,omitempty"`
-	FilePath     string    `json:"filePath"`
-	TotalCost    float64   `json:"totalCost"`
-	InputTokens  int64     `json:"inputTokens"`
-	OutputTokens int64     `json:"outputTokens"`
+	ID              string    `json:"id"`
+	RepoID          string    `json:"repoId,omitempty"`
+	SessionName     string    `json:"sessionName,omitempty"`
+	TotalCost       float64   `json:"totalCost"`
+	InputTokens     int64     `json:"inputTokens"`
+	OutputTokens    int64     `json:"outputTokens"`
 	CacheReadTokens     int64   `json:"cacheReadTokens"`
 	CacheCreationTokens int64   `json:"cacheCreationTokens"`
-	CacheHitPct         float64 `json:"cacheHitPct"`
 	MessageCount   int              `json:"messageCount"`
+	EventCount     int              `json:"eventCount"`
 	LastActive     time.Time        `json:"lastActive"`
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt      time.Time        `json:"startedAt"`
@@ -56,51 +51,21 @@ type Session struct {
 	Model          string           `json:"model,omitempty"`
 	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
 	ErrorCount     int              `json:"errorCount"`
-	IsSubagent     bool             `json:"isSubagent,omitempty"`
 	TaskDescription string          `json:"taskDescription"`
+	Version        string           `json:"version,omitempty"`
+	Entrypoint     string           `json:"entrypoint,omitempty"`
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
 type Store struct {
 	mu              sync.RWMutex
-	sessions        map[string]*Session
-	replayCache     map[string][]byte // cached JSON bytes per session ID
-	replayCacheOrder []string          // insertion order for LRU eviction
+	sessions map[string]*Session
 }
 
 // NewStore creates an empty Store.
 func NewStore() *Store {
 	return &Store{
-		sessions:    make(map[string]*Session),
-		replayCache: make(map[string][]byte),
-	}
-}
-
-// GetReplayJSON returns cached manifest JSON for the given session ID, if present.
-func (s *Store) GetReplayJSON(id string) ([]byte, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	data, ok := s.replayCache[id]
-	return data, ok
-}
-
-// SetReplayJSON stores manifest JSON for the given session ID.
-// Uses a check-then-set under the write lock so concurrent callers don't
-// overwrite a freshly-invalidated entry with stale data.
-// The cache is bounded to maxReplayCacheSize entries; the oldest entry is
-// evicted when the cache is full.
-func (s *Store) SetReplayJSON(id string, data []byte) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.replayCache[id]; !exists {
-		// Evict oldest entry if at capacity.
-		if len(s.replayCache) >= maxReplayCacheSize {
-			oldest := s.replayCacheOrder[0]
-			s.replayCacheOrder = s.replayCacheOrder[1:]
-			delete(s.replayCache, oldest)
-		}
-		s.replayCache[id] = data
-		s.replayCacheOrder = append(s.replayCacheOrder, id)
+		sessions: make(map[string]*Session),
 	}
 }
 
@@ -120,20 +85,7 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		s.sessions[sessionID] = sess
 	}
 
-	prevMsgCount := sess.MessageCount
 	update(sess)
-
-	// Only invalidate replay cache when message count actually changed.
-	if sess.MessageCount != prevMsgCount {
-		delete(s.replayCache, sessionID)
-		// Remove from insertion order tracking.
-		for i, id := range s.replayCacheOrder {
-			if id == sessionID {
-				s.replayCacheOrder = append(s.replayCacheOrder[:i], s.replayCacheOrder[i+1:]...)
-				break
-			}
-		}
-	}
 
 	// Prevent unbounded growth of the deduplication maps.
 	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
@@ -146,7 +98,7 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	// Recalculate derived fields.
 	// Subagents in "waiting" use a shorter threshold — they emit end_turn then stop.
 	threshold := activeThreshold
-	if sess.IsSubagent && sess.Status == "waiting" {
+	if sess.ParentID != "" && sess.Status == "waiting" {
 		threshold = subagentWaitingThreshold
 	}
 	sess.IsActive = time.Since(sess.LastActive) < threshold
@@ -161,12 +113,6 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		if mins >= 1 {
 			sess.CostRate = sess.TotalCost / mins
 		}
-	}
-
-	// Cache hit % = cache reads / total input tokens (including cache creation).
-	totalInput := sess.InputTokens + sess.CacheReadTokens + sess.CacheCreationTokens
-	if totalInput > 0 {
-		sess.CacheHitPct = float64(sess.CacheReadTokens) / float64(totalInput) * 100
 	}
 
 	return sess
@@ -185,7 +131,7 @@ func (s *Store) All() []*Session {
 		cp.SeenMessageCosts = nil // don't share internal dedup map
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
-		if cp.IsSubagent && cp.Status == "waiting" {
+		if cp.ParentID != "" && cp.Status == "waiting" {
 			th = subagentWaitingThreshold
 		}
 		cp.IsActive = time.Since(cp.LastActive) < th

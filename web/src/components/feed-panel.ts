@@ -2,10 +2,10 @@
 import type { ParsedMessage, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchRecentMessages } from '../api';
+import { fetchSessionEvents, fetchPinnedEvents } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
-import { escapeHtml } from '../utils';
+import { escapeHtml, sessionDisplayName } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
 import { open as openTimeline } from './timeline-view';
@@ -14,6 +14,8 @@ import '../styles/feed.css';
 let container: HTMLElement | null = null;
 let feedContent: HTMLElement | null = null;
 let lastToolEntry: HTMLElement | null = null;
+let lastToolUseId: string | null = null;
+let currentHighlightGroup: string | null = null;
 let filterBar: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
 let scrollLockBtn: HTMLElement | null = null;
@@ -26,6 +28,8 @@ const MAX_ENTRIES = 500;
 const toolUseMap = new Map<string, string>(); // toolUseId -> displayType
 
 const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'command', 'hook', 'error'] as const;
+
+let multiSessionLoaded = false;
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -41,6 +45,12 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   const sessionChanged = changed.has('selectedSessionId');
   const viewChanged = changed.has('view');
 
+  // When sessions first load, populate multi-session feed
+  if (changed.has('grouped') && !multiSessionLoaded && !state.selectedSessionId) {
+    multiSessionLoaded = true;
+    loadMultiSessionEvents();
+  }
+
   if (sessionChanged || viewChanged) {
     if (state.view !== 'list') return; // other views take over the mount
 
@@ -51,31 +61,35 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       // Back to multi-session mode
       renderFeedPanel();
       currentLoadSessionId = null;
+      multiSessionLoaded = false;
+      loadMultiSessionEvents();
     }
   }
 }
 
 function onWsMessage(event: WsEvent): void {
-  if (!event.message || !event.session) return;
+  if (event.event !== 'event' || !event.data || !event.session) return;
   if (state.view !== 'list') return;
   if (!feedContent) return;
+
+  const msg = event.data;
 
   // In single-session mode, only show messages for selected session
   if (state.selectedSessionId && event.session.id !== state.selectedSessionId) return;
 
-  if (event.message.toolName && event.message.role === 'assistant') {
-    const toolInfo = event.message.toolName + (event.message.toolDetail ? ': ' + event.message.toolDetail.slice(0, 60) : '');
+  if (msg.toolName && msg.role === 'assistant') {
+    const toolInfo = msg.toolName + (msg.toolDetail ? ': ' + msg.toolDetail.slice(0, 60) : '');
     setLastTool(event.session.id, toolInfo);
   }
 
-  if (event.message.isError) {
-    const name = event.session.sessionName || event.session.projectName || 'Agent';
-    notify('error', 'Agent Error', `${name}: ${(event.message.contentText || '').slice(0, 100)}`);
+  if (msg.isError) {
+    const name = sessionDisplayName(event.session);
+    notify('error', 'Agent Error', `${name}: ${(msg.contentPreview || '').slice(0, 100)}`);
   }
 
-  const sessionName = event.session.sessionName || event.session.projectName || event.session.id.slice(0, 8);
+  const sessionName = sessionDisplayName(event.session);
   const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
-  appendMessage(event.message, opts);
+  appendMessage(msg as ParsedMessage, opts);
 }
 
 function renderFeedPanel(): void {
@@ -114,6 +128,19 @@ function renderFeedPanel(): void {
     autoScroll = atBottom;
     scrollLockBtn?.classList.toggle('visible', !atBottom);
   });
+  // Hover-based group highlighting: hovering any entry with a data-group-id
+  // highlights all entries in the same group (tool_use + hooks + tool_result).
+  feedContent.addEventListener('mouseover', (e) => {
+    const entry = (e.target as HTMLElement).closest<HTMLElement>('.feed-entry[data-group-id]');
+    if (!entry) { clearGroupHighlight(); return; }
+    const groupId = entry.dataset.groupId;
+    if (!groupId || groupId === currentHighlightGroup) return;
+    clearGroupHighlight();
+    currentHighlightGroup = groupId;
+    feedContent!.querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`)
+      .forEach(el => el.classList.add('group-highlight'));
+  });
+  feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
 
   // Scroll lock button — recreate on each render since container.innerHTML
@@ -138,14 +165,14 @@ function updateHeader(): void {
   if (!headerEl) return;
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
-    const name = sess ? (sess.sessionName || sess.projectName || sess.id) : state.selectedSessionId;
+    const name = sess ? (sessionDisplayName(sess)) : state.selectedSessionId;
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
-      <span style="color:var(--text-dim);font-size:10px">${escapeHtml(name)}</span>
+      <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">${escapeHtml(name)}</span>
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
       ${!isLive ? '<span class="replay-btn" role="button" tabindex="0" aria-label="Replay session" style="margin-left:4px;color:var(--purple,#a855f7);font-size:9px;cursor:pointer;border:1px solid rgba(168,85,247,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">▶ REPLAY</span>' : ''}
-      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← all</span>`;
+      <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
     backBtn?.addEventListener('keydown', (e) => {
@@ -182,7 +209,7 @@ function updateHeader(): void {
     }
   } else {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">LIVE FEED</span>
-      <span style="color:var(--text-dim);font-size:10px">all sessions</span>`;
+      <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">ALL SESSIONS</span>`;
   }
 }
 
@@ -247,6 +274,7 @@ function applyFilters(): void {
   }
 }
 
+
 async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
@@ -254,9 +282,30 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
-    const messages = await fetchRecentMessages(sessionId);
+    const [messages, pinned] = await Promise.all([
+      fetchSessionEvents(sessionId, 200),
+      fetchPinnedEvents(sessionId),
+    ]);
     if (currentLoadSessionId !== sessionId) return;
-    for (const msg of messages) {
+
+    // Deduplicate: DB may contain duplicate rows from re-bootstraps.
+    // Use timestamp + content as a fingerprint since IDs aren't stable.
+    const seen = new Set<string>();
+    const dedup = (events: typeof messages) => events.filter(e => {
+      const key = `${e.timestamp}|${e.contentPreview ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Merge pinned events (errors + agents) that aren't in the recent window.
+    const recentDeduped = dedup(messages);
+    const missingPinned = dedup(pinned);
+    const merged = [...missingPinned, ...recentDeduped].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    for (const msg of merged) {
       appendMessage(msg as ParsedMessage);
     }
   } catch {
@@ -266,8 +315,65 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   }
 }
 
+/** Load recent events from all active sessions to populate the multi-session feed on mount. */
+async function loadMultiSessionEvents(): Promise<void> {
+  if (!feedContent) return;
+  if (state.selectedSessionId) return; // only for multi-session mode
+
+  const activeSessions = Array.from(state.sessions.values()).filter(s => s.isActive);
+  if (activeSessions.length === 0) return;
+
+  try {
+    // Fetch last 20 events from each active session
+    const perSession = await Promise.all(
+      activeSessions.map(async (sess) => {
+        const events = await fetchSessionEvents(sess.id, 20);
+        return events.map(e => ({ ...e, _sessionName: sessionDisplayName(sess) }));
+      })
+    );
+
+    const allEvents = perSession.flat()
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    // Deduplicate
+    const seen = new Set<string>();
+    for (const evt of allEvents) {
+      const key = `${evt.timestamp}|${evt.contentPreview ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      appendMessage(evt as ParsedMessage, { showSessionId: (evt as any)._sessionName });
+    }
+  } catch {
+    // Silently fail — live events will still flow in via WebSocket
+  }
+}
+
+function clearGroupHighlight(): void {
+  if (!currentHighlightGroup || !feedContent) return;
+  feedContent.querySelectorAll('.group-highlight')
+    .forEach(el => el.classList.remove('group-highlight'));
+  currentHighlightGroup = null;
+}
+
 function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}): void {
   if (!feedContent) return;
+
+  // Suppress thinking-only assistant messages — they're streaming intermediates
+  // that will be replaced by the actual response with the same messageId.
+  // These have no contentPreview text (renderer would fall back to "[thinking...]")
+  // and no tool info. Keep them if they have expandable fullContent.
+  if (msg.role === 'assistant' && !msg.toolName && !msg.isAgent) {
+    const preview = (msg.contentPreview || '').replace(/^\[thinking\.\.\.\]$/, '');
+    if (!preview && !msg.fullContent) {
+      return;
+    }
+  }
+
+  // Suppress empty system messages (e.g. queue-operation/remove with no content),
+  // but allow turn_duration summaries through — they're rendered as separators.
+  if (!msg.role && !msg.contentPreview && !msg.fullContent && msg.subtype !== 'turn_duration') {
+    return;
+  }
 
   // Remove the "WAITING FOR EVENTS..." placeholder
   const empty = feedContent.querySelector('.feed-empty');
@@ -300,11 +406,19 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   if (type === 'tool_use') {
     entry.classList.add('tool-group-start');
     lastToolEntry = entry;
+    lastToolUseId = msg.toolUseId || null;
+    if (msg.toolUseId) entry.dataset.groupId = msg.toolUseId;
+  } else if (type === 'hook' && lastToolEntry) {
+    // Hooks nest under the preceding tool_use (small/supporting entries)
+    entry.classList.add('tool-group-child');
+    if (lastToolUseId) entry.dataset.groupId = lastToolUseId;
   } else if (type === 'tool_result' && lastToolEntry) {
-    entry.classList.add('tool-group-end');
-    lastToolEntry = null;
+    // Tool results stay flat but link to their group via data attribute
+    if (msg.forToolUseId) entry.dataset.groupId = msg.forToolUseId;
+    else if (lastToolUseId) entry.dataset.groupId = lastToolUseId;
   } else {
     lastToolEntry = null;
+    lastToolUseId = null;
   }
 
   feedContent.appendChild(entry);
