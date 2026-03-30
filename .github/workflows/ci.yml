@@ -59,14 +59,11 @@ jobs:
             echo "WARNING: Found debug print statements"
           fi
 
-  # Release jobs only run on main, after tests and lint pass
+  # Create or update the release PR on pushes to main
   release-please:
     if: github.ref == 'refs/heads/main'
     needs: [build-and-test, lint]
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.create-release.outputs.release_created }}
-      tag_name: ${{ steps.create-release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -75,112 +72,11 @@ jobs:
           manifest-file: .release-please-manifest.json
           skip-github-release: true
 
-      # Auto-merge the release PR so releases ship without manual intervention.
-      # Only when release-please created a PR but didn't already create the release.
-      - name: Auto-merge release PR
+      # Enable auto-merge so it merges once CI passes on the PR itself
+      - name: Enable auto-merge on release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr merge --repo ${{ github.repository }} --merge \
+          gh pr merge --repo ${{ github.repository }} --auto --merge \
             ${{ fromJSON(steps.release.outputs.prs)[0].number }}
-
-      # github.token merges don't trigger downstream workflows, so the normal
-      # second-pass (where release-please detects its own merged PR and creates
-      # the GitHub release) never fires. We create the tag and release directly
-      # in this same run instead — but only if they don't already exist.
-      - name: Create release after merge
-        id: create-release
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PR_NUMBER=${{ fromJSON(steps.release.outputs.prs)[0].number }}
-          PR_TITLE="${{ fromJSON(steps.release.outputs.prs)[0].title }}"
-          VERSION=$(echo "${PR_TITLE}" | grep -oP '\d+\.\d+\.\d+')
-          TAG_NAME="v${VERSION}"
-
-          # Skip if release already exists (idempotent)
-          if gh release view "${TAG_NAME}" --repo ${{ github.repository }} &>/dev/null; then
-            echo "Release ${TAG_NAME} already exists, skipping"
-            echo "release_created=true" >> $GITHUB_OUTPUT
-            echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Wait for merge to propagate
-          sleep 3
-
-          # Get the merge commit SHA from the PR
-          MERGE_SHA=$(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER} --jq '.merge_commit_sha')
-
-          # Create the tag (skip if it already exists)
-          gh api repos/${{ github.repository }}/git/refs \
-            -f ref="refs/tags/${TAG_NAME}" \
-            -f sha="${MERGE_SHA}" || true
-
-          # Extract release notes from the PR body
-          gh pr view ${PR_NUMBER} --repo ${{ github.repository }} --json body --jq '.body' > /tmp/release-notes.md
-
-          # Create the GitHub release
-          gh release create "${TAG_NAME}" \
-            --repo ${{ github.repository }} \
-            --title "${TAG_NAME}" \
-            --notes-file /tmp/release-notes.md \
-            --target "${MERGE_SHA}"
-
-          # Mark release PR as tagged so release-please doesn't block on it
-          gh pr edit ${PR_NUMBER} --repo ${{ github.repository }} \
-            --remove-label "autorelease: pending" \
-            --add-label "autorelease: tagged" || true
-
-          echo "release_created=true" >> $GITHUB_OUTPUT
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-
-  # Build and attach binaries when a release is created
-  build-binaries:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Build frontend
-        run: cd web && npm ci && npm run build
-
-      - name: Build binaries
-        run: |
-          VERSION=${{ needs.release-please.outputs.tag_name }}
-          LDFLAGS="-s -w -X main.version=${VERSION}"
-          mkdir -p dist
-
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-linux-amd64 ./cmd/claude-monitor
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-linux-arm64 ./cmd/claude-monitor
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-darwin-amd64 ./cmd/claude-monitor
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-darwin-arm64 ./cmd/claude-monitor
-
-          cd dist
-          for bin in claude-monitor-*; do
-            chmod +x "$bin"
-            tar czf "${bin}.tar.gz" "$bin"
-          done
-          sha256sum *.tar.gz > checksums.txt
-
-      - name: Upload binaries to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} \
-            dist/*.tar.gz \
-            dist/checksums.txt \
-            --repo ${{ github.repository }}
