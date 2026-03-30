@@ -468,7 +468,9 @@ Examples:
 			hourAgo := now.Add(-1 * time.Hour)
 			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 			yesterdayStart := todayStart.Add(-24 * time.Hour)
-			weekStart := todayStart.Add(-time.Duration(now.Weekday()) * 24 * time.Hour)
+			weekday := int(now.Weekday())
+			if weekday == 0 { weekday = 7 }
+			weekStart := todayStart.AddDate(0, 0, -(weekday - 1))
 
 			type grouped struct {
 				Active    []*session.Session `json:"active"`

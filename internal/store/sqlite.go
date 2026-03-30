@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/zxela-claude/claude-monitor/internal/parser"
@@ -773,13 +774,17 @@ func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// Wrap in double quotes to treat as a literal phrase, escaping any
+	// internal double quotes. This prevents FTS5 syntax errors from
+	// user-supplied queries (e.g. unbalanced quotes, bare operators).
+	safe := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		''
 		FROM events_fts fts
 		JOIN events e ON e.id = fts.rowid
 		WHERE events_fts MATCH ?
 		ORDER BY fts.rank * (1.0 + 10.0 / (1.0 + (julianday('now') - julianday(e.timestamp)) * 24.0))
-		LIMIT ?`, query, limit)
+		LIMIT ?`, safe, limit)
 	if err != nil {
 		return nil, err
 	}

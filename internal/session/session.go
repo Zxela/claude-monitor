@@ -13,9 +13,6 @@ const activeThreshold = 30 * time.Second
 // Subagents that finish their task emit end_turn then stop writing — no need to wait 30s.
 const subagentWaitingThreshold = 5 * time.Second
 
-// maxReplayCacheSize caps the number of entries in the replay cache to prevent unbounded growth.
-const maxReplayCacheSize = 100
-
 // maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
 const maxSeenMessageIDs = 10000
 
@@ -62,44 +59,13 @@ type Session struct {
 // Store is a thread-safe registry of sessions keyed by session ID.
 type Store struct {
 	mu              sync.RWMutex
-	sessions        map[string]*Session
-	replayCache     map[string][]byte // cached JSON bytes per session ID
-	replayCacheOrder []string          // insertion order for LRU eviction
+	sessions map[string]*Session
 }
 
 // NewStore creates an empty Store.
 func NewStore() *Store {
 	return &Store{
-		sessions:    make(map[string]*Session),
-		replayCache: make(map[string][]byte),
-	}
-}
-
-// GetReplayJSON returns cached manifest JSON for the given session ID, if present.
-func (s *Store) GetReplayJSON(id string) ([]byte, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	data, ok := s.replayCache[id]
-	return data, ok
-}
-
-// SetReplayJSON stores manifest JSON for the given session ID.
-// Uses a check-then-set under the write lock so concurrent callers don't
-// overwrite a freshly-invalidated entry with stale data.
-// The cache is bounded to maxReplayCacheSize entries; the oldest entry is
-// evicted when the cache is full.
-func (s *Store) SetReplayJSON(id string, data []byte) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.replayCache[id]; !exists {
-		// Evict oldest entry if at capacity.
-		if len(s.replayCache) >= maxReplayCacheSize {
-			oldest := s.replayCacheOrder[0]
-			s.replayCacheOrder = s.replayCacheOrder[1:]
-			delete(s.replayCache, oldest)
-		}
-		s.replayCache[id] = data
-		s.replayCacheOrder = append(s.replayCacheOrder, id)
+		sessions: make(map[string]*Session),
 	}
 }
 
@@ -119,20 +85,7 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 		s.sessions[sessionID] = sess
 	}
 
-	prevMsgCount := sess.MessageCount
 	update(sess)
-
-	// Only invalidate replay cache when message count actually changed.
-	if sess.MessageCount != prevMsgCount {
-		delete(s.replayCache, sessionID)
-		// Remove from insertion order tracking.
-		for i, id := range s.replayCacheOrder {
-			if id == sessionID {
-				s.replayCacheOrder = append(s.replayCacheOrder[:i], s.replayCacheOrder[i+1:]...)
-				break
-			}
-		}
-	}
 
 	// Prevent unbounded growth of the deduplication maps.
 	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
