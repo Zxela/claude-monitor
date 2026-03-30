@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.0](https://github.com/Zxela/claude-monitor/compare/v1.26.0...v2.0.0) (2026-03-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* major version bump to v2.0.0
+
+### Features
+
+* switch release-please to manifest mode for v2.0.0 ([172f5c1](https://github.com/Zxela/claude-monitor/commit/172f5c10d82442a260d390fd5f2c3e033ddc55be))
+
+
+### Bug Fixes
+
+* search UX — smart preview, click-to-reveal, no horizontal scroll ([3348cb3](https://github.com/Zxela/claude-monitor/commit/3348cb3b5dc429d157965623cee547a511e89209))
+* sidebar subagent UX — inline children, remove replay button, auto-reveal ([38ebbfe](https://github.com/Zxela/claude-monitor/commit/38ebbfe6ab158f910391417c62573b2a22f9fec9))
+* split release pipeline — auto-merge in CI, release on PR close ([04334ea](https://github.com/Zxela/claude-monitor/commit/04334eaf8e67606b0355cb3e590277a2161e6841))
+* update autorelease label after manual release creation ([1949b4b](https://github.com/Zxela/claude-monitor/commit/1949b4b63979dc091203f44c4e13c7e88027bed4))
+* use config-file/manifest-file inputs for release-please manifest mode ([f462eda](https://github.com/Zxela/claude-monitor/commit/f462edae9fd61e86da3ba39f6d387c547a02ea61))
+
 ## [1.26.0](https://github.com/Zxela/claude-monitor/compare/v1.25.5...v1.26.0) (2026-03-30)
 
 
