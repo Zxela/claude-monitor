@@ -71,7 +71,7 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          release-type: go
+          manifest: true
           skip-github-release: true
 
       # Auto-merge the release PR so releases ship without manual intervention.
