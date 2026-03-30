@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.26.0](https://github.com/Zxela/claude-monitor/compare/v1.25.5...v1.26.0) (2026-03-30)
+
+
+### Features
+
+* capture all dropped JSONL fields — tool durations, agent stats, system summaries ([1f8161e](https://github.com/Zxela/claude-monitor/commit/1f8161e0877e3ebdeeecbc9815d129c9ac724db9))
+* data model v2 — schema, pipeline, and API redesign ([fd242be](https://github.com/Zxela/claude-monitor/commit/fd242be0503229ef1d98c10c728ccdcb2f8c2782))
+* data model v2 — schema, pipeline, and API redesign ([#80](https://github.com/Zxela/claude-monitor/issues/80)) ([fd242be](https://github.com/Zxela/claude-monitor/commit/fd242be0503229ef1d98c10c728ccdcb2f8c2782))
+* data model v2 foundation (Phase 1+2) ([f44a047](https://github.com/Zxela/claude-monitor/commit/f44a047caee5e4700be14b3206115b1392f2eb9a))
+* feed UX improvements — hover grouping, turn summaries, sidebar fixes ([4e1c1e0](https://github.com/Zxela/claude-monitor/commit/4e1c1e0fc190069b012662df06687fd292c5c815))
+* frontend types and components update (Tasks [#9](https://github.com/Zxela/claude-monitor/issues/9), [#10](https://github.com/Zxela/claude-monitor/issues/10)) ([e6ed525](https://github.com/Zxela/claude-monitor/commit/e6ed5255d793fc5924c6ec73b86ea553c31e1a50))
+* missing API endpoints + automatic retention compaction ([6824ba4](https://github.com/Zxela/claude-monitor/commit/6824ba4ba32c525a6ab8d4c5550c2378daebb108))
+* pipeline package — staged event processing (Task [#6](https://github.com/Zxela/claude-monitor/issues/6)) ([223c7a2](https://github.com/Zxela/claude-monitor/commit/223c7a2a7dc977ebad5e8e88972251118016fbb0))
+* store layer rewrite for v2 schema (Task [#4](https://github.com/Zxela/claude-monitor/issues/4)) ([f9f7e2c](https://github.com/Zxela/claude-monitor/commit/f9f7e2c5e43e87b68c80bb80c9271b5072a565d1))
+* unify Session type across backend and frontend (Option 3) ([91ecaec](https://github.com/Zxela/claude-monitor/commit/91ecaecec82bd2301c65205c7c37714326fcc791))
+* wire pipeline into main.go, rewrite all API endpoints (Tasks [#7](https://github.com/Zxela/claude-monitor/issues/7), [#8](https://github.com/Zxela/claude-monitor/issues/8), [#11](https://github.com/Zxela/claude-monitor/issues/11)) ([625a6f3](https://github.com/Zxela/claude-monitor/commit/625a6f383b7fd277124b08d87df0e0b1e226a015))
+
+
+### Bug Fixes
+
+* 3 code review issues — Sunday grouping, FTS5 injection, dead replay cache ([6c4ec5f](https://github.com/Zxela/claude-monitor/commit/6c4ec5fd1c1ba78c83c4094a0de4433fac5efedf))
+* active count consistency, session name truncation, timeline contrast ([faba672](https://github.com/Zxela/claude-monitor/commit/faba672a157423700bafd1c1ac3c67829092663f))
+* address 4 code review issues from JSONL capture commit ([50670e6](https://github.com/Zxela/claude-monitor/commit/50670e69d51515572a18d613594241226a6db120))
+* dedup index + API response consistency ([18f571b](https://github.com/Zxela/claude-monitor/commit/18f571beb855831b115941f31b952d09436f422d))
+* feed overhaul — visual hierarchy, tool/hook grouping, card consistency, 3 bug fixes ([b38b01f](https://github.com/Zxela/claude-monitor/commit/b38b01f96f12ca2f2eab8c3e27da59497c0fe5f3))
+* feed quality + DB dedup + design consistency — 7 fixes from live testing ([7cc24de](https://github.com/Zxela/claude-monitor/commit/7cc24de1aa4869d9fe0098c6f070327ac5f4e5af))
+* FTS5 corruption on event upsert + review fixes ([5bfe457](https://github.com/Zxela/claude-monitor/commit/5bfe457dc7c374312c65baefb35b00f2e511b03f))
+* make release pipeline idempotent to prevent duplicate tag errors ([9fa69fb](https://github.com/Zxela/claude-monitor/commit/9fa69fb31f7643f34b31b0d81e15445398ad3851))
+* pinned events — always show errors + agents regardless of window size ([e7fec69](https://github.com/Zxela/claude-monitor/commit/e7fec6909d3942d45323de101c44e9811e618ee5))
+* release pipeline duplicate tag + QA test artifacts ([76495a3](https://github.com/Zxela/claude-monitor/commit/76495a3e3f711064077182cda41e9d1c4eb8af0e))
+* remove phantom 't' keyboard shortcut from help overlay, add QA docs ([cab7e66](https://github.com/Zxela/claude-monitor/commit/cab7e669349958e5144651e12a42f9c225485f3f))
+* review agent findings — last_insert_rowid, dead code, stale comment ([3c5b76e](https://github.com/Zxela/claude-monitor/commit/3c5b76e75c58a9eefd1ab85a38e85b54219a8a4d))
+* SQLite max connections + resolver TOCTOU race ([acba9bc](https://github.com/Zxela/claude-monitor/commit/acba9bc7d148e04a2389039b67544903181f2626))
+* UX issues from Playwright review (10 findings) ([e8cff0f](https://github.com/Zxela/claude-monitor/commit/e8cff0f43b86ee215bc6c96c0cd9f080b5bd3893))
+* UX iteration 1+2 — sidebar groups, display names, boilerplate ([d225abb](https://github.com/Zxela/claude-monitor/commit/d225abbc22f201dddcb319e1eb0ec45a8f269f89))
+* UX iteration 3+4 — 8 fixes from 6 Playwright testing loops ([c88a288](https://github.com/Zxela/claude-monitor/commit/c88a2882419d0d68263b6b5e2f940f9d9930d8cb))
+
 ## [1.25.5](https://github.com/Zxela/claude-monitor/compare/v1.25.4...v1.25.5) (2026-03-27)
 
 
