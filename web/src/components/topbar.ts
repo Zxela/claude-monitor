@@ -180,6 +180,20 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       btn.setAttribute('aria-pressed', String(isActive));
     });
   }
+  if (changed.has('sessions') || changed.has('view')) {
+    const graphBtn = el?.querySelector('[data-view="graph"]');
+    if (graphBtn) {
+      let attnCount = 0;
+      if (state.view !== 'graph') {
+        for (const sess of state.sessions.values()) {
+          if (sess.isActive && (sess.status === 'waiting' || sess.errorCount > 0)) {
+            attnCount++;
+          }
+        }
+      }
+      graphBtn.textContent = attnCount > 0 ? `GRAPH (${attnCount})` : 'GRAPH';
+    }
+  }
 }
 
 function setVal(el: HTMLElement | null, text: string): void {
