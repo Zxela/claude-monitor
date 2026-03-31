@@ -1,4 +1,4 @@
-import type { Session, GroupedSessions, Event, Stats, StorageInfo, RepoEntry } from './types';
+import type { Session, GroupedSessions, Event, Stats, StorageInfo, RepoEntry, TrendResult } from './types';
 
 const BASE = '';
 
@@ -43,6 +43,14 @@ export type StatsWindow = 'all' | 'today' | 'week' | 'month';
 
 export async function fetchStats(window: StatsWindow = 'today'): Promise<Stats> {
   return request<Stats>(`${BASE}/api/stats?window=${window}`);
+}
+
+export type TrendWindow = '24h' | '7d' | '30d';
+
+export async function fetchTrends(window: TrendWindow = '7d', repo?: string): Promise<TrendResult> {
+  const params = new URLSearchParams({ window });
+  if (repo) params.set('repo', repo);
+  return request<TrendResult>(`${BASE}/api/stats/trends?${params}`);
 }
 
 export async function fetchVersion(): Promise<string> {
