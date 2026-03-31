@@ -317,6 +317,39 @@ func TestStatsNonNegative(t *testing.T) {
 	}
 }
 
+func TestTrendsEndpoint(t *testing.T) {
+	resp, err := http.Get(baseURL + "/api/stats/trends?window=7d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result struct {
+		Window  string `json:"window"`
+		Buckets []struct {
+			Date string  `json:"date"`
+			Cost float64 `json:"cost"`
+		} `json:"buckets"`
+		Summary struct {
+			TotalCost    float64 `json:"totalCost"`
+			SessionCount int     `json:"sessionCount"`
+		} `json:"summary"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Window != "7d" {
+		t.Errorf("window = %q, want '7d'", result.Window)
+	}
+	if result.Buckets == nil {
+		t.Error("buckets should not be nil")
+	}
+}
+
 // TestSwaggerEndpoint verifies that /swagger is not served by default (404).
 func TestSwaggerEndpoint(t *testing.T) {
 	t.Parallel()
