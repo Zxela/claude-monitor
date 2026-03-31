@@ -1,0 +1,178 @@
+.burn-rate-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  width: 340px;
+  background: var(--bg-secondary, #16162a);
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-primary, #e0e0e0);
+  overflow: hidden;
+}
+
+.burn-rate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 16px 4px;
+}
+.burn-rate-label {
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+  letter-spacing: 1px;
+}
+.burn-rate-value {
+  font-size: 18px;
+  font-weight: bold;
+  color: #4ae68a;
+}
+
+.burn-rate-sparkline {
+  padding: 4px 16px 0;
+}
+.burn-rate-sparkline canvas {
+  width: 100%;
+  height: 50px;
+  display: block;
+}
+.burn-rate-sparkline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-dim, #555);
+  padding: 0 0 8px;
+}
+
+.burn-rate-metrics {
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--border, #2a2a4a);
+}
+.burn-rate-metric {
+  display: flex;
+  justify-content: space-between;
+}
+.burn-rate-metric-label {
+  color: var(--text-secondary, #888);
+}
+.burn-rate-metric-value {
+  color: var(--text-primary, #e0e0e0);
+}
+
+.burn-rate-sessions {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border, #2a2a4a);
+}
+.burn-rate-sessions-title {
+  font-size: 9px;
+  color: var(--text-dim, #555);
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+.burn-rate-session-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}
+.burn-rate-session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 8px;
+}
+.burn-rate-session-rate {
+  color: #4ae68a;
+  white-space: nowrap;
+}
+.burn-rate-session-model {
+  margin-left: 8px;
+  font-size: 10px;
+  color: var(--text-dim, #666);
+}
+
+.burn-rate-budget {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border, #2a2a4a);
+}
+.burn-rate-budget-bar {
+  height: 6px;
+  background: var(--bg-tertiary, #2a2a4a);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+.burn-rate-budget-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.burn-rate-budget-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+}
+.burn-rate-depletion {
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+  margin-top: 4px;
+}
+
+.burn-rate-settings-toggle {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border, #2a2a4a);
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-dim, #666);
+  letter-spacing: 1px;
+}
+.burn-rate-settings-toggle:hover {
+  color: var(--text-secondary, #888);
+}
+.burn-rate-settings {
+  padding: 0 16px 12px;
+}
+.burn-rate-settings input[type="number"] {
+  background: var(--bg-tertiary, #2a2a4a);
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 4px;
+  color: var(--text-primary, #e0e0e0);
+  padding: 4px 8px;
+  font-family: monospace;
+  font-size: 12px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+.burn-rate-settings label {
+  display: block;
+  margin: 3px 0;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-dim, #666);
+}
+.burn-rate-settings-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.burn-rate-settings-actions button {
+  padding: 3px 10px;
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 4px;
+  background: var(--bg-tertiary, #2a2a4a);
+  color: var(--text-primary, #e0e0e0);
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+.burn-rate-settings-actions button:hover {
+  background: var(--bg-hover, #3a3a5a);
+}
