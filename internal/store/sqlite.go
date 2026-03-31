@@ -600,15 +600,13 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 			&b.CacheReadTokens, &b.CacheCreationTokens, &b.SessionCount, &b.AvgSessionCost); err != nil {
 			return nil, fmt.Errorf("scan bucket: %w", err)
 		}
-		totalTokens := b.InputTokens + b.OutputTokens + b.CacheReadTokens + b.CacheCreationTokens
-		if totalTokens > 0 {
-			b.CacheHitPct = float64(b.CacheReadTokens) / float64(totalTokens) * 100
-		}
-		if b.InputTokens > 0 {
-			b.OutputInputRatio = float64(b.OutputTokens) / float64(b.InputTokens)
+		effInput := b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
+		if effInput > 0 {
+			b.CacheHitPct = float64(b.CacheReadTokens) / float64(effInput) * 100
+			b.OutputInputRatio = float64(b.OutputTokens) / float64(effInput)
 		}
 		if b.SessionCount > 0 {
-			b.AvgSessionTokens = float64(totalTokens) / float64(b.SessionCount)
+			b.AvgSessionTokens = float64(effInput+b.OutputTokens) / float64(b.SessionCount)
 		}
 		buckets = append(buckets, b)
 	}
@@ -710,19 +708,16 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 
 	// Build summary from buckets
 	var summary TrendSummary
+	var totalEffInput, totalCacheRead int64
 	for _, b := range buckets {
 		summary.TotalCost += b.Cost
 		summary.EffectiveTokens += b.InputTokens + b.OutputTokens + b.CacheReadTokens + b.CacheCreationTokens
 		summary.SessionCount += b.SessionCount
+		totalEffInput += b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
+		totalCacheRead += b.CacheReadTokens
 	}
-	totalTokens := summary.EffectiveTokens
-	if totalTokens > 0 {
-		// Recompute cache read total for summary
-		var cacheRead int64
-		for _, b := range buckets {
-			cacheRead += b.CacheReadTokens
-		}
-		summary.CacheHitPct = float64(cacheRead) / float64(totalTokens) * 100
+	if totalEffInput > 0 {
+		summary.CacheHitPct = float64(totalCacheRead) / float64(totalEffInput) * 100
 	}
 
 	return &TrendResult{
