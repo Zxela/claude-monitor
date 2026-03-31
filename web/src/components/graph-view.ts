@@ -3,6 +3,7 @@ import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { escapeHtml, sessionDisplayName } from '../utils';
+import { getLastTool } from '../tool-tracker';
 import '../styles/views.css';
 
 interface GraphNode {
@@ -37,6 +38,19 @@ let settledFrames = 0;
 let graphMode: 'graph' | 'sequence' = 'graph';
 const SETTLE_THRESHOLD = 0.1;
 const SETTLE_FRAMES = 30;
+const lastSeenErrors = new Map<string, number>();
+
+function needsAttention(sess: Session): boolean {
+  if (sess.status === 'waiting') return true;
+  const lastSeen = lastSeenErrors.get(sess.id) ?? 0;
+  return sess.errorCount > lastSeen;
+}
+
+function acknowledgeAttention(): void {
+  for (const sess of state.sessions.values()) {
+    lastSeenErrors.set(sess.id, sess.errorCount);
+  }
+}
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -54,6 +68,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('sessions') && state.view === 'graph') {
     if (graphMode === 'graph') {
       rebuildNodes();
+      updateNodeColors();
     } else {
       show(); // re-render sequence list
     }
@@ -62,6 +77,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 function show(): void {
   if (!container) return;
+  acknowledgeAttention();
   container.innerHTML = '';
 
   const wrapper = document.createElement('div');
@@ -114,7 +130,12 @@ function renderSequence(wrapper: HTMLElement): void {
 
   const sessions = Array.from(state.sessions.values())
     .filter(s => s.isActive || (now - new Date(s.lastActive).getTime()) < threshold)
-    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+    .sort((a, b) => {
+      const aAttn = needsAttention(a) ? 1 : 0;
+      const bAttn = needsAttention(b) ? 1 : 0;
+      if (aAttn !== bAttn) return bAttn - aAttn;
+      return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
+    });
 
   const list = document.createElement('div');
   list.className = 'sequence-list';
@@ -139,13 +160,20 @@ function renderSequence(wrapper: HTMLElement): void {
       ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
       : 'idle';
     const statusText = sess.isActive ? sess.status.replace('_', ' ') : 'done';
+    const attn = needsAttention(sess);
+    const attnBadge = attn
+      ? (sess.status === 'waiting' ? '<span style="color:#ffa64a;font-size:9px;margin-left:6px">WAITING</span>'
+        : '<span style="color:#ff6b6b;font-size:9px;margin-left:6px">ERROR</span>')
+      : '';
+    const toolInfo = sess.status === 'tool_use' ? (getLastTool(sess.id) || '') : '';
 
     entry.innerHTML = `
       <span class="sequence-time">${time}</span>
       <span class="sequence-dot ${statusClass}"></span>
       ${depth > 0 ? '<span class="sequence-connector">└─</span>' : ''}
-      <span class="sequence-name">${escapeHtml(name)}</span>
-      <span class="sequence-cost">${cost}</span>
+      <span class="sequence-name">${escapeHtml(name)}${attnBadge}</span>
+      ${toolInfo ? `<span style="color:#4488ff;font-size:10px">${escapeHtml(toolInfo)}</span>` : ''}
+      <span class="sequence-cost">${cost}${sess.costRate > 0 ? ` <span style="color:#888;font-size:9px">$${sess.costRate.toFixed(3)}/m</span>` : ''}</span>
       <span class="sequence-status">${statusText}</span>
     `;
 
@@ -216,9 +244,11 @@ function rebuildNodes(): void {
   nodes = visibleSessions.map(sess => {
     const old = oldNodes.get(sess.id);
     const radius = Math.min(30, Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8));
-    const color = sess.isActive
-      ? (sess.status === 'thinking' ? '#ffcc00' : sess.status === 'tool_use' ? '#4488ff' : '#00ff88')
-      : '#44445a';
+    const color = !sess.isActive ? '#44445a'
+      : sess.status === 'thinking' ? '#ffcc00'
+      : sess.status === 'tool_use' ? '#4488ff'
+      : sess.status === 'waiting' ? '#ffa64a'
+      : '#00ff88';
     const label = (sessionDisplayName(sess)).substring(0, 16);
 
     return {
@@ -245,6 +275,33 @@ function rebuildNodes(): void {
   settledFrames = 0;
   if (animFrame === null && state.view === 'graph') {
     startAnimation();
+  }
+}
+
+function updateNodeColors(): void {
+  let needsRedraw = false;
+  for (const n of nodes) {
+    const sess = state.sessions.get(n.id);
+    if (!sess) continue;
+    n.session = sess;
+    const newColor = !sess.isActive ? '#44445a'
+      : sess.status === 'thinking' ? '#ffcc00'
+      : sess.status === 'tool_use' ? '#4488ff'
+      : sess.status === 'waiting' ? '#ffa64a'
+      : '#00ff88';
+    if (n.color !== newColor) {
+      n.color = newColor;
+      needsRedraw = true;
+    }
+    n.radius = Math.min(30, Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8));
+  }
+  // If any node needs attention, ensure animation is running
+  const anyAttention = nodes.some(n => needsAttention(n.session));
+  if (anyAttention && animFrame === null && state.view === 'graph') {
+    settledFrames = 0;
+    startAnimation();
+  } else if (needsRedraw) {
+    draw();
   }
 }
 
@@ -295,9 +352,10 @@ function simulate(): void {
 
   // Idle detection: check if all velocities are below threshold
   const allSettled = nodes.every(n => Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD);
-  if (allSettled) {
+  const anyAttention = nodes.some(n => needsAttention(n.session));
+  if (allSettled && !anyAttention) {
     settledFrames++;
-  } else {
+  } else if (!allSettled) {
     settledFrames = 0;
   }
 }
@@ -331,6 +389,19 @@ function draw(): void {
       ctx.stroke();
     }
     ctx.globalAlpha = 1.0;
+
+    // Pulsing ring for nodes that need attention
+    if (needsAttention(n.session)) {
+      const pulse = (Math.sin(Date.now() / 500) + 1) / 2;
+      ctx.globalAlpha = 0.3 + pulse * 0.7;
+      const ringColor = n.session.errorCount > (lastSeenErrors.get(n.id) ?? 0) ? '#ff6b6b' : '#ffa64a';
+      ctx.strokeStyle = ringColor;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius + 6 + pulse * 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+    }
 
     // Label
     ctx.fillStyle = '#aaa';
@@ -385,9 +456,20 @@ function onMouseMove(e: MouseEvent): void {
   canvas.style.cursor = node ? 'pointer' : 'default';
 
   if (node) {
-    tooltip.innerHTML = `<div><b>${escapeHtml(node.label)}</b></div>
-      <div>$${node.session.totalCost.toFixed(2)} · ${node.session.messageCount} msgs</div>
-      <div>${node.session.status} · ${node.session.model || '?'}</div>`;
+    const sess = node.session;
+    const statusText = sess.isActive ? sess.status.replace('_', ' ').toUpperCase() : 'DONE';
+    const statusClass = sess.status === 'waiting' ? 'color:#ffa64a'
+      : sess.status === 'thinking' ? 'color:#ffcc00'
+      : sess.status === 'tool_use' ? 'color:#4488ff'
+      : 'color:#888';
+    const toolName = sess.status === 'tool_use' ? (getLastTool(sess.id) || '') : '';
+    const errHtml = sess.errorCount > 0 ? `<div style="color:#ff6b6b">${sess.errorCount} errors</div>` : '';
+
+    tooltip.innerHTML = `
+      <div><b>${escapeHtml(node.label)}</b> <span style="${statusClass};font-size:9px">${statusText}</span></div>
+      ${toolName ? `<div style="color:#4488ff;font-size:10px">${escapeHtml(toolName)}</div>` : ''}
+      <div>$${sess.totalCost.toFixed(2)}${sess.costRate > 0 ? ` ($${sess.costRate.toFixed(3)}/min)` : ''}</div>
+      ${errHtml}`;
     tooltip.style.left = `${mx + 15}px`;
     tooltip.style.top = `${my + 15}px`;
     tooltip.classList.add('visible');
