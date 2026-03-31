@@ -43,20 +43,23 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
 
   loadSettings();
 
-  const openPanel = (e: Event) => {
+  const openFromGear = (e: Event) => {
     e.stopPropagation();
     togglePanel(gearBtn);
   };
 
-  gearBtn.addEventListener('click', openPanel);
+  gearBtn.addEventListener('click', openFromGear);
   gearBtn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(e); }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFromGear(e); }
   });
 
-  // Make $/MIN stat also open the panel
+  // Make $/MIN stat also open the panel, anchored to the rate stat
   if (rateStatEl) {
     rateStatEl.style.cursor = 'pointer';
-    rateStatEl.addEventListener('click', openPanel);
+    rateStatEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePanel(rateStatEl!);
+    });
   }
 
   document.addEventListener('click', () => closePanel());
