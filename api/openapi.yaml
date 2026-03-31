@@ -4,7 +4,7 @@ info:
   description: >
     REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
     JSONL session files and broadcasts activity over WebSocket.
-  version: "1.0.0"
+  version: "2.0.0"
 
 servers:
   - url: http://localhost:7700
@@ -14,26 +14,30 @@ tags:
   - name: health
     description: Health and version checks
   - name: sessions
-    description: Live in-memory session data
-  - name: history
-    description: Persistent historical session records from SQLite
+    description: Session data (live and persisted)
+  - name: events
+    description: Parsed JSONL events for a session
   - name: replay
-    description: Session replay and streaming
+    description: Session replay
   - name: search
     description: Full-text search across sessions
-  - name: projects
-    description: Project aggregations
+  - name: repos
+    description: Repository aggregations
+  - name: stats
+    description: Aggregated statistics and trends
+  - name: settings
+    description: User-configurable settings
+  - name: storage
+    description: Database storage info and cache management
   - name: realtime
     description: WebSocket real-time updates
-  - name: stats
-    description: Aggregated statistics with time windowing
 
 paths:
   /health:
     get:
       tags: [health]
       summary: Health check
-      description: Returns a simple JSON object confirming the server is running.
+      description: Returns a JSON object confirming the server and database are healthy.
       operationId: getHealth
       responses:
         "200":
@@ -41,9 +45,29 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OkResponse"
-              example:
-                ok: true
+                type: object
+                required: [ok, db]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  db:
+                    type: string
+                    example: "ok"
+        "503":
+          description: Database unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, db]
+                properties:
+                  ok:
+                    type: boolean
+                    example: false
+                  db:
+                    type: string
+                    example: "database is locked"
 
   /api/version:
     get:
@@ -59,68 +83,157 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "v1.2.3"
+                version: "v2.0.0"
 
   /api/sessions:
     get:
       tags: [sessions]
-      summary: List all live sessions
+      summary: List sessions
       description: >
-        Returns a flat array of all sessions currently tracked in memory.
-        Sessions are populated from JSONL file watchers and remain until the
-        daemon is restarted.
+        Unified sessions endpoint. Behavior depends on query parameters:
+
+        - `?active=true` — returns only live active sessions from memory.
+
+        - `?group=activity` — returns sessions partitioned into time buckets
+          (active, lastHour, today, yesterday, thisWeek, older), merging live
+          sessions with DB history.
+
+        - Default (no group) — returns paginated session list from the database.
+          Supports `?repo=` filter, `?limit=` and `?offset=` pagination.
       operationId: listSessions
+      parameters:
+        - name: active
+          in: query
+          description: >
+            When "true", returns only currently active sessions from the live store.
+          schema:
+            type: string
+            enum: ["true"]
+        - name: group
+          in: query
+          description: >
+            Grouping mode. Currently only "activity" is supported, which returns
+            sessions bucketed by time.
+          schema:
+            type: string
+            enum: [activity]
+        - name: repo
+          in: query
+          description: Filter sessions by repository ID (only applies to default/flat mode).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >
+            Maximum number of records to return (default mode only). Clamped to 1–500. Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+        - name: offset
+          in: query
+          description: Number of records to skip for pagination (default mode only). Defaults to 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         "200":
-          description: Array of sessions (may be empty)
+          description: >
+            Either a flat array of Session objects (default and active modes) or a
+            GroupedSessions object (group=activity mode).
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Session"
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/Session"
+                  - $ref: "#/components/schemas/GroupedSessions"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  /api/sessions/grouped:
+  /api/sessions/{id}:
     get:
       tags: [sessions]
-      summary: Sessions grouped by time bucket
+      summary: Get a single session by ID
       description: >
-        Returns all live sessions partitioned into six time buckets based on
-        LastActive: active (within 30 s), lastHour, today, yesterday, thisWeek,
-        and older.
-      operationId: getSessionsGrouped
-      responses:
-        "200":
-          description: Grouped sessions object
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GroupedSessions"
-
-  /api/sessions/{id}/recent:
-    get:
-      tags: [sessions]
-      summary: Last 50 messages for a session
-      description: >
-        Reads the session's JSONL file and returns the last 50 meaningful
-        parsed events (non-empty contentText or toolName, excluding raw
-        streaming chunks).
-      operationId: getSessionRecent
+        Returns a single session. Checks the live in-memory store first, then
+        falls back to the database.
+      operationId: getSession
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
         "200":
-          description: Array of up to 50 replay events
+          description: Session found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/sessions/{id}/events:
+    get:
+      tags: [events]
+      summary: Events for a session
+      description: >
+        Returns parsed JSONL events for a session from the database.
+        Supports multiple modes via query parameters:
+
+        - `?pinned=true` or `?errors=true` — returns all error and agent events
+          (always visible regardless of window).
+
+        - `?last=N` — returns the N most recent events.
+
+        - Default — paginated with `?limit=` (default 100) and `?offset=` (default 0).
+      operationId: listSessionEvents
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: pinned
+          in: query
+          description: When "true", returns all error and agent events for the session.
+          schema:
+            type: string
+            enum: ["true"]
+        - name: errors
+          in: query
+          description: Alias for pinned=true.
+          schema:
+            type: string
+            enum: ["true"]
+        - name: last
+          in: query
+          description: Return the N most recent events. Defaults to 50 if provided without a value.
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          description: Maximum number of events to return (default mode only). Defaults to 100.
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+        - name: offset
+          in: query
+          description: Number of events to skip (default mode only). Defaults to 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Array of event rows
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/ReplayEvent"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                  $ref: "#/components/schemas/EventRow"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -129,9 +242,8 @@ paths:
       tags: [replay]
       summary: Replay manifest for a session
       description: >
-        Returns the full ordered list of parsed events for the session, plus
-        the session ID. Results are cached in memory and invalidated whenever
-        new messages arrive. Suitable for driving a timeline scrubber.
+        Returns the full ordered list of events for the session from the database
+        (up to 10,000), plus the session ID. Suitable for driving a timeline scrubber.
       operationId: getSessionReplay
       parameters:
         - $ref: "#/components/parameters/SessionId"
@@ -142,57 +254,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReplayManifest"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/sessions/{id}/replay/stream:
-    get:
-      tags: [replay]
-      summary: SSE replay stream
-      description: >
-        Streams replay events as Server-Sent Events (SSE). Each SSE `data`
-        field contains a JSON-encoded ReplayEvent. The stream ends with a
-        `event: done` message. Use `from` to start partway through the event
-        list and `speed` to control playback rate (1.0 = real time, 2.0 =
-        double speed, 0 = as fast as possible).
-      operationId: streamSessionReplay
-      parameters:
-        - $ref: "#/components/parameters/SessionId"
-        - name: from
-          in: query
-          description: Zero-based event index to start replay from (default 0).
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-        - name: speed
-          in: query
-          description: >
-            Playback speed multiplier. 0 or omitted means no delay between
-            events. 1.0 is real-time, 2.0 is double speed.
-          schema:
-            type: number
-            format: double
-            minimum: 0
-            default: 0
-      responses:
-        "200":
-          description: SSE stream of replay events
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: >
-                  Newline-delimited SSE frames. Each frame is either
-                  `data: <ReplayEvent JSON>` or `event: done\ndata: {}`.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -215,8 +276,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OkResponse"
-              example:
-                ok: true
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -224,108 +283,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /api/history:
-    get:
-      tags: [history]
-      summary: Paginated historical sessions
-      description: >
-        Returns persisted session records from SQLite, ordered by ended_at
-        descending. Sessions are written to history when they transition from
-        active to inactive (checked every 30 seconds).
-      operationId: listHistory
-      parameters:
-        - name: limit
-          in: query
-          description: >
-            Maximum number of records to return. Clamped to 1–500.
-            Defaults to 50.
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 500
-            default: 50
-        - name: offset
-          in: query
-          description: Number of records to skip for pagination. Defaults to 0.
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-      responses:
-        "200":
-          description: Array of historical session records (may be empty)
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/HistoryRow"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/projects:
-    get:
-      tags: [projects]
-      summary: Distinct project names with session counts
-      description: >
-        Aggregates all live sessions by project name (falling back to
-        projectDir when projectName is empty) and returns each unique project
-        with its session count.
-      operationId: listProjects
-      responses:
-        "200":
-          description: Array of project entries
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ProjectEntry"
-
-  /api/search:
-    get:
-      tags: [search]
-      summary: Cross-session full-text search
-      description: >
-        Searches contentText, toolDetail, and toolName across all live
-        sessions. Returns an empty array when `q` is absent or blank.
-        Results are limited to `limit` matches across all sessions combined.
-      operationId: searchSessions
-      parameters:
-        - name: q
-          in: query
-          required: true
-          description: Search query string (case-insensitive substring match).
-          schema:
-            type: string
-        - name: limit
-          in: query
-          description: >
-            Maximum number of results to return. Clamped to 1–200.
-            Defaults to 50.
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
-      responses:
-        "200":
-          description: Array of matching search results (may be empty)
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SearchResult"
-
   /api/stats:
     get:
       tags: [stats]
       summary: Aggregate stats with configurable time window
       description: >
         Returns aggregated cost, token, and session counts from the SQLite
-        history database, merged with live deltas from currently active
-        sessions. Subagent sessions are excluded from all totals.
+        database, plus live active session count and cost rate from the
+        in-memory store.
       operationId: getStats
       parameters:
         - name: window
@@ -347,14 +312,288 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/stats/trends:
+    get:
+      tags: [stats]
+      summary: Time-bucketed trend data
+      description: >
+        Returns trend data broken into time buckets (hourly for 24h, daily for
+        7d/30d), with per-repo and per-model breakdowns and a summary.
+      operationId: getTrends
+      parameters:
+        - name: window
+          in: query
+          description: >
+            Time window for trend analysis. Determines bucket granularity:
+            24h = hourly, 7d/30d = daily. Defaults to 7d.
+          schema:
+            type: string
+            enum: [24h, 7d, 30d]
+            default: 7d
+        - name: repo
+          in: query
+          description: Optional repository ID to filter trends to a single repo.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trend analysis result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/repos:
+    get:
+      tags: [repos]
+      summary: List repositories
+      description: >
+        Returns all known repositories with their total cost across all sessions.
+      operationId: listRepos
+      responses:
+        "200":
+          description: Array of repository entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RepoRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/repos/{id}/stats:
+    get:
+      tags: [repos]
+      summary: Per-repo aggregate stats
+      description: >
+        Returns aggregated cost and token statistics for a single repository.
+      operationId: getRepoStats
+      parameters:
+        - $ref: "#/components/parameters/RepoId"
+      responses:
+        "200":
+          description: Aggregate stats for the repo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResult"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/repos/{id}/sessions:
+    get:
+      tags: [repos]
+      summary: Sessions for a repo
+      description: >
+        Returns paginated sessions belonging to a specific repository.
+      operationId: listRepoSessions
+      parameters:
+        - $ref: "#/components/parameters/RepoId"
+        - name: limit
+          in: query
+          description: Maximum number of sessions to return. Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+        - name: offset
+          in: query
+          description: Number of sessions to skip for pagination. Defaults to 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Array of sessions for the repo
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Session"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/search:
+    get:
+      tags: [search]
+      summary: FTS5 full-text search
+      description: >
+        Searches content_preview and tool_detail via SQLite FTS5 across all
+        sessions. Returns an empty array when `q` is absent or blank.
+      operationId: searchSessions
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query string (FTS5 match syntax).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >
+            Maximum number of results to return. Clamped to 1–200. Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Array of matching event rows (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EventRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/search/full:
+    get:
+      tags: [search]
+      summary: Full-content search
+      description: >
+        Searches full event content (not just the FTS preview). Slower than
+        /api/search but returns matches on the complete text. Useful for
+        detecting leaked secrets or finding exact strings.
+      operationId: searchFullContent
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query string (substring match on full content).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >
+            Maximum number of results to return. Clamped to 1–200. Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Array of matching event rows (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EventRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/settings:
+    get:
+      tags: [settings]
+      summary: Get all settings
+      description: Returns all user-configurable settings as a key-value map.
+      operationId: getSettings
+      responses:
+        "200":
+          description: Settings map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                example:
+                  retention_hot_days: "30"
+                  retention_warm_days: "90"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/settings/{key}:
+    put:
+      tags: [settings]
+      summary: Update a setting
+      description: Sets a single setting by key. Creates the key if it does not exist.
+      operationId: updateSetting
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Setting key name.
+          schema:
+            type: string
+          example: retention_hot_days
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: string
+                  description: New value for the setting.
+                  example: "60"
+      responses:
+        "200":
+          description: Setting updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/storage:
+    get:
+      tags: [storage]
+      summary: Storage info
+      description: Returns database storage statistics including size and event counts.
+      operationId: getStorageInfo
+      responses:
+        "200":
+          description: Storage statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageInfo"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/cache/repos:
+    delete:
+      tags: [storage]
+      summary: Clear repo resolver cache
+      description: >
+        Clears the in-memory and persisted CWD-to-repo mapping cache. Useful
+        when repositories have been moved or renamed.
+      operationId: clearRepoCache
+      responses:
+        "200":
+          description: Cache cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /ws:
     get:
       tags: [realtime]
       summary: WebSocket connection for real-time updates
       description: >
         Upgrades the HTTP connection to WebSocket. After connecting, the
-        server pushes BroadcastEvent JSON messages for every significant
-        session or message change. Clients should reconnect on disconnect.
+        server pushes BroadcastEvent JSON messages for session and event
+        changes. Clients should reconnect on disconnect.
       operationId: connectWebSocket
       responses:
         "101":
@@ -372,27 +611,44 @@ components:
       schema:
         type: string
 
+    RepoId:
+      name: id
+      in: path
+      required: true
+      description: Repository ID (SHA256 hash of the repo root path).
+      schema:
+        type: string
+
   responses:
     NotFound:
-      description: Session not found
+      description: Resource not found
       content:
-        text/plain:
+        application/json:
           schema:
-            type: string
+            $ref: "#/components/schemas/ErrorResponse"
     BadRequest:
-      description: Bad request (e.g. session has no file path, or not a Docker session)
+      description: Bad request
       content:
-        text/plain:
+        application/json:
           schema:
-            type: string
+            $ref: "#/components/schemas/ErrorResponse"
     InternalError:
       description: Internal server error
       content:
-        text/plain:
+        application/json:
           schema:
-            type: string
+            $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: "session not found"
+
     OkResponse:
       type: object
       required: [ok]
@@ -408,26 +664,22 @@ components:
         version:
           type: string
           description: Build version string (set via ldflags at compile time).
-          example: "v1.2.3"
+          example: "v2.0.0"
 
     Session:
       type: object
       description: >
-        Aggregated live statistics for a single Claude Code session (one JSONL
-        file). Fields derived from parsed messages are accumulated in memory
-        and are not persisted beyond daemon restarts.
+        Aggregated statistics for a single Claude Code session. Live sessions
+        come from the in-memory store; historical sessions come from SQLite.
       required:
         - id
-        - projectDir
-        - projectName
-        - filePath
         - totalCost
         - inputTokens
         - outputTokens
         - cacheReadTokens
         - cacheCreationTokens
-        - cacheHitPct
         - messageCount
+        - eventCount
         - lastActive
         - isActive
         - startedAt
@@ -440,26 +692,15 @@ components:
           type: string
           description: Session identifier (JSONL filename stem or sessionId field).
           example: "abc123def456"
-        projectDir:
+        repoId:
           type: string
-          description: Raw project directory hash or path as reported by the watcher.
-          example: "-root-my-project"
-        projectName:
-          type: string
-          description: >
-            Human-readable project name. Derived from custom-title messages,
-            CWD basename, Docker container label, or projectDir as fallback.
-          example: "my-project"
+          description: Repository ID this session belongs to. Omitted when empty.
+          example: "a1b2c3d4e5f6"
         sessionName:
           type: string
           description: >
-            Optional session-level name from a custom-title or agent-name
-            message. Omitted when empty.
+            Optional session-level name from a custom-title or agent-name message.
           example: "Refactor auth module"
-        filePath:
-          type: string
-          description: Absolute path to the JSONL session file on disk.
-          example: "/home/user/.claude/projects/-root-my-project/abc123.jsonl"
         totalCost:
           type: number
           format: double
@@ -485,45 +726,41 @@ components:
           format: int64
           description: Total prompt cache creation tokens.
           example: 2000
-        cacheHitPct:
-          type: number
-          format: double
-          description: >
-            Cache hit percentage: cacheReadTokens / (inputTokens +
-            cacheReadTokens + cacheCreationTokens) * 100.
-          example: 32.0
         messageCount:
           type: integer
           description: >
             Number of unique conversation messages (user + assistant turns).
             Streaming duplicates are deduplicated by messageId.
           example: 24
+        eventCount:
+          type: integer
+          description: Total number of parsed JSONL events in this session.
+          example: 150
         lastActive:
           type: string
           format: date-time
-          description: RFC3339 timestamp of the most recent parsed message.
+          description: RFC3339 timestamp of the most recent parsed event.
           example: "2026-03-25T14:05:00Z"
         isActive:
           type: boolean
-          description: >
-            True when lastActive is within the last 30 seconds.
+          description: True when lastActive is within the last 30 seconds.
           example: true
         startedAt:
           type: string
           format: date-time
-          description: RFC3339 timestamp of the earliest parsed message in the session.
+          description: RFC3339 timestamp of the earliest parsed event in the session.
           example: "2026-03-25T13:50:00Z"
         status:
           type: string
           description: >
-            Current session status. One of: `idle`, `thinking`, `tool_use`,
-            `waiting`. Set to `idle` automatically when isActive becomes false.
+            Current session status. Set to "idle" automatically when isActive
+            becomes false. Parents with active children show "waiting".
           enum: [idle, thinking, tool_use, waiting]
           example: "thinking"
         parentId:
           type: string
           description: >
-            Session ID of the parent session when this is a subagent session.
+            Session ID of the parent session when this is a subagent.
             Omitted for top-level sessions.
           example: "parentSession123"
         children:
@@ -555,23 +792,25 @@ components:
           type: integer
           description: Number of tool_result messages with is_error set.
           example: 2
-        isSubagent:
-          type: boolean
-          description: True when this session is a subagent of another session.
-          example: false
         taskDescription:
           type: string
-          description: >
-            First 200 characters of the first user message, used as a task
-            summary.
+          description: First 200 characters of the first user message, used as a task summary.
           example: "Refactor the authentication module to use JWT tokens"
+        version:
+          type: string
+          description: Claude Code CLI version string. Omitted when empty.
+          example: "1.0.33"
+        entrypoint:
+          type: string
+          description: How the session was started (e.g. "cli", "vscode"). Omitted when empty.
+          example: "cli"
 
     GroupedSessions:
       type: object
       description: >
-        Sessions partitioned into six time buckets. Active sessions are those
-        with isActive=true. Inactive sessions are bucketed by lastActive
-        relative to the server's current time.
+        Sessions partitioned into six time buckets. Active sessions have
+        isActive=true. Inactive sessions are bucketed by lastActive relative
+        to the server's current time.
       required: [active, lastHour, today, yesterday, thisWeek, older]
       properties:
         active:
@@ -596,7 +835,7 @@ components:
             $ref: "#/components/schemas/Session"
         thisWeek:
           type: array
-          description: Inactive sessions active during the current week (since last Sunday).
+          description: Inactive sessions active during the current week (since Monday).
           items:
             $ref: "#/components/schemas/Session"
         older:
@@ -605,295 +844,204 @@ components:
           items:
             $ref: "#/components/schemas/Session"
 
-    HistoryRow:
+    EventRow:
       type: object
       description: >
-        A persisted record of a completed session stored in SQLite. Written
-        when a session transitions from active to inactive.
+        A single event as stored in the database, representing one parsed
+        JSONL line from a Claude Code session file.
       required:
         - id
-        - projectName
-        - sessionName
-        - totalCost
-        - inputTokens
-        - outputTokens
-        - cacheReadTokens
-        - messageCount
-        - errorCount
-        - startedAt
-        - endedAt
-        - durationSeconds
-        - model
-        - cwd
-        - gitBranch
-        - cacheCreationTokens
-        - cacheHitPct
-        - parentId
-        - taskDescription
-      properties:
-        id:
-          type: string
-          description: Session identifier.
-          example: "abc123def456"
-        projectName:
-          type: string
-          description: Human-readable project name at time of persistence.
-          example: "my-project"
-        sessionName:
-          type: string
-          description: Session name (custom title or agent name) at time of persistence.
-          example: "Refactor auth module"
-        totalCost:
-          type: number
-          format: double
-          description: Total estimated USD cost for the session.
-          example: 0.042
-        inputTokens:
-          type: integer
-          format: int64
-          description: Total input tokens consumed.
-          example: 15000
-        outputTokens:
-          type: integer
-          format: int64
-          description: Total output tokens generated.
-          example: 3200
-        cacheReadTokens:
-          type: integer
-          format: int64
-          description: Total prompt cache read tokens.
-          example: 8000
-        messageCount:
-          type: integer
-          description: Total number of unique conversation messages.
-          example: 24
-        errorCount:
-          type: integer
-          description: Number of errored tool results.
-          example: 2
-        startedAt:
-          type: string
-          description: RFC3339 timestamp of session start (empty string if unknown).
-          example: "2026-03-25T13:50:00Z"
-        endedAt:
-          type: string
-          description: RFC3339 timestamp when the session became inactive (empty string if unknown).
-          example: "2026-03-25T14:05:00Z"
-        durationSeconds:
-          type: number
-          format: double
-          description: Session duration in seconds (endedAt - startedAt). 0 if either timestamp is unknown.
-          example: 900.0
-        model:
-          type: string
-          description: Claude model identifier used in the session.
-          example: "claude-sonnet-4-6"
-        cwd:
-          type: string
-          description: Working directory for the session.
-          example: "/root/my-project"
-        gitBranch:
-          type: string
-          description: Git branch name during the session.
-          example: "feature/auth-refactor"
-        taskDescription:
-          type: string
-          description: First 200 characters of the first user message.
-          example: "Refactor the authentication module to use JWT tokens"
-        cacheCreationTokens:
-          type: integer
-          format: int64
-          description: Total prompt cache creation tokens. 0 for sessions recorded before this field was added.
-          example: 2000
-        cacheHitPct:
-          type: number
-          format: double
-          description: >
-            Pre-computed cache hit percentage at time of save. 0 for sessions
-            recorded before migration 004.
-          example: 32.0
-        parentId:
-          type: string
-          description: >
-            Session ID of the parent session when this is a subagent.
-            Empty string for top-level sessions.
-          example: "parentSession123"
-
-    ParsedMessage:
-      type: object
-      description: >
-        Normalised representation of a single JSONL line from a Claude Code
-        session file. Produced by the parser package.
-      required:
+        - sessionId
         - type
         - role
-        - contentText
+        - contentPreview
         - costUSD
         - inputTokens
         - outputTokens
         - cacheReadTokens
         - cacheCreationTokens
+        - isError
         - timestamp
-        - sessionId
-        - uuid
       properties:
+        id:
+          type: integer
+          format: int64
+          description: Auto-increment database row ID.
+          example: 42
+        sessionId:
+          type: string
+          description: Session ID this event belongs to.
+          example: "abc123def456"
+        uuid:
+          type: string
+          description: Per-event UUID from the JSONL line. Omitted when empty.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        messageId:
+          type: string
+          description: Anthropic message ID from the inner message object. Omitted when empty.
+          example: "msg_01XyzAbc"
         type:
           type: string
           description: >
-            Message type from the raw JSONL. Common values: `assistant`,
-            `user`, `human`, `progress`, `system`, `summary`,
-            `custom-title`, `agent-name`, `file-history-snapshot`.
+            Event type from the raw JSONL. Common values: assistant, user,
+            human, progress, system, summary, custom-title, agent-name.
           example: "assistant"
-        messageId:
-          type: string
-          description: Anthropic message ID from the inner message object. Omitted when absent.
-          example: "msg_01XyzAbc"
         role:
           type: string
-          description: Speaker role. One of `assistant`, `user`, or empty for metadata lines.
+          description: Speaker role (assistant, user, or empty for metadata lines).
           example: "assistant"
-        contentText:
+        contentPreview:
           type: string
           description: >
-            Extracted plain-text preview of the message content, truncated to
-            200 characters. For tool calls: `[tool: ToolName]`. For hooks:
-            `[hook:EventName] HookTool`.
+            Extracted plain-text preview of the content, truncated to 200
+            characters. For tool calls: "[tool: ToolName]".
           example: "I'll refactor the auth module to use JWT tokens."
         fullContent:
           type: string
           description: >
-            Full untruncated content when contentText was truncated, or the
+            Full untruncated content when contentPreview was truncated, or
             pretty-printed JSON input for tool_use blocks. Omitted when not
-            applicable.
+            applicable. May be empty for warm/cold events (retention compaction).
           example: "I'll refactor the auth module to use JWT tokens. First, let me..."
         toolName:
           type: string
-          description: Name of the tool called (e.g. `Bash`, `Read`, `Agent`). Omitted when not a tool call.
+          description: Name of the tool called (e.g. Bash, Read, Agent). Omitted when not a tool call.
           example: "Bash"
-        costUSD:
-          type: number
-          format: double
-          description: Estimated cost in USD for this message's token usage.
-          example: 0.003
-        inputTokens:
-          type: integer
-          format: int64
-          description: Input tokens for this message.
-          example: 1200
-        outputTokens:
-          type: integer
-          format: int64
-          description: Output tokens for this message.
-          example: 350
-        cacheReadTokens:
-          type: integer
-          format: int64
-          description: Cache read tokens for this message.
-          example: 800
-        cacheCreationTokens:
-          type: integer
-          format: int64
-          description: Cache creation tokens for this message.
-          example: 0
-        timestamp:
-          type: string
-          format: date-time
-          description: RFC3339 timestamp from the JSONL line.
-          example: "2026-03-25T14:00:00Z"
-        sessionId:
-          type: string
-          description: Session ID embedded in the JSONL line.
-          example: "abc123def456"
-        uuid:
-          type: string
-          description: Per-message UUID from the JSONL line.
-          example: "550e8400-e29b-41d4-a716-446655440000"
-        parentUuid:
-          type: string
-          description: UUID of the parent message (for branched conversations). Omitted when absent.
-          example: "550e8400-e29b-41d4-a716-446655440001"
-        cwd:
-          type: string
-          description: Working directory at message time. Omitted when absent.
-          example: "/root/my-project"
-        gitBranch:
-          type: string
-          description: Git branch at message time. Omitted when absent.
-          example: "feature/auth-refactor"
-        model:
-          type: string
-          description: Model identifier. Omitted when absent.
-          example: "claude-sonnet-4-6"
-        isSidechain:
-          type: boolean
-          description: True when the message belongs to a subagent sidechain. Omitted when false.
-          example: false
-        stopReason:
-          type: string
-          description: >
-            Model stop reason: `end_turn`, `tool_use`, or empty. Omitted when
-            absent.
-          example: "end_turn"
-        hookEvent:
-          type: string
-          description: Hook event name (e.g. `PostToolUse`) for progress/hook messages. Omitted when absent.
-          example: "PostToolUse"
-        hookName:
-          type: string
-          description: Full hook name string (e.g. `PostToolUse:Read`). Omitted when absent.
-          example: "PostToolUse:Read"
         toolDetail:
           type: string
           description: >
             Additional context for tool calls: file path for Read/Write/Edit,
-            command description for Bash, pattern for Grep/Glob, agent name
-            for Agent, skill name for Skill. Omitted when absent.
+            command description for Bash, pattern for Grep/Glob, agent/skill
+            name for Agent/Skill. Omitted when empty.
           example: "/root/my-project/auth.go"
-        isAgent:
+        costUSD:
+          type: number
+          format: double
+          description: Estimated cost in USD for this event's token usage.
+          example: 0.003
+        inputTokens:
+          type: integer
+          format: int64
+          description: Input tokens for this event.
+          example: 1200
+        outputTokens:
+          type: integer
+          format: int64
+          description: Output tokens for this event.
+          example: 350
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Cache read tokens for this event.
+          example: 800
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Cache creation tokens for this event.
+          example: 0
+        model:
+          type: string
+          description: Model identifier. Omitted when empty.
+          example: "claude-sonnet-4-6"
+        isError:
           type: boolean
-          description: True when toolName is `Agent`. Omitted when false.
+          description: True when this is a tool_result with is_error set or error content.
           example: false
+        stopReason:
+          type: string
+          description: Model stop reason (end_turn, tool_use). Omitted when empty.
+          example: "end_turn"
+        hookEvent:
+          type: string
+          description: Hook event name (e.g. PostToolUse) for progress/hook events. Omitted when empty.
+          example: "PostToolUse"
+        hookName:
+          type: string
+          description: Full hook name string (e.g. PostToolUse:Read). Omitted when empty.
+          example: "PostToolUse:Read"
         toolUseId:
           type: string
-          description: ID of the first tool_use content block in this message. Omitted when absent.
+          description: ID of the first tool_use content block. Omitted when empty.
           example: "toolu_01AbcDef"
-        toolUseIds:
-          type: array
-          description: >
-            IDs of all tool_use blocks when a message contains multiple
-            batched tool calls. Omitted for single-tool or non-tool messages.
-          items:
-            type: string
-          example: ["toolu_01AbcDef", "toolu_02GhiJkl"]
         forToolUseId:
           type: string
           description: >
-            For tool_result messages: the tool_use_id this result responds to.
-            Omitted when absent.
+            For tool_result events: the tool_use_id this result responds to.
+            Omitted when empty.
           example: "toolu_01AbcDef"
-        isError:
+        isAgent:
           type: boolean
-          description: True when this is a tool_result with is_error set or error content. Omitted when false.
-          example: false
-
-    ReplayEvent:
-      type: object
-      description: >
-        A ParsedMessage augmented with a zero-based index representing its
-        position in the session's JSONL file. Used in replay endpoints.
-      allOf:
-        - $ref: "#/components/schemas/ParsedMessage"
-        - type: object
-          required: [index]
-          properties:
-            index:
-              type: integer
-              description: Zero-based position of this event within the session file.
-              example: 42
+          description: True when toolName is Agent.
+        timestamp:
+          type: string
+          description: RFC3339 timestamp from the JSONL line.
+          example: "2026-03-25T14:00:00Z"
+        durationMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: Tool execution duration in milliseconds. Null when not applicable.
+          example: 1234
+        success:
+          type: boolean
+          nullable: true
+          description: Whether the tool execution succeeded. Null when not applicable.
+        stderr:
+          type: string
+          description: Stderr output from tool execution. Omitted when empty.
+        interrupted:
+          type: boolean
+          description: True when tool execution was interrupted.
+        truncated:
+          type: boolean
+          description: True when tool output was truncated.
+        agentDurationMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total duration of a sub-agent run in milliseconds. Null when not applicable.
+        agentTokens:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total tokens consumed by a sub-agent. Null when not applicable.
+        agentToolUseCount:
+          type: integer
+          nullable: true
+          description: Number of tool calls made by a sub-agent. Null when not applicable.
+        agentType:
+          type: string
+          description: Type of agent (e.g. inner, tool). Omitted when empty.
+        subtype:
+          type: string
+          description: System message subtype (e.g. turn_duration, stop_hook_summary). Omitted when empty.
+        turnMessageCount:
+          type: integer
+          nullable: true
+          description: Number of messages in a turn (from system.turn_duration). Null when not applicable.
+        hookCount:
+          type: integer
+          nullable: true
+          description: Number of hooks executed (from system.stop_hook_summary). Null when not applicable.
+        hookInfos:
+          type: string
+          description: JSON string of hook execution details. Omitted when empty.
+        level:
+          type: string
+          description: Log level (from system.stop_hook_summary). Omitted when empty.
+        isMeta:
+          type: boolean
+          description: True for metadata-only events.
+        version:
+          type: string
+          description: Claude Code CLI version. Omitted when empty.
+        entrypoint:
+          type: string
+          description: Session entrypoint (cli, vscode, etc.). Omitted when empty.
 
     ReplayManifest:
       type: object
-      description: Full ordered event list for a session, used to drive a replay scrubber.
+      description: Full ordered event list for a session, used to drive a replay timeline.
       required: [sessionId, events]
       properties:
         sessionId:
@@ -902,101 +1050,99 @@ components:
           example: "abc123def456"
         events:
           type: array
-          description: All events in chronological order.
+          description: All events in chronological order (up to 10,000).
           items:
-            $ref: "#/components/schemas/ManifestEvent"
+            $ref: "#/components/schemas/EventRow"
 
-    ManifestEvent:
+    RepoRow:
       type: object
-      description: >
-        Lightweight event summary included in the replay manifest. Contains
-        only the fields needed for timeline rendering and scrubbing.
-      required:
-        - index
-        - timestamp
-        - type
-        - role
-        - contentText
-        - costUSD
+      description: A repository with its aggregate cost across all sessions.
+      required: [id, name, totalCost]
       properties:
-        index:
-          type: integer
-          description: Zero-based event position.
-          example: 42
-        timestamp:
+        id:
           type: string
-          format: date-time
-          description: RFC3339 event timestamp.
-          example: "2026-03-25T14:00:00Z"
-        type:
-          type: string
-          description: Message type (e.g. `assistant`, `user`).
-          example: "assistant"
-        role:
-          type: string
-          description: Speaker role.
-          example: "assistant"
-        contentText:
-          type: string
-          description: Truncated plain-text content preview.
-          example: "I'll refactor the auth module."
-        toolName:
-          type: string
-          description: Tool name for tool_use messages. Omitted when absent.
-          example: "Bash"
-        costUSD:
-          type: number
-          format: double
-          description: Estimated cost in USD for this event.
-          example: 0.003
-
-    SearchResult:
-      type: object
-      description: >
-        A matching message from a cross-session search. Embeds all
-        ParsedMessage fields plus session-level context fields.
-      allOf:
-        - $ref: "#/components/schemas/ParsedMessage"
-        - type: object
-          required: [sessionId, sessionName, projectName]
-          properties:
-            sessionId:
-              type: string
-              description: Session ID that contains this message.
-              example: "abc123def456"
-            sessionName:
-              type: string
-              description: >
-                Display name for the session (sessionName if set, otherwise
-                projectName).
-              example: "Refactor auth module"
-            projectName:
-              type: string
-              description: Project name for the containing session.
-              example: "my-project"
-
-    ProjectEntry:
-      type: object
-      description: A distinct project with its live session count.
-      required: [name, count]
-      properties:
+          description: Repository ID (SHA256 hash of repo root path).
+          example: "a1b2c3d4e5f6"
         name:
           type: string
-          description: >
-            Project name (from projectName, falling back to projectDir when
-            projectName is empty).
+          description: Repository name (basename of repo root directory).
           example: "my-project"
-        count:
+        url:
+          type: string
+          description: Git remote URL for the repository. Omitted when empty.
+          example: "https://github.com/user/my-project.git"
+        totalCost:
+          type: number
+          format: double
+          description: Sum of totalCost across all sessions in this repo.
+          example: 42.50
+
+    AggregateResult:
+      type: object
+      description: Aggregated statistics across sessions.
+      required:
+        - totalCost
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - sessionCount
+        - costByModel
+        - costByRepo
+      properties:
+        totalCost:
+          type: number
+          format: double
+          description: Total estimated cost in USD across matching sessions.
+          example: 142.37
+        inputTokens:
           type: integer
-          description: Number of live sessions belonging to this project.
-          example: 3
+          format: int64
+          description: Total input tokens.
+          example: 12840000
+        outputTokens:
+          type: integer
+          format: int64
+          description: Total output tokens.
+          example: 3210000
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Total cache read tokens.
+          example: 9800000
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Total cache creation tokens.
+          example: 1200000
+        sessionCount:
+          type: integer
+          description: Number of sessions in the aggregate.
+          example: 87
+        costByModel:
+          type: object
+          description: Cost breakdown by model identifier.
+          additionalProperties:
+            type: number
+            format: double
+          example:
+            claude-opus-4-6: 98.20
+            claude-sonnet-4-6: 44.17
+        costByRepo:
+          type: object
+          description: Cost breakdown by repository ID.
+          additionalProperties:
+            type: number
+            format: double
+          example:
+            a1b2c3d4: 80.00
+            e5f6g7h8: 62.37
 
     StatsResponse:
       type: object
       description: >
-        Aggregated statistics across all top-level sessions within the
-        requested time window. Merges SQLite history with live active
-        session deltas for real-time accuracy.
+        Aggregated statistics within the requested time window. Merges DB
+        aggregates with live active session data for real-time accuracy.
       required:
         - totalCost
         - inputTokens
@@ -1008,6 +1154,7 @@ components:
         - cacheHitPct
         - costRate
         - costByModel
+        - costByRepo
       properties:
         totalCost:
           type: number
@@ -1036,7 +1183,7 @@ components:
           example: 1200000
         sessionCount:
           type: integer
-          description: Number of sessions in the window (including live unsaved sessions).
+          description: Number of sessions in the window.
           example: 87
         activeSessions:
           type: integer
@@ -1063,22 +1210,249 @@ components:
           example:
             claude-opus-4-6: 98.20
             claude-sonnet-4-6: 44.17
+        costByRepo:
+          type: object
+          description: Cost breakdown by repository ID.
+          additionalProperties:
+            type: number
+            format: double
+          example:
+            a1b2c3d4: 80.00
+            e5f6g7h8: 62.37
+
+    TrendResult:
+      type: object
+      description: Complete trend analysis response with time buckets and breakdowns.
+      required: [window, buckets, byRepo, byModel, summary]
+      properties:
+        window:
+          type: string
+          description: The time window used for this analysis.
+          enum: [24h, 7d, 30d]
+          example: "7d"
+        buckets:
+          type: array
+          description: >
+            Time-bucketed aggregates. Hourly buckets for 24h window, daily
+            buckets for 7d/30d windows.
+          items:
+            $ref: "#/components/schemas/TrendBucket"
+        byRepo:
+          type: array
+          description: Cost and token breakdown per repository.
+          items:
+            $ref: "#/components/schemas/RepoTrend"
+        byModel:
+          type: array
+          description: Cost and token breakdown per model.
+          items:
+            $ref: "#/components/schemas/ModelTrend"
+        summary:
+          $ref: "#/components/schemas/TrendSummary"
+
+    TrendBucket:
+      type: object
+      description: Aggregated stats for a single time bucket (hour or day).
+      required:
+        - date
+        - cost
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - sessionCount
+        - cacheHitPct
+        - avgSessionCost
+        - medianSessionCost
+        - p95SessionCost
+        - avgSessionTokens
+        - outputInputRatio
+      properties:
+        date:
+          type: string
+          description: >
+            Bucket label. ISO date for daily buckets (2026-03-25), ISO
+            datetime hour for hourly buckets (2026-03-25T14).
+          example: "2026-03-25"
+        cost:
+          type: number
+          format: double
+          description: Total cost in USD for this bucket.
+          example: 12.50
+        inputTokens:
+          type: integer
+          format: int64
+          description: Total input tokens in this bucket.
+          example: 1500000
+        outputTokens:
+          type: integer
+          format: int64
+          description: Total output tokens in this bucket.
+          example: 400000
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: Total cache read tokens in this bucket.
+          example: 900000
+        cacheCreationTokens:
+          type: integer
+          format: int64
+          description: Total cache creation tokens in this bucket.
+          example: 200000
+        sessionCount:
+          type: integer
+          description: Number of sessions that started in this bucket.
+          example: 5
+        cacheHitPct:
+          type: number
+          format: double
+          description: Cache hit percentage for this bucket.
+          example: 38.5
+        avgSessionCost:
+          type: number
+          format: double
+          description: Average cost per session in this bucket.
+          example: 2.50
+        medianSessionCost:
+          type: number
+          format: double
+          description: Median cost per session in this bucket.
+          example: 1.80
+        p95SessionCost:
+          type: number
+          format: double
+          description: 95th percentile cost per session in this bucket.
+          example: 8.20
+        avgSessionTokens:
+          type: number
+          format: double
+          description: Average total tokens per session in this bucket.
+          example: 45000
+        outputInputRatio:
+          type: number
+          format: double
+          description: Ratio of output tokens to input tokens in this bucket.
+          example: 0.27
+
+    RepoTrend:
+      type: object
+      description: Cost and token breakdown for a single repository within a trend window.
+      required: [repoId, repoName, cost, tokens, sessions]
+      properties:
+        repoId:
+          type: string
+          description: Repository ID.
+          example: "a1b2c3d4"
+        repoName:
+          type: string
+          description: Repository display name.
+          example: "my-project"
+        cost:
+          type: number
+          format: double
+          description: Total cost attributed to this repo in the window.
+          example: 25.00
+        tokens:
+          type: integer
+          format: int64
+          description: Total tokens consumed by this repo in the window.
+          example: 5000000
+        sessions:
+          type: integer
+          description: Number of sessions for this repo in the window.
+          example: 12
+
+    ModelTrend:
+      type: object
+      description: Cost and token breakdown for a single model within a trend window.
+      required: [model, cost, tokens, sessions]
+      properties:
+        model:
+          type: string
+          description: Model identifier.
+          example: "claude-sonnet-4-6"
+        cost:
+          type: number
+          format: double
+          description: Total cost for this model in the window.
+          example: 44.17
+        tokens:
+          type: integer
+          format: int64
+          description: Total tokens consumed by this model in the window.
+          example: 8000000
+        sessions:
+          type: integer
+          description: Number of sessions using this model in the window.
+          example: 30
+
+    TrendSummary:
+      type: object
+      description: Summary totals across all buckets in a trend window.
+      required: [totalCost, effectiveTokens, cacheHitPct, sessionCount]
+      properties:
+        totalCost:
+          type: number
+          format: double
+          description: Total cost across the entire window.
+          example: 142.37
+        effectiveTokens:
+          type: integer
+          format: int64
+          description: Total effective tokens (input + output + cache) across the window.
+          example: 25000000
+        cacheHitPct:
+          type: number
+          format: double
+          description: Overall cache hit percentage across the window.
+          example: 38.2
+        sessionCount:
+          type: integer
+          description: Total number of sessions in the window.
+          example: 87
+
+    StorageInfo:
+      type: object
+      description: Database storage statistics.
+      required: [totalSizeBytes, hotContentBytes, warmContentBytes, eventCount]
+      properties:
+        totalSizeBytes:
+          type: integer
+          format: int64
+          description: Total size of the database file in bytes.
+          example: 52428800
+        hotContentBytes:
+          type: integer
+          format: int64
+          description: Size of hot (recent, uncompressed) event content in bytes.
+          example: 30000000
+        warmContentBytes:
+          type: integer
+          format: int64
+          description: Size of warm (compressed) event content in bytes.
+          example: 10000000
+        eventCount:
+          type: integer
+          format: int64
+          description: Total number of event rows in the database.
+          example: 150000
 
     BroadcastEvent:
       type: object
       description: >
-        WebSocket message envelope pushed to all connected clients on every
-        significant session or message change.
+        WebSocket message envelope pushed to all connected clients on session
+        or event changes.
       required: [event]
       properties:
         event:
           type: string
           description: >
-            Event type. `session_new` on first message for a session,
-            `message` for subsequent updates.
-          enum: [session_new, message, update_available]
-          example: "message"
+            Event type. "session_new" on first event for a session,
+            "session_update" for subsequent session changes, "event" for
+            detailed event data, "update_available" when a new version is found.
+          enum: [session_new, session_update, event, update_available]
+          example: "session_update"
         session:
           $ref: "#/components/schemas/Session"
-        message:
-          $ref: "#/components/schemas/ParsedMessage"
+        data:
+          $ref: "#/components/schemas/EventRow"
