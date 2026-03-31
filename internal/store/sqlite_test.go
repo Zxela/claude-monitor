@@ -384,3 +384,264 @@ func TestListRecentEvents(t *testing.T) {
 		t.Errorf("expected msg 9 last, got %q", events[2].ContentPreview)
 	}
 }
+
+// --- Trend test helpers ---
+
+func insertTestSession(t *testing.T, db *DB, id string, startedAt time.Time, cost float64, input, output, cacheRead, cacheCreate int64) {
+	t.Helper()
+	s := &session.Session{
+		ID:                  id,
+		TotalCost:           cost,
+		InputTokens:         input,
+		OutputTokens:        output,
+		CacheReadTokens:     cacheRead,
+		CacheCreationTokens: cacheCreate,
+		StartedAt:           startedAt,
+		LastActive:          startedAt.Add(5 * time.Minute),
+		Model:               "claude-sonnet-4-6",
+	}
+	if err := db.SaveSession(s); err != nil {
+		t.Fatalf("insertTestSession(%s): %v", id, err)
+	}
+}
+
+func insertTestSessionWithRepo(t *testing.T, db *DB, id, repoID string, startedAt time.Time, cost float64, input, output, cacheRead, cacheCreate int64) {
+	t.Helper()
+	db.UpsertRepo(&repo.Repo{ID: repoID, Name: repoID})
+	s := &session.Session{
+		ID:                  id,
+		RepoID:              repoID,
+		TotalCost:           cost,
+		InputTokens:         input,
+		OutputTokens:        output,
+		CacheReadTokens:     cacheRead,
+		CacheCreationTokens: cacheCreate,
+		StartedAt:           startedAt,
+		LastActive:          startedAt.Add(5 * time.Minute),
+		Model:               "claude-sonnet-4-6",
+	}
+	if err := db.SaveSession(s); err != nil {
+		t.Fatalf("insertTestSessionWithRepo(%s): %v", id, err)
+	}
+}
+
+func insertTestSessionWithModel(t *testing.T, db *DB, id, model string, startedAt time.Time, cost float64, input, output, cacheRead, cacheCreate int64) {
+	t.Helper()
+	s := &session.Session{
+		ID:                  id,
+		TotalCost:           cost,
+		InputTokens:         input,
+		OutputTokens:        output,
+		CacheReadTokens:     cacheRead,
+		CacheCreationTokens: cacheCreate,
+		StartedAt:           startedAt,
+		LastActive:          startedAt.Add(5 * time.Minute),
+		Model:               model,
+	}
+	if err := db.SaveSession(s); err != nil {
+		t.Fatalf("insertTestSessionWithModel(%s): %v", id, err)
+	}
+}
+
+func TestTrendBuckets_DailyGrouping(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	// Two sessions on day 1 (2 days ago), one session on day 2 (today)
+	insertTestSession(t, db, "s1", now.Add(-48*time.Hour), 1.00, 100, 50, 30, 10)
+	insertTestSession(t, db, "s2", now.Add(-47*time.Hour), 2.00, 200, 100, 60, 20)
+	insertTestSession(t, db, "s3", now.Add(-1*time.Hour), 3.00, 300, 150, 90, 30)
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if result.Window != "7d" {
+		t.Errorf("Window: got %q, want 7d", result.Window)
+	}
+
+	// Should have 2 daily buckets
+	if len(result.Buckets) != 2 {
+		t.Fatalf("expected 2 buckets, got %d", len(result.Buckets))
+	}
+
+	// First bucket (yesterday): 2 sessions, cost = 3.00
+	b0 := result.Buckets[0]
+	if b0.SessionCount != 2 {
+		t.Errorf("bucket 0 sessions: got %d, want 2", b0.SessionCount)
+	}
+	if b0.Cost != 3.00 {
+		t.Errorf("bucket 0 cost: got %f, want 3.00", b0.Cost)
+	}
+
+	// Second bucket (today): 1 session, cost = 3.00
+	b1 := result.Buckets[1]
+	if b1.SessionCount != 1 {
+		t.Errorf("bucket 1 sessions: got %d, want 1", b1.SessionCount)
+	}
+	if b1.Cost != 3.00 {
+		t.Errorf("bucket 1 cost: got %f, want 3.00", b1.Cost)
+	}
+
+	// Summary
+	if result.Summary.TotalCost != 6.00 {
+		t.Errorf("summary totalCost: got %f, want 6.00", result.Summary.TotalCost)
+	}
+	if result.Summary.SessionCount != 3 {
+		t.Errorf("summary sessionCount: got %d, want 3", result.Summary.SessionCount)
+	}
+}
+
+func TestTrendBuckets_EmptyWindow(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if result.Buckets == nil {
+		t.Error("buckets should be empty slice, not nil")
+	}
+	if len(result.Buckets) != 0 {
+		t.Errorf("expected 0 buckets, got %d", len(result.Buckets))
+	}
+	if result.Summary.SessionCount != 0 {
+		t.Errorf("summary sessionCount: got %d, want 0", result.Summary.SessionCount)
+	}
+}
+
+func TestTrendBuckets_RepoFilter(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	insertTestSessionWithRepo(t, db, "s1", "repo-a", now.Add(-2*time.Hour), 1.00, 100, 50, 30, 10)
+	insertTestSessionWithRepo(t, db, "s2", "repo-b", now.Add(-1*time.Hour), 5.00, 500, 250, 150, 50)
+
+	// Filter by repo-a
+	result, err := db.TrendData("7d", "repo-a")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if result.Summary.SessionCount != 1 {
+		t.Errorf("filtered sessionCount: got %d, want 1", result.Summary.SessionCount)
+	}
+	if result.Summary.TotalCost != 1.00 {
+		t.Errorf("filtered totalCost: got %f, want 1.00", result.Summary.TotalCost)
+	}
+}
+
+func TestTrendPercentiles(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	// 20 sessions with costs 1..20, all on same day
+	for i := 1; i <= 20; i++ {
+		insertTestSession(t, db, fmt.Sprintf("s%d", i), now.Add(-time.Duration(i)*time.Minute), float64(i), 100, 50, 30, 10)
+	}
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if len(result.Buckets) != 1 {
+		t.Fatalf("expected 1 bucket, got %d", len(result.Buckets))
+	}
+
+	b := result.Buckets[0]
+	// Sorted costs: 1,2,3,...,20
+	// Median (index 10): value = 11
+	if b.MedianSessionCost != 11.0 {
+		t.Errorf("median: got %f, want 11.0", b.MedianSessionCost)
+	}
+	// P95 (index 19): value = 20
+	if b.P95SessionCost != 20.0 {
+		t.Errorf("p95: got %f, want 20.0", b.P95SessionCost)
+	}
+}
+
+func TestTrendByRepo(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	// repo-a: 2 sessions, total cost 3.00
+	insertTestSessionWithRepo(t, db, "s1", "repo-a", now.Add(-2*time.Hour), 1.00, 100, 50, 30, 10)
+	insertTestSessionWithRepo(t, db, "s2", "repo-a", now.Add(-1*time.Hour), 2.00, 200, 100, 60, 20)
+	// repo-b: 1 session, total cost 5.00
+	insertTestSessionWithRepo(t, db, "s3", "repo-b", now.Add(-30*time.Minute), 5.00, 500, 250, 150, 50)
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if len(result.ByRepo) != 2 {
+		t.Fatalf("expected 2 repo trends, got %d", len(result.ByRepo))
+	}
+
+	// Sorted by cost desc — repo-b first
+	if result.ByRepo[0].RepoID != "repo-b" {
+		t.Errorf("first repo: got %q, want repo-b", result.ByRepo[0].RepoID)
+	}
+	if result.ByRepo[0].Cost != 5.00 {
+		t.Errorf("repo-b cost: got %f, want 5.00", result.ByRepo[0].Cost)
+	}
+	if result.ByRepo[0].Sessions != 1 {
+		t.Errorf("repo-b sessions: got %d, want 1", result.ByRepo[0].Sessions)
+	}
+
+	if result.ByRepo[1].RepoID != "repo-a" {
+		t.Errorf("second repo: got %q, want repo-a", result.ByRepo[1].RepoID)
+	}
+	if result.ByRepo[1].Cost != 3.00 {
+		t.Errorf("repo-a cost: got %f, want 3.00", result.ByRepo[1].Cost)
+	}
+	if result.ByRepo[1].Sessions != 2 {
+		t.Errorf("repo-a sessions: got %d, want 2", result.ByRepo[1].Sessions)
+	}
+}
+
+func TestTrendByModel(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	insertTestSessionWithModel(t, db, "s1", "claude-opus-4-6", now.Add(-2*time.Hour), 4.00, 400, 200, 120, 40)
+	insertTestSessionWithModel(t, db, "s2", "claude-sonnet-4-6", now.Add(-1*time.Hour), 1.00, 100, 50, 30, 10)
+	insertTestSessionWithModel(t, db, "s3", "claude-opus-4-6", now.Add(-30*time.Minute), 3.00, 300, 150, 90, 30)
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if len(result.ByModel) != 2 {
+		t.Fatalf("expected 2 model trends, got %d", len(result.ByModel))
+	}
+
+	// Sorted by cost desc — opus first (7.00 vs 1.00)
+	if result.ByModel[0].Model != "claude-opus-4-6" {
+		t.Errorf("first model: got %q, want claude-opus-4-6", result.ByModel[0].Model)
+	}
+	if result.ByModel[0].Cost != 7.00 {
+		t.Errorf("opus cost: got %f, want 7.00", result.ByModel[0].Cost)
+	}
+	if result.ByModel[0].Sessions != 2 {
+		t.Errorf("opus sessions: got %d, want 2", result.ByModel[0].Sessions)
+	}
+
+	if result.ByModel[1].Model != "claude-sonnet-4-6" {
+		t.Errorf("second model: got %q, want claude-sonnet-4-6", result.ByModel[1].Model)
+	}
+	if result.ByModel[1].Cost != 1.00 {
+		t.Errorf("sonnet cost: got %f, want 1.00", result.ByModel[1].Cost)
+	}
+}
