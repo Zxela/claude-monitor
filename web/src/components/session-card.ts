@@ -1,7 +1,7 @@
 // web/src/components/session-card.ts
 import type { Session } from '../types';
 import { state, update } from '../state';
-import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo, sessionDisplayName, stripInternalTags } from '../utils';
+import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo, sessionDisplayName, stripInternalTags, effectiveInputTokens } from '../utils';
 import { getLastTool } from '../tool-tracker';
 
 function getCostTier(cost: number): string {
@@ -60,7 +60,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       </div>
       <div class="session-card-details">
         <div class="session-stats">
-          <span class="tok">${formatTokens(session.inputTokens + session.outputTokens + session.cacheReadTokens + session.cacheCreationTokens)} tok</span>
+          <span class="tok">${formatTokens(effectiveInputTokens(session) + session.outputTokens)} tok</span>
           <span class="cache">${Math.round((session.cacheReadTokens / Math.max(1, session.inputTokens + session.cacheReadTokens + session.cacheCreationTokens)) * 100).toFixed(0)}%</span>
           ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
         </div>

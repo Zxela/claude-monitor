@@ -3,7 +3,7 @@ import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions } from '../api';
-import { formatDurationSecs, formatTokens, sessionDisplayName } from '../utils';
+import { formatDurationSecs, formatTokens, sessionDisplayName, effectiveInputTokens } from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
@@ -23,7 +23,7 @@ const COLUMNS: Column[] = [
     const secs = (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000;
     return formatDurationSecs(secs);
   }},
-  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(r.inputTokens + r.outputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0)) },
+  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(effectiveInputTokens(r) + r.outputTokens) },
   { key: 'cache', label: 'Cache%', cls: 'col-cache', fmt: r => {
     const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
     if (total === 0) return '';

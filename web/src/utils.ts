@@ -22,6 +22,11 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+/** Effective input = input + cache_read + cache_creation (raw input_tokens is ~1 with caching). */
+export function effectiveInputTokens(s: { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }): number {
+  return s.inputTokens + s.cacheReadTokens + s.cacheCreationTokens;
+}
+
 /** Extract a short display name for a session. */
 export function sessionDisplayName(s: { sessionName?: string; cwd?: string; id: string }): string {
   if (s.sessionName) return s.sessionName;
