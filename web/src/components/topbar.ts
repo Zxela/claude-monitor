@@ -37,7 +37,7 @@ export function render(container: HTMLElement): void {
       </div>
     </div>
     <div class="topbar-stat" title="Weighted cache read percentage across all sessions"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
-    <div class="topbar-stat" title="Aggregate cost velocity across all active sessions"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
+    <div class="topbar-stat rate-stat" title="Aggregate cost velocity across all active sessions"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
     <div class="search-box">
       <input type="text" placeholder="Search all sessions..." data-search aria-label="Search sessions" />
     </div>
