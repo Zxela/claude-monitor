@@ -68,7 +68,7 @@ export const state: AppState = {
   connected: false,
   eventCount: 0,
   version: '',
-  feedTypeFilters: { user: true, assistant: true, tool_use: true, tool_result: true, agent: true, hook: true, error: true },
+  feedTypeFilters: { user: true, assistant: true, tool_use: true, tool_result: true, agent: true, hook: true, error: true, command: false },
   replaySessionId: null,
   replayPlaying: false,
   budgetThreshold: null,

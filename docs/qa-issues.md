@@ -13,26 +13,30 @@ Tracking issues found during manual QA testing of all frontend features.
 
 ## Open
 
+None — all issues resolved.
+
+## Fixed (batch 2)
+
 ### 2. Invalid hash stuck on "Loading..."
 - **Test:** 13.4
 - **Severity:** Low
-- **Description:** Navigating to `#session=nonexistent-id` shows "Loading..." permanently. The feed never shows a failure message or times out. The `loadRecentMessages` function in `feed-panel.ts` catches the error and shows "Failed to load messages", but only if `currentLoadSessionId` still matches — which it does, so likely the API returns a 200 with empty results rather than erroring, leaving the feed in an empty loaded state with no entries rendered.
-- **File:** `web/src/components/feed-panel.ts:278-316`
-- **Expected:** Should show "No events found" or similar after loading completes with empty results.
+- **Description:** Navigating to `#session=nonexistent-id` shows "Loading..." permanently. The API returns 200 with empty results, leaving the feed in a loaded state with no entries rendered.
+- **Fix:** Added empty-result check after dedup/merge in `loadRecentMessages` — shows "No events found" when merged array is empty.
+- **Status:** Fixed
 
 ### 3. Rapid filter toggle state inconsistency
 - **Test:** 22.5
 - **Severity:** Very Low
-- **Description:** Toggling all 8 feed filter buttons off then on rapidly didn't return to exact original state. The COMMAND filter (which starts inactive by default since it's not in the initial `feedTypeFilters` state) flipped. This is because COMMAND is not in the default state object in `state.ts` line 69 — the filter logic falls back to `state.feedTypeFilters[type] ?? true` which defaults to true for unknown types, but toggling creates an explicit `false` entry.
-- **File:** `web/src/state.ts:69`, `web/src/components/feed-panel.ts:216-242`
-- **Impact:** No real-world impact — users don't toggle all filters programmatically.
+- **Description:** COMMAND filter flipped state on rapid toggle because it had no explicit entry in the default `feedTypeFilters` state, falling back to `?? true`.
+- **Fix:** Added explicit `command: false` to the default `feedTypeFilters` in `state.ts`.
+- **Status:** Fixed
 
 ### 4. Compact card error badge not clickable
 - **Test:** 2.14
 - **Severity:** Low
-- **Description:** The error count click-to-filter feature only works on expanded session cards (`.session-error-count` in `renderExpanded`), not on compact cards (`.compact-stat-err` in `renderCompact`). The compact card renders the error count as a plain span without a click handler.
-- **File:** `web/src/components/session-card.ts:125-144` (expanded has handler), `232` (compact lacks handler)
-- **Expected:** Both card variants should support clicking the error count to filter feed to errors.
+- **Description:** Error count click-to-filter only worked on expanded cards, not compact cards.
+- **Fix:** Added click/keydown handler to `.compact-stat-err` in `renderCompact`, matching the expanded card pattern.
+- **Status:** Fixed
 
 ## Design Notes (Not Bugs)
 
@@ -52,6 +56,6 @@ Tracking issues found during manual QA testing of all frontend features.
 - **Total test cases:** 242
 - **Tested:** ~185
 - **Passed:** ~181
-- **Fixed:** 1 (help overlay `t` key)
-- **Open issues:** 4 (all low/very-low severity)
+- **Fixed:** 4 (help overlay `t` key, invalid hash loading, filter toggle, compact error badge)
+- **Open issues:** 0
 - **Skipped:** ~57 (mostly error injection, canvas mouse interaction, and edge cases requiring specific server states)

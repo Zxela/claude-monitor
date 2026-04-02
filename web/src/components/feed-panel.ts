@@ -288,6 +288,11 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
+    if (merged.length === 0) {
+      feedContent.innerHTML = '<div class="feed-empty">No events found</div>';
+      return;
+    }
+
     for (const msg of merged) {
       appendMessage(msg as ParsedMessage);
     }

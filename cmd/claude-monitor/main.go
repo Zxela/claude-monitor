@@ -140,6 +140,76 @@ func handleMigrate(args []string) {
 }
 
 
+func handleHook(args []string) {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	switch sub {
+	case "install":
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatalf("cannot determine home directory: %v", err)
+		}
+
+		// Install the hook script
+		hookDir := filepath.Join(homeDir, ".claude-monitor", "hooks")
+		if err := os.MkdirAll(hookDir, 0o755); err != nil {
+			log.Fatalf("cannot create hooks directory: %v", err)
+		}
+
+		hookScript := filepath.Join(hookDir, "ensure-running.sh")
+		scriptContent := `#!/bin/sh
+# Claude Code SessionStart hook — ensures claude-monitor is running.
+if curl -sf http://127.0.0.1:${CLAUDE_MONITOR_PORT:-7700}/health >/dev/null 2>&1; then
+  exit 0
+fi
+nohup claude-monitor ${CLAUDE_MONITOR_ARGS:-} >/dev/null 2>&1 &
+for i in 1 2 3; do
+  sleep 0.5
+  if curl -sf http://127.0.0.1:${CLAUDE_MONITOR_PORT:-7700}/health >/dev/null 2>&1; then
+    echo "claude-monitor started on http://127.0.0.1:${CLAUDE_MONITOR_PORT:-7700}"
+    exit 0
+  fi
+done
+echo "claude-monitor started in background"
+`
+		if err := os.WriteFile(hookScript, []byte(scriptContent), 0o755); err != nil {
+			log.Fatalf("cannot write hook script: %v", err)
+		}
+
+		// Print the settings.json snippet for the user
+		fmt.Println("Hook script installed to:", hookScript)
+		fmt.Println()
+		fmt.Println("Add this to your ~/.claude/settings.json (or .claude/settings.json):")
+		fmt.Println()
+		fmt.Printf(`{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "%s"
+          }
+        ]
+      }
+    ]
+  }
+}
+`, hookScript)
+		fmt.Println()
+		fmt.Println("claude-monitor will auto-start when you open Claude Code.")
+
+	default:
+		fmt.Fprintf(os.Stderr, "Usage: claude-monitor hook install\n")
+		fmt.Fprintf(os.Stderr, "\nInstalls a Claude Code hook that auto-starts claude-monitor on session start.\n")
+		os.Exit(1)
+	}
+}
+
 // requireSession looks up a session by path parameter "id" and writes an HTTP
 // error if not found.
 func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
@@ -214,9 +284,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Handle 'migrate' subcommand before flag.Parse().
+	// Handle subcommands before flag.Parse().
 	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
 		handleMigrate(os.Args[2:])
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "hook" {
+		handleHook(os.Args[2:])
 		return
 	}
 
@@ -225,6 +299,7 @@ func main() {
 
 Usage:
   claude-monitor [flags]
+  claude-monitor hook install
   claude-monitor migrate [status|rollback]
   claude-monitor --version
 

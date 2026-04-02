@@ -20,6 +20,15 @@
   <img src="docs/screenshots/feed.png" alt="Claude Monitor — live feed with active agents" width="100%" />
 </p>
 
+## Quick Start
+
+```bash
+brew install Zxela/tap/claude-monitor   # or: curl -fsSL https://raw.githubusercontent.com/Zxela/claude-monitor/main/install.sh | sh
+claude-monitor                          # start the dashboard
+open http://localhost:7700              # view in browser
+claude-monitor hook install             # (optional) auto-start with Claude Code
+```
+
 ## Requirements
 
 - **Go** >= 1.25
@@ -29,11 +38,19 @@
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install Zxela/tap/claude-monitor
+```
+
+### Shell script
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Zxela/claude-monitor/main/install.sh | sh
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/Zxela/claude-monitor.git
@@ -102,6 +119,16 @@ claude-monitor migrate status
 # Roll back the last migration
 claude-monitor migrate rollback
 ```
+
+### Auto-Start with Claude Code
+
+Install a Claude Code hook to start claude-monitor automatically when you open a session:
+
+```bash
+claude-monitor hook install
+```
+
+This installs a `SessionStart` hook script and prints the JSON snippet to add to your `~/.claude/settings.json`. Once configured, claude-monitor starts in the background whenever you use Claude Code.
 
 ### Data Storage
 
