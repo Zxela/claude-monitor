@@ -54,8 +54,9 @@ type Event struct {
 
 // fileState tracks our read position within a single JSONL file.
 type fileState struct {
-	path   string
-	offset int64
+	path    string
+	offset  int64
+	partial []byte // incomplete line carried across reads
 }
 
 // Watcher monitors JSONL files and emits Events for each new line.
@@ -360,6 +361,13 @@ func (w *Watcher) readNewLines(path string) {
 	}
 	defer f.Close()
 
+	// Detect file truncation: if file is smaller than our offset, reset.
+	if info, err := f.Stat(); err == nil && info.Size() < state.offset {
+		log.Printf("watcher: file truncated (%s), resetting offset from %d to 0", path, state.offset)
+		state.offset = 0
+		state.partial = nil
+	}
+
 	if _, err := f.Seek(state.offset, 0); err != nil {
 		log.Printf("watcher seek error (%s): %v", path, err)
 		return
@@ -368,7 +376,8 @@ func (w *Watcher) readNewLines(path string) {
 	bufp := bufPool.Get().(*[]byte)
 	buf := *bufp
 	defer bufPool.Put(bufp)
-	var partial []byte
+	partial := state.partial
+	state.partial = nil
 
 	for {
 		n, err := f.Read(buf)
@@ -397,6 +406,11 @@ func (w *Watcher) readNewLines(path string) {
 		if err != nil {
 			break
 		}
+	}
+
+	// Persist any incomplete line for next call
+	if len(partial) > 0 {
+		state.partial = append([]byte(nil), partial...) // copy to avoid buffer reuse issues
 	}
 }
 

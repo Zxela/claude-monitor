@@ -48,6 +48,7 @@ export async function open(sid: string): Promise<void> {
 
 export function close(): void {
   events = [];
+  window.removeEventListener('resize', resizeCanvas);
 }
 
 async function loadEvents(sid: string): Promise<void> {
@@ -77,6 +78,7 @@ function show(): void {
   container.appendChild(wrapper);
 
   resizeCanvas();
+  window.removeEventListener('resize', resizeCanvas);
   window.addEventListener('resize', resizeCanvas);
   canvas.addEventListener('mousedown', onMouseDown);
   canvas.addEventListener('mousemove', onMouseMove);

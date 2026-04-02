@@ -101,7 +101,7 @@ export function update(changes: Partial<AppState>): void {
     }
   }
   if (changedKeys.size > 0) {
-    for (const listener of listeners) {
+    for (const listener of [...listeners]) {
       listener(state, changedKeys);
     }
   }
@@ -109,7 +109,7 @@ export function update(changes: Partial<AppState>): void {
 
 export function updateSession(session: Session): void {
   state.sessions.set(session.id, session);
-  for (const listener of listeners) {
+  for (const listener of [...listeners]) {
     listener(state, new Set(['sessions']));
   }
 }

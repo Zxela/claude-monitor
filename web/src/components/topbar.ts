@@ -9,6 +9,7 @@ import '../styles/topbar.css';
 let el: HTMLElement | null = null;
 let searchInput: HTMLInputElement | null = null;
 let renderAbort: AbortController | null = null;
+let statsTimer: ReturnType<typeof setInterval> | null = null;
 
 let statActive: HTMLElement | null = null;
 let statCost: HTMLElement | null = null;
@@ -152,7 +153,8 @@ export function render(container: HTMLElement): void {
   }
 
   refreshStats();
-  setInterval(refreshStats, 5000);
+  if (statsTimer) clearInterval(statsTimer);
+  statsTimer = setInterval(refreshStats, 5000);
 }
 
 function refreshStats(): void {

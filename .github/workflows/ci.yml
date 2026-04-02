@@ -70,7 +70,6 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          skip-github-release: true
 
       # Enable auto-merge so it merges once CI passes on the PR itself
       - name: Enable auto-merge on release PR

@@ -28,6 +28,8 @@ let container: HTMLElement | null = null;
 let canvas: HTMLCanvasElement | null = null;
 let tooltip: HTMLElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
+let logicalW = 800;
+let logicalH = 600;
 let nodes: GraphNode[] = [];
 let edges: GraphEdge[] = [];
 let nodeMap = new Map<string, GraphNode>();
@@ -185,12 +187,12 @@ function hide(): void {
 function resizeCanvas(): void {
   if (!canvas || !container) return;
   const dpr = window.devicePixelRatio || 1;
-  const w = container.clientWidth;
-  const h = container.clientHeight;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  canvas.style.width = w + 'px';
-  canvas.style.height = h + 'px';
+  logicalW = container.clientWidth;
+  logicalH = container.clientHeight;
+  canvas.width = logicalW * dpr;
+  canvas.height = logicalH * dpr;
+  canvas.style.width = logicalW + 'px';
+  canvas.style.height = logicalH + 'px';
   ctx = canvas.getContext('2d');
   if (ctx) ctx.scale(dpr, dpr);
 }
@@ -225,8 +227,8 @@ function rebuildNodes(): void {
   prevNodeIds = nodeIds;
 
   const oldNodes = new Map(nodes.map(n => [n.id, n]));
-  const cx = (canvas?.width ?? 800) / 2;
-  const cy = (canvas?.height ?? 600) / 2;
+  const cx = logicalW / 2;
+  const cy = logicalH / 2;
 
   nodes = visibleSessions.map(sess => {
     const old = oldNodes.get(sess.id);
@@ -294,8 +296,8 @@ function updateNodeColors(): void {
 
 function simulate(): void {
   if (!canvas) return;
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = logicalW;
+  const h = logicalH;
 
   // Repulsion
   for (let i = 0; i < nodes.length; i++) {
@@ -349,7 +351,7 @@ function simulate(): void {
 
 function draw(): void {
   if (!ctx || !canvas) return;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, logicalW, logicalH);
 
   // Edges (use cached nodeMap)
   ctx.strokeStyle = 'rgba(100,100,140,0.3)';
