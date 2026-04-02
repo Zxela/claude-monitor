@@ -3,6 +3,7 @@ import type { AppState } from '../state';
 import { fetchStats } from '../api';
 import type { StatsWindow } from '../api';
 import { toggle as toggleCostBreakdown } from './cost-breakdown';
+import { getAttentionCount } from '../attention';
 import '../styles/topbar.css';
 
 let el: HTMLElement | null = null;
@@ -183,14 +184,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('sessions') || changed.has('view')) {
     const graphBtn = el?.querySelector('[data-view="graph"]');
     if (graphBtn) {
-      let attnCount = 0;
-      if (state.view !== 'graph') {
-        for (const sess of state.sessions.values()) {
-          if (sess.isActive && (sess.status === 'waiting' || sess.errorCount > 0)) {
-            attnCount++;
-          }
-        }
-      }
+      const attnCount = getAttentionCount();
       graphBtn.textContent = attnCount > 0 ? `GRAPH (${attnCount})` : 'GRAPH';
     }
   }

@@ -4,6 +4,7 @@ import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { escapeHtml, sessionDisplayName } from '../utils';
 import { getLastTool } from '../tool-tracker';
+import { needsAttention, acknowledgeAttention } from '../attention';
 import '../styles/views.css';
 
 interface GraphNode {
@@ -38,20 +39,6 @@ let settledFrames = 0;
 let graphMode: 'graph' | 'sequence' = 'graph';
 const SETTLE_THRESHOLD = 0.1;
 const SETTLE_FRAMES = 30;
-const lastSeenErrors = new Map<string, number>();
-
-function needsAttention(sess: Session): boolean {
-  if (sess.status === 'waiting') return true;
-  const lastSeen = lastSeenErrors.get(sess.id) ?? 0;
-  return sess.errorCount > lastSeen;
-}
-
-function acknowledgeAttention(): void {
-  for (const sess of state.sessions.values()) {
-    lastSeenErrors.set(sess.id, sess.errorCount);
-  }
-}
-
 export function render(mount: HTMLElement): void {
   container = mount;
   subscribe(onStateChange);
@@ -394,7 +381,7 @@ function draw(): void {
     if (needsAttention(n.session)) {
       const pulse = (Math.sin(Date.now() / 500) + 1) / 2;
       ctx.globalAlpha = 0.3 + pulse * 0.7;
-      const ringColor = n.session.errorCount > (lastSeenErrors.get(n.id) ?? 0) ? '#ff6b6b' : '#ffa64a';
+      const ringColor = n.session.status === 'waiting' ? '#ffa64a' : '#ff6b6b';
       ctx.strokeStyle = ringColor;
       ctx.lineWidth = 3;
       ctx.beginPath();
