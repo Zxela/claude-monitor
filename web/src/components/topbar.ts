@@ -3,6 +3,7 @@ import type { AppState } from '../state';
 import { fetchStats } from '../api';
 import type { StatsWindow } from '../api';
 import { toggle as toggleCostBreakdown } from './cost-breakdown';
+import { getAttentionCount } from '../attention';
 import '../styles/topbar.css';
 
 let el: HTMLElement | null = null;
@@ -179,6 +180,13 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       btn.classList.toggle('active', isActive);
       btn.setAttribute('aria-pressed', String(isActive));
     });
+  }
+  if (changed.has('sessions') || changed.has('view')) {
+    const graphBtn = el?.querySelector('[data-view="graph"]');
+    if (graphBtn) {
+      const attnCount = getAttentionCount();
+      graphBtn.textContent = attnCount > 0 ? `GRAPH (${attnCount})` : 'GRAPH';
+    }
   }
 }
 
