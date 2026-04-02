@@ -17,6 +17,7 @@ import { dismiss as dismissBudget } from './components/budget-popover';
 import { init as initHash } from './hash';
 import { init as initOnboarding } from './components/onboarding';
 import { render as renderUpdateBanner } from './components/update-banner';
+import { startSampling } from './burn-rate';
 
 // Mount components
 const topbarMount = document.getElementById('topbar-mount')!;
@@ -178,6 +179,7 @@ async function init() {
   connect();
   initHash();
   initOnboarding();
+  startSampling();
 }
 
 init();
