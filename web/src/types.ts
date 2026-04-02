@@ -96,6 +96,52 @@ export interface Stats {
   costByRepo: Record<string, number>;
 }
 
+export interface TrendBucket {
+  date: string;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  sessionCount: number;
+  cacheHitPct: number;
+  avgSessionCost: number;
+  medianSessionCost: number;
+  p95SessionCost: number;
+  avgSessionTokens: number;
+  outputInputRatio: number;
+}
+
+export interface RepoTrend {
+  repoId: string;
+  repoName: string;
+  cost: number;
+  tokens: number;
+  sessions: number;
+}
+
+export interface ModelTrend {
+  model: string;
+  cost: number;
+  tokens: number;
+  sessions: number;
+}
+
+export interface TrendSummary {
+  totalCost: number;
+  effectiveTokens: number;
+  cacheHitPct: number;
+  sessionCount: number;
+}
+
+export interface TrendResult {
+  window: string;
+  buckets: TrendBucket[];
+  byRepo: RepoTrend[];
+  byModel: ModelTrend[];
+  summary: TrendSummary;
+}
+
 export interface WsEvent {
   event: 'session_new' | 'session_update' | 'event' | 'update_available';
   session?: Session;

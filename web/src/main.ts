@@ -9,6 +9,7 @@ import { render as renderFeedPanel } from './components/feed-panel';
 import { render as renderGraphView } from './components/graph-view';
 import { render as renderHistoryView } from './components/history-view';
 import { render as renderTimeline } from './components/timeline-view';
+import { render as renderAnalyticsView } from './components/analytics-view';
 import { render as renderBudget } from './components/budget-popover';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { dismiss as dismissCostBreakdown } from './components/cost-breakdown';
@@ -31,6 +32,7 @@ renderFeedPanel(feedMount);
 renderGraphView(feedMount);
 renderHistoryView(feedMount);
 renderTimeline(feedMount);
+renderAnalyticsView(feedMount);
 
 // Search dropdown
 const searchBox = topbarMount.querySelector<HTMLElement>('.search-box');
@@ -84,6 +86,9 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'h':
       update({ view: state.view === 'history' ? 'list' : 'history' });
+      break;
+    case 'a':
+      update({ view: state.view === 'analytics' ? 'list' : 'analytics' });
       break;
     case '?':
       toggleHelp();

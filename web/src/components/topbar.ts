@@ -45,6 +45,7 @@ export function render(container: HTMLElement): void {
       <button class="view-btn active" data-view="list" aria-pressed="true">LIST</button>
       <button class="view-btn" data-view="graph" aria-pressed="false">GRAPH</button>
       <button class="view-btn" data-view="history" aria-pressed="false">HISTORY</button>
+      <button class="view-btn" data-view="analytics" aria-pressed="false">ANALYTICS</button>
     </nav>
   `;
   // Add hamburger button (outside collapsible)

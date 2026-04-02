@@ -171,6 +171,57 @@ type AggregateResult struct {
 	CostByRepo          map[string]float64 `json:"costByRepo"`
 }
 
+// TrendBucket holds aggregated stats for a single time bucket (hour or day).
+type TrendBucket struct {
+	Date                string  `json:"date"`
+	Cost                float64 `json:"cost"`
+	InputTokens         int64   `json:"inputTokens"`
+	OutputTokens        int64   `json:"outputTokens"`
+	CacheReadTokens     int64   `json:"cacheReadTokens"`
+	CacheCreationTokens int64   `json:"cacheCreationTokens"`
+	SessionCount        int     `json:"sessionCount"`
+	CacheHitPct         float64 `json:"cacheHitPct"`
+	AvgSessionCost      float64 `json:"avgSessionCost"`
+	MedianSessionCost   float64 `json:"medianSessionCost"`
+	P95SessionCost      float64 `json:"p95SessionCost"`
+	AvgSessionTokens    float64 `json:"avgSessionTokens"`
+	OutputInputRatio    float64 `json:"outputInputRatio"`
+}
+
+// RepoTrend holds cost/token breakdown for a single repo.
+type RepoTrend struct {
+	RepoID   string  `json:"repoId"`
+	RepoName string  `json:"repoName"`
+	Cost     float64 `json:"cost"`
+	Tokens   int64   `json:"tokens"`
+	Sessions int     `json:"sessions"`
+}
+
+// ModelTrend holds cost/token breakdown for a single model.
+type ModelTrend struct {
+	Model    string  `json:"model"`
+	Cost     float64 `json:"cost"`
+	Tokens   int64   `json:"tokens"`
+	Sessions int     `json:"sessions"`
+}
+
+// TrendSummary holds totals across all buckets.
+type TrendSummary struct {
+	TotalCost       float64 `json:"totalCost"`
+	EffectiveTokens int64   `json:"effectiveTokens"`
+	CacheHitPct     float64 `json:"cacheHitPct"`
+	SessionCount    int     `json:"sessionCount"`
+}
+
+// TrendResult holds the complete trend analysis response.
+type TrendResult struct {
+	Window  string        `json:"window"`
+	Buckets []TrendBucket `json:"buckets"`
+	ByRepo  []RepoTrend   `json:"byRepo"`
+	ByModel []ModelTrend  `json:"byModel"`
+	Summary TrendSummary  `json:"summary"`
+}
+
 // StorageInfo holds database storage statistics.
 type StorageInfo struct {
 	TotalSizeBytes  int64 `json:"totalSizeBytes"`
@@ -500,6 +551,200 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	}
 
 	return r, nil
+}
+
+// TrendData returns time-bucketed analytics for the given window and optional repo filter.
+// window must be "24h", "7d", or "30d". repoID may be empty for all repos.
+func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
+	var dateFmt string
+	var interval string
+	switch window {
+	case "24h":
+		dateFmt = "%Y-%m-%d %H:00"
+		interval = "-1 days"
+	case "7d":
+		dateFmt = "%Y-%m-%d"
+		interval = "-7 days"
+	case "30d":
+		dateFmt = "%Y-%m-%d"
+		interval = "-30 days"
+	default:
+		return nil, fmt.Errorf("invalid window: %s", window)
+	}
+
+	where := fmt.Sprintf("started_at >= datetime('now', '%s') AND (parent_id IS NULL OR parent_id = '')", interval)
+	var args []interface{}
+	if repoID != "" {
+		where += " AND repo_id = ?"
+		args = append(args, repoID)
+	}
+
+	// Query 1: Bucket aggregation
+	bucketQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket,
+		COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
+		COUNT(*), COALESCE(AVG(total_cost),0)
+		FROM sessions WHERE %s
+		GROUP BY bucket ORDER BY bucket`, dateFmt, where)
+
+	rows, err := d.db.Query(bucketQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("trend buckets: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []TrendBucket
+	for rows.Next() {
+		var b TrendBucket
+		if err := rows.Scan(&b.Date, &b.Cost, &b.InputTokens, &b.OutputTokens,
+			&b.CacheReadTokens, &b.CacheCreationTokens, &b.SessionCount, &b.AvgSessionCost); err != nil {
+			return nil, fmt.Errorf("scan bucket: %w", err)
+		}
+		effInput := b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
+		if effInput > 0 {
+			b.CacheHitPct = float64(b.CacheReadTokens) / float64(effInput) * 100
+			b.OutputInputRatio = float64(b.OutputTokens) / float64(effInput)
+		}
+		if b.SessionCount > 0 {
+			b.AvgSessionTokens = float64(effInput+b.OutputTokens) / float64(b.SessionCount)
+		}
+		buckets = append(buckets, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if buckets == nil {
+		buckets = []TrendBucket{}
+	}
+
+	// Query 2: Percentiles — fetch all session costs per bucket
+	percQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket, total_cost
+		FROM sessions WHERE %s
+		ORDER BY bucket, total_cost`, dateFmt, where)
+
+	percRows, err := d.db.Query(percQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("trend percentiles: %w", err)
+	}
+	defer percRows.Close()
+
+	// Collect costs grouped by bucket
+	bucketCosts := make(map[string][]float64)
+	for percRows.Next() {
+		var bucket string
+		var cost float64
+		if err := percRows.Scan(&bucket, &cost); err != nil {
+			return nil, fmt.Errorf("scan percentile: %w", err)
+		}
+		bucketCosts[bucket] = append(bucketCosts[bucket], cost)
+	}
+	if err := percRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Apply percentiles to buckets
+	for i := range buckets {
+		costs := bucketCosts[buckets[i].Date]
+		if len(costs) > 0 {
+			buckets[i].MedianSessionCost = percentile(costs, 0.5)
+			buckets[i].P95SessionCost = percentile(costs, 0.95)
+		}
+	}
+
+	// Query 3: By repo — build WHERE with table-prefixed columns for JOIN
+	repoWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s') AND (s.parent_id IS NULL OR s.parent_id = '')", interval)
+	if repoID != "" {
+		repoWhere += " AND s.repo_id = ?"
+	}
+	repoQuery := fmt.Sprintf(`SELECT s.repo_id, COALESCE(r.name,''), COALESCE(SUM(s.total_cost),0),
+		COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens),0),
+		COUNT(*)
+		FROM sessions s JOIN repos r ON r.id = s.repo_id
+		WHERE %s AND s.repo_id != ''
+		GROUP BY r.id ORDER BY SUM(s.total_cost) DESC`, repoWhere)
+
+	repoRows, err := d.db.Query(repoQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("trend by repo: %w", err)
+	}
+	defer repoRows.Close()
+
+	var byRepo []RepoTrend
+	for repoRows.Next() {
+		var rt RepoTrend
+		if err := repoRows.Scan(&rt.RepoID, &rt.RepoName, &rt.Cost, &rt.Tokens, &rt.Sessions); err != nil {
+			return nil, fmt.Errorf("scan repo trend: %w", err)
+		}
+		byRepo = append(byRepo, rt)
+	}
+	if err := repoRows.Err(); err != nil {
+		return nil, err
+	}
+	if byRepo == nil {
+		byRepo = []RepoTrend{}
+	}
+
+	// Query 4: By model
+	modelQuery := fmt.Sprintf(`SELECT COALESCE(model,'unknown'), COALESCE(SUM(total_cost),0),
+		COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens),0),
+		COUNT(*)
+		FROM sessions WHERE %s AND model != ''
+		GROUP BY model ORDER BY SUM(total_cost) DESC`, where)
+
+	modelRows, err := d.db.Query(modelQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("trend by model: %w", err)
+	}
+	defer modelRows.Close()
+
+	var byModel []ModelTrend
+	for modelRows.Next() {
+		var mt ModelTrend
+		if err := modelRows.Scan(&mt.Model, &mt.Cost, &mt.Tokens, &mt.Sessions); err != nil {
+			return nil, fmt.Errorf("scan model trend: %w", err)
+		}
+		byModel = append(byModel, mt)
+	}
+	if err := modelRows.Err(); err != nil {
+		return nil, err
+	}
+	if byModel == nil {
+		byModel = []ModelTrend{}
+	}
+
+	// Build summary from buckets
+	var summary TrendSummary
+	var totalEffInput, totalCacheRead int64
+	for _, b := range buckets {
+		summary.TotalCost += b.Cost
+		summary.EffectiveTokens += b.InputTokens + b.OutputTokens + b.CacheReadTokens + b.CacheCreationTokens
+		summary.SessionCount += b.SessionCount
+		totalEffInput += b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
+		totalCacheRead += b.CacheReadTokens
+	}
+	if totalEffInput > 0 {
+		summary.CacheHitPct = float64(totalCacheRead) / float64(totalEffInput) * 100
+	}
+
+	return &TrendResult{
+		Window:  window,
+		Buckets: buckets,
+		ByRepo:  byRepo,
+		ByModel: byModel,
+		Summary: summary,
+	}, nil
+}
+
+// percentile returns the value at the given percentile (0-1) from a sorted slice.
+func percentile(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(float64(len(sorted)) * p)
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
 
 // --- Events ---

@@ -27,6 +27,7 @@ export function toggle(): void {
       <div class="help-row"><span>All filter</span><kbd>3</kbd></div>
       <div class="help-row"><span>Graph view</span><kbd>g</kbd></div>
       <div class="help-row"><span>History view</span><kbd>h</kbd></div>
+      <div class="help-row"><span>Analytics view</span><kbd>a</kbd></div>
       <div class="help-row"><span>Help</span><kbd>?</kbd></div>
     </div>
   `;

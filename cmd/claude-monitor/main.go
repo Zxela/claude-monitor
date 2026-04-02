@@ -734,6 +734,29 @@ Examples:
 		json.NewEncoder(w).Encode(resp)
 	})
 
+	mux.HandleFunc("GET /api/stats/trends", func(w http.ResponseWriter, r *http.Request) {
+		window := r.URL.Query().Get("window")
+		if window == "" {
+			window = "7d"
+		}
+		if window != "24h" && window != "7d" && window != "30d" {
+			writeJSONError(w, "window must be 24h, 7d, or 30d", http.StatusBadRequest)
+			return
+		}
+
+		repoID := r.URL.Query().Get("repo")
+
+		result, err := historyDB.TrendData(window, repoID)
+		if err != nil {
+			log.Printf("trends error: %v", err)
+			writeJSONError(w, "failed to compute trends", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	})
+
 	// Repos endpoint — replaces /api/projects.
 	mux.HandleFunc("GET /api/repos", func(w http.ResponseWriter, r *http.Request) {
 		repos, err := historyDB.ListRepos()

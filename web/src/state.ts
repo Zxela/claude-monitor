@@ -5,7 +5,7 @@ export interface AppState {
   sessions: Map<string, Session>;
   grouped: GroupedSessions | null;
   selectedSessionId: string | null;
-  view: 'list' | 'graph' | 'history';
+  view: 'list' | 'graph' | 'history' | 'analytics';
   repoFilter: string | null;
   searchQuery: string;
   searchResults: Event[];
