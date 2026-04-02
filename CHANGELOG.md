@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.0](https://github.com/Zxela/claude-monitor/compare/v2.0.0...v2.1.0) (2026-04-02)
+
+
+### Features
+
+* Agent Swarm HQ — status-aware graph with attention tracking ([#87](https://github.com/Zxela/claude-monitor/issues/87)) ([8f1d936](https://github.com/Zxela/claude-monitor/commit/8f1d936757ebdbace20bced60cfc4cab7bb37198))
+* burn rate gauge with cost intelligence panel ([#86](https://github.com/Zxela/claude-monitor/issues/86)) ([49370ec](https://github.com/Zxela/claude-monitor/commit/49370ec07114e752c983956edd9f177527a1dd2c))
+* cost & token analytics dashboard ([#84](https://github.com/Zxela/claude-monitor/issues/84)) ([0838b50](https://github.com/Zxela/claude-monitor/commit/0838b50248c372fb69cb822fa5f8a7d2fa1431a8))
+* phase 1 polish — QA fixes, Homebrew, Claude Code hook ([#88](https://github.com/Zxela/claude-monitor/issues/88)) ([8a194f8](https://github.com/Zxela/claude-monitor/commit/8a194f8b36297a2fa190c57208cd1002d1f80446))
+
+
+### Bug Fixes
+
+* onboarding persistence + rewrite OpenAPI spec for v2 ([#85](https://github.com/Zxela/claude-monitor/issues/85)) ([82e1f6e](https://github.com/Zxela/claude-monitor/commit/82e1f6e22ba80e7ef80cf026189bac8a34f6690c))
+
 ## [2.0.0](https://github.com/Zxela/claude-monitor/compare/v1.26.0...v2.0.0) (2026-03-30)
 
 
