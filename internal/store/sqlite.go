@@ -680,6 +680,9 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	if err := repoRows.Err(); err != nil {
 		return nil, err
 	}
+	if byRepo == nil {
+		byRepo = []RepoTrend{}
+	}
 
 	// Query 4: By model
 	modelQuery := fmt.Sprintf(`SELECT COALESCE(model,'unknown'), COALESCE(SUM(total_cost),0),
@@ -704,6 +707,9 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	}
 	if err := modelRows.Err(); err != nil {
 		return nil, err
+	}
+	if byModel == nil {
+		byModel = []ModelTrend{}
 	}
 
 	// Build summary from buckets

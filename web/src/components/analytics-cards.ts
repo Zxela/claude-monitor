@@ -236,6 +236,7 @@ export function renderCards(
   cardState: CardState,
   onToggle: OnToggle,
 ): void {
+  destroyCards();
   container.innerHTML = '';
 
   for (const def of CARD_DEFS) {

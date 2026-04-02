@@ -155,6 +155,7 @@ async function loadData(): Promise<void> {
     loaded = true;
   } catch (err) {
     console.error('Failed to load analytics:', err);
+    loaded = true; // prevent retry loop on persistent errors
   } finally {
     loading = false;
   }
