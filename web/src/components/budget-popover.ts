@@ -92,8 +92,8 @@ function togglePanel(anchor: HTMLElement): void {
   statEl.style.position = 'relative';
   statEl.appendChild(panel);
 
-  // Refresh panel content every 5 seconds (synced with sampling)
-  refreshTimer = setInterval(renderPanelContent, 5000);
+  // Refresh dynamic values every 5 seconds (synced with sampling)
+  refreshTimer = setInterval(updatePanelValues, 5000);
 }
 
 function renderPanelContent(): void {
@@ -238,6 +238,70 @@ function renderPanelContent(): void {
   settingsEl.querySelector('.notif-error')?.addEventListener('change', (e) => {
     const s = getSettings(); s.error = (e.target as HTMLInputElement).checked; saveSettings(s);
   });
+}
+
+function updatePanelValues(): void {
+  if (!panel) return;
+
+  const rate = getCurrentRate();
+  const tokenRate = getTokenRate();
+  const totalCost = state.stats?.totalCost ?? 0;
+  const projected = getProjectedDailyCost(totalCost);
+  const samples = getSamples();
+
+  // Update burn rate value
+  const rateVal = panel.querySelector('.burn-rate-value');
+  if (rateVal) rateVal.textContent = `$${rate.toFixed(3)}/min`;
+
+  // Update metrics
+  const metricValues = panel.querySelectorAll('.burn-rate-metric-value');
+  if (metricValues[0]) metricValues[0].textContent = `$${projected.toFixed(2)}`;
+  if (metricValues[1]) metricValues[1].textContent = `${formatTokens(Math.round(tokenRate))}/min`;
+
+  // Redraw sparkline
+  drawSparkline(samples);
+
+  // Update active sessions
+  const activeSessions = Array.from(state.sessions.values()).filter(s => s.isActive);
+  const sessSection = panel.querySelector('.burn-rate-sessions');
+  if (sessSection) {
+    const rows = sessSection.querySelectorAll('.burn-rate-session-row');
+    // If count changed, do a targeted rebuild of just the sessions section
+    if (rows.length !== activeSessions.length) {
+      sessSection.innerHTML = `<div class="burn-rate-sessions-title">ACTIVE SESSIONS</div>`;
+      for (const sess of activeSessions) {
+        const row = document.createElement('div');
+        row.className = 'burn-rate-session-row';
+        const model = (sess.model || '').replace('claude-', '').replace('-4-6', '');
+        row.innerHTML = `
+          <span class="burn-rate-session-name">${escapeHtml(sessionDisplayName(sess))}</span>
+          <span class="burn-rate-session-rate">$${sess.costRate.toFixed(3)}/min</span>
+          <span class="burn-rate-session-model">${escapeHtml(model)}</span>
+        `;
+        sessSection.appendChild(row);
+      }
+    } else {
+      rows.forEach((row, i) => {
+        const sess = activeSessions[i];
+        const rateEl = row.querySelector('.burn-rate-session-rate');
+        if (rateEl) rateEl.textContent = `$${sess.costRate.toFixed(3)}/min`;
+      });
+    }
+  }
+
+  // Update budget progress
+  if (state.budgetThreshold) {
+    const budget = state.budgetThreshold;
+    const pct = Math.min(100, (totalCost / budget) * 100);
+    const barColor = pct >= 100 ? '#ff6b6b' : pct >= 80 ? '#ffa64a' : '#4ae68a';
+    const depletionMin = getDepletionMinutes(budget, totalCost);
+    const fill = panel.querySelector('.burn-rate-budget-fill') as HTMLElement | null;
+    if (fill) { fill.style.width = `${pct}%`; fill.style.background = barColor; }
+    const budgetText = panel.querySelector('.burn-rate-budget-text');
+    if (budgetText) budgetText.innerHTML = `<span>${pct.toFixed(0)}%</span><span>$${totalCost.toFixed(2)} / $${budget}</span>`;
+    const depletion = panel.querySelector('.burn-rate-depletion');
+    if (depletion) depletion.textContent = depletionMin !== null ? `Depletes in ~${formatMinutes(depletionMin)} at current rate` : '';
+  }
 }
 
 function drawSparkline(samples: { timestamp: number; costRate: number }[]): void {
