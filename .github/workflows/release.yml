@@ -4,6 +4,13 @@ on:
   pull_request:
     branches: [main]
     types: [closed]
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to build binaries for (e.g. v2.1.0)'
+        required: true
 
 permissions:
   contents: write
@@ -64,12 +71,24 @@ jobs:
 
   build-binaries:
     needs: create-release
-    if: ${{ needs.create-release.outputs.release_created == 'true' }}
+    if: |
+      always() && (
+        needs.create-release.outputs.release_created == 'true' ||
+        github.event_name == 'release' ||
+        github.event_name == 'workflow_dispatch'
+      )
     runs-on: ubuntu-latest
+    env:
+      TAG_NAME: >-
+        ${{
+          needs.create-release.outputs.tag_name ||
+          github.event.release.tag_name ||
+          inputs.tag_name
+        }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-release.outputs.tag_name }}
+          ref: ${{ env.TAG_NAME }}
 
       - uses: actions/setup-go@v5
         with:
@@ -84,7 +103,7 @@ jobs:
 
       - name: Build binaries
         run: |
-          VERSION=${{ needs.create-release.outputs.tag_name }}
+          VERSION="${TAG_NAME}"
           LDFLAGS="-s -w -X main.version=${VERSION}"
           mkdir -p dist
 
@@ -104,7 +123,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ needs.create-release.outputs.tag_name }} \
+          gh release upload ${{ env.TAG_NAME }} \
             dist/*.tar.gz \
             dist/checksums.txt \
             --repo ${{ github.repository }}
@@ -113,7 +132,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ needs.create-release.outputs.tag_name }}"
+          VERSION="${TAG_NAME}"
           VERSION_NUM="${VERSION#v}"
 
           # Read checksums
