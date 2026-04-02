@@ -129,12 +129,17 @@ jobs:
           sed -i "/linux-amd64/{n;s/sha256 \".*\"/sha256 \"${LINUX_AMD64}\"/}" Formula/claude-monitor.rb
           sed -i "/linux-arm64/{n;s/sha256 \".*\"/sha256 \"${LINUX_ARM64}\"/}" Formula/claude-monitor.rb
 
-          # Update formula in this repo
+          # Update formula in this repo via PR (not direct push to main)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="chore/update-formula-${VERSION}"
+          git checkout -b "${BRANCH}"
           git add Formula/claude-monitor.rb
-          git commit -m "chore: update Homebrew formula for ${VERSION}" || true
-          git push origin HEAD:main || true
+          git commit -m "chore: update Homebrew formula for ${VERSION}" || echo "::warning::No formula changes to commit"
+          git push origin "${BRANCH}" || echo "::warning::Failed to push formula branch"
+          gh pr create --title "chore: update Homebrew formula for ${VERSION}" \
+            --body "Auto-generated formula update for ${VERSION}" \
+            --base main --head "${BRANCH}" || echo "::warning::Failed to create formula PR"
 
           # Also update the Homebrew tap repo
           git clone https://x-access-token:${GH_TOKEN}@github.com/Zxela/homebrew-tap.git /tmp/tap
@@ -143,5 +148,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/claude-monitor.rb
-          git commit -m "Update claude-monitor to ${VERSION}" || true
-          git push origin main || true
+          git commit -m "Update claude-monitor to ${VERSION}" || echo "::warning::No tap changes to commit"
+          git push origin main || echo "::warning::Failed to push to homebrew-tap"
