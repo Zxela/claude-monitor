@@ -22,7 +22,7 @@ export function init(): void {
   });
 
   // Auto-dismiss after 15 seconds
-  setTimeout(() => { if (tip.parentNode) tip.remove(); }, 15000);
+  setTimeout(() => { if (tip.parentNode) { localStorage.setItem(STORAGE_KEY, '1'); tip.remove(); } }, 15000);
 
   document.body.appendChild(tip);
 }
