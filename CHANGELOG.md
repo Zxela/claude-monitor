@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/Zxela/claude-monitor/compare/v2.1.0...v2.1.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* add release/dispatch triggers so builds run on manual releases ([7d778c3](https://github.com/Zxela/claude-monitor/commit/7d778c379d12c07b1a912e79aa08bd8a5f58af7b))
+* address critical review findings across backend, frontend, and CI ([e34d7b8](https://github.com/Zxela/claude-monitor/commit/e34d7b852700b4ea3f1510c0f9a612db9fb6087f))
+
 ## [2.1.0](https://github.com/Zxela/claude-monitor/compare/v2.0.0...v2.1.0) (2026-04-02)
 
 
