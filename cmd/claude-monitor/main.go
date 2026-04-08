@@ -40,6 +40,14 @@ var version = "dev"
 // validContainerName matches safe Docker container names (alphanumeric, dash, underscore, dot).
 var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// writeJSON writes a JSON success response, logging any encoding error.
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("json encode error: %v", err)
+	}
+}
+
 // writeJSONError writes a JSON error response with the given message and status code.
 func writeJSONError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
@@ -531,8 +539,7 @@ Examples:
 			if active == nil {
 				active = []*session.Session{}
 			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(active)
+			writeJSON(w, active)
 			return
 		}
 
@@ -607,8 +614,7 @@ Examples:
 				}
 			}
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(g)
+			writeJSON(w, g)
 			return
 		}
 
@@ -637,8 +643,7 @@ Examples:
 		if sessions == nil {
 			sessions = []*session.Session{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(sessions)
+		writeJSON(w, sessions)
 	})
 
 	// Single session by ID.
@@ -646,8 +651,7 @@ Examples:
 		id := r.PathValue("id")
 		// Try live store first
 		if sess, ok := sessionStore.Get(id); ok {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sess)
+			writeJSON(w, sess)
 			return
 		}
 		// Fall back to DB
@@ -660,8 +664,7 @@ Examples:
 			writeJSONError(w, "session not found", http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(row.ToSession())
+		writeJSON(w, row.ToSession())
 	})
 
 	// Aggregate stats — reads from DB (pipeline keeps it up to date).
@@ -730,8 +733,7 @@ Examples:
 			resp.CacheHitPct = float64(resp.CacheReadTokens) / float64(totalInput) * 100
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeJSON(w, resp)
 	})
 
 	mux.HandleFunc("GET /api/stats/trends", func(w http.ResponseWriter, r *http.Request) {
@@ -753,8 +755,7 @@ Examples:
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		writeJSON(w, result)
 	})
 
 	// Repos endpoint — replaces /api/projects.
@@ -767,8 +768,7 @@ Examples:
 		if repos == nil {
 			repos = []store.RepoRow{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(repos)
+		writeJSON(w, repos)
 	})
 
 	// Per-repo stats.
@@ -779,8 +779,7 @@ Examples:
 			writeJSONError(w, "failed to get repo stats", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(agg)
+		writeJSON(w, agg)
 	})
 
 	// Sessions for a repo.
@@ -803,8 +802,7 @@ Examples:
 		if sessions == nil {
 			sessions = []*session.Session{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(sessions)
+		writeJSON(w, sessions)
 	})
 
 	// Search — FTS5 on preview + tool_detail.
@@ -828,8 +826,7 @@ Examples:
 		if results == nil {
 			results = []store.EventRow{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
+		writeJSON(w, results)
 	})
 
 	// Full content search (slower, for key leak detection).
@@ -853,8 +850,7 @@ Examples:
 		if results == nil {
 			results = []store.EventRow{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
+		writeJSON(w, results)
 	})
 
 	// Events for a session — from DB.
@@ -872,8 +868,7 @@ Examples:
 			if events == nil {
 				events = []store.EventRow{}
 			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(events)
+			writeJSON(w, events)
 			return
 		}
 
@@ -891,8 +886,7 @@ Examples:
 			if events == nil {
 				events = []store.EventRow{}
 			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(events)
+			writeJSON(w, events)
 			return
 		}
 
@@ -912,8 +906,7 @@ Examples:
 		if events == nil {
 			events = []store.EventRow{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(events)
+		writeJSON(w, events)
 	})
 
 	// Replay — returns events from DB for playback.
@@ -927,8 +920,7 @@ Examples:
 		if events == nil {
 			events = []store.EventRow{}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, map[string]any{
 			"sessionId": id,
 			"events":    events,
 		})
@@ -941,8 +933,7 @@ Examples:
 			writeJSONError(w, "failed to get settings", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(settings)
+		writeJSON(w, settings)
 	})
 
 	mux.HandleFunc("PUT /api/settings/{key}", func(w http.ResponseWriter, r *http.Request) {
@@ -958,8 +949,7 @@ Examples:
 			writeJSONError(w, "failed to update setting", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		writeJSON(w, map[string]bool{"ok": true})
 	})
 
 	// Storage info.
@@ -969,8 +959,7 @@ Examples:
 			writeJSONError(w, "failed to get storage info", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		writeJSON(w, info)
 	})
 
 	// Cache clear endpoint.
@@ -980,8 +969,7 @@ Examples:
 			writeJSONError(w, "failed to clear cache", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		writeJSON(w, map[string]bool{"ok": true})
 	})
 
 	// Stop session (Docker container).
@@ -1020,21 +1008,18 @@ Examples:
 
 	// Health check.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		if err := historyDB.Ping(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "db": err.Error()})
+			writeJSON(w, map[string]interface{}{"ok": false, "db": err.Error()})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "db": "ok"})
+		writeJSON(w, map[string]interface{}{"ok": true, "db": "ok"})
 	})
 
 	// Version endpoint.
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"version": version}); err != nil {
-			log.Printf("json encode: %v", err)
-		}
+		writeJSON(w, map[string]string{"version": version})
 	})
 
 	// Swagger UI (opt-in via --swagger flag).

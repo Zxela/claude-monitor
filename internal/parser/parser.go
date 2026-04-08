@@ -29,6 +29,8 @@ type rawMessage struct {
 	AgentName   string          `json:"agentName"`
 	Data        rawProgressData `json:"data"`
 	Operation   string          `json:"operation"`
+	// Compact/summary event.
+	Summary string `json:"summary"`
 	// Additional fields previously dropped.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 	Subtype       string          `json:"subtype"`
@@ -241,6 +243,23 @@ func ParseLine(line []byte) (*Event, error) {
 	msg.Version = raw.Version
 	msg.Entrypoint = raw.Entrypoint
 
+	// Compact/summary events (context compaction in Claude Code).
+	// After a /compact, Claude Code emits a "summary" line containing the
+	// compressed context.  We surface it in the feed so users can see when
+	// compaction happened, and downstream pipeline code uses the type to
+	// reset dedup state.
+	if raw.Type == "summary" {
+		msg.Subtype = "compact"
+		if raw.Summary != "" {
+			msg.ContentText = truncate(raw.Summary, maxContentPreview)
+			if len([]rune(raw.Summary)) > maxContentPreview {
+				msg.FullContent = raw.Summary
+			}
+		} else {
+			msg.ContentText = "[context compacted]"
+		}
+	}
+
 	// System message metadata (turn_duration, stop_hook_summary).
 	if raw.Type == "system" {
 		msg.Subtype = raw.Subtype
@@ -280,8 +299,8 @@ func ParseLine(line []byte) (*Event, error) {
 		msg.HookName = raw.Data.HookName
 		// Extract tool name from hookName (e.g. "PostToolUse:Read" → "Read")
 		hookTool := raw.Data.HookName
-		if i := len(raw.Data.HookEvent); i < len(raw.Data.HookName) && raw.Data.HookName[i] == ':' {
-			hookTool = raw.Data.HookName[i+1:]
+		if idx := strings.IndexByte(raw.Data.HookName, ':'); idx >= 0 {
+			hookTool = raw.Data.HookName[idx+1:]
 		}
 		// Include the hook command when available (shell command or "callback")
 		cmd := raw.Data.Command

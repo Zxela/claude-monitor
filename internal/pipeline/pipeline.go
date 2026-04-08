@@ -81,6 +81,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	// Stage 1: Parse
 	event, err := parser.ParseLine(ev.Line)
 	if err != nil {
+		if !ev.Bootstrap {
+			log.Printf("parse error (%s): %v (line prefix: %.120s)", ev.FilePath, err, ev.Line)
+		}
 		return
 	}
 
@@ -321,8 +324,16 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		s.LastActive = time.Now()
 	}
 
+	// On compact/summary, reset message-ID dedup (IDs change after compact)
+	// but preserve cost tracking to maintain running totals.
+	if msg.Type == "summary" {
+		s.SeenMessageIDs = make(map[string]bool)
+	}
+
 	// Status
-	if msg.StopReason == "end_turn" {
+	if msg.Type == "summary" {
+		s.Status = "thinking" // session stays active through compact
+	} else if msg.StopReason == "end_turn" {
 		s.Status = "waiting"
 	} else if msg.StopReason == "tool_use" {
 		s.Status = "tool_use"

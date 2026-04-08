@@ -223,7 +223,7 @@
 
 .fe-time {
   flex: 0 0 85px;
-  color: #44445a;
+  color: #667788;
   font-size: var(--text-base);
   white-space: nowrap;
 }
@@ -516,7 +516,7 @@
   font-size: 11px;
   border-left-color: rgba(255,204,0,0.15);
 }
-.feed-entry.tool-group-child .fe-time { color: #33334a; }
+.feed-entry.tool-group-child .fe-time { color: #556677; }
 .feed-entry.tool-group-child:last-child,
 .feed-entry.tool-group-child + .feed-entry:not(.tool-group-child) { border-bottom: 1px solid rgba(255,255,255,0.03); }
 
@@ -526,7 +526,7 @@
   padding-bottom: 2px;
   font-size: 11px;
 }
-.feed-entry.type-tool_result .fe-time { color: #33334a; }
+.feed-entry.type-tool_result .fe-time { color: #556677; }
 .feed-entry.type-tool_result .fe-type { color: #446666; }
 
 
