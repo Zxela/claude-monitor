@@ -224,6 +224,15 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		s.Entrypoint = msg.Entrypoint
 	}
 
+	// Track which file is providing events for this session.
+	// Log when the source file changes (e.g. after compact or file rotation).
+	if s.SourceFile == "" {
+		s.SourceFile = ev.FilePath
+	} else if s.SourceFile != ev.FilePath {
+		log.Printf("session %s: source file changed from %s to %s", ev.SessionID, s.SourceFile, ev.FilePath)
+		s.SourceFile = ev.FilePath
+	}
+
 	// Session naming
 	if msg.Type == "custom-title" && msg.ContentText != "" {
 		s.SessionName = msg.ContentText

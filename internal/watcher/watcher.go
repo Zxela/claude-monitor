@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -65,8 +66,9 @@ type Watcher struct {
 	mu        sync.Mutex
 	basePaths []string              // directories to scan
 	labels    map[string]string     // basePath -> label (container name)
-	states      map[string]*fileState
-	events      chan Event
+	states        map[string]*fileState
+	events        chan Event
+	droppedEvents atomic.Int64
 	bootstrapping bool              // true during initial scan
 	bootstrapCB   func(Event)       // called synchronously for bootstrap events
 }
@@ -87,7 +89,7 @@ func New(extraPaths []string) (*Watcher, error) {
 		basePaths: paths,
 		labels:    make(map[string]string),
 		states:    make(map[string]*fileState),
-		events:    make(chan Event, 512),
+		events:    make(chan Event, 4096),
 	}, nil
 }
 
@@ -238,6 +240,12 @@ func (w *Watcher) run(ctx context.Context) {
 				w.readNewLines(ev.Name)
 				w.mu.Unlock()
 			}
+			if ev.Has(fsnotify.Create) && strings.HasSuffix(ev.Name, ".jsonl") {
+				w.mu.Lock()
+				w.ensureTracked(ev.Name)
+				w.readNewLines(ev.Name)
+				w.mu.Unlock()
+			}
 
 		case err, ok := <-w.fsw.Errors:
 			if !ok {
@@ -259,6 +267,14 @@ func (w *Watcher) run(ctx context.Context) {
 func (w *Watcher) scanAll() {
 	for _, base := range w.basePaths {
 		w.scanPath(base)
+	}
+
+	// Clean up states for files that no longer exist on disk.
+	for path := range w.states {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			log.Printf("watcher: removing stale state for deleted file %s", path)
+			delete(w.states, path)
+		}
 	}
 }
 
@@ -438,8 +454,14 @@ func (w *Watcher) emit(filePath string, line []byte) {
 	select {
 	case w.events <- ev:
 	default:
+		w.droppedEvents.Add(1)
 		log.Printf("watcher event channel full, dropping line from %s", filePath)
 	}
+}
+
+// DroppedEvents returns the total number of events dropped due to a full channel.
+func (w *Watcher) DroppedEvents() int64 {
+	return w.droppedEvents.Load()
 }
 
 // labelForPath returns the label for the base path that contains filePath.
