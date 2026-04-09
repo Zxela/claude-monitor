@@ -409,7 +409,9 @@ func (p *Pipeline) loadMeta(ev watcher.Event) {
 	metaPath := strings.TrimSuffix(ev.FilePath, ".jsonl") + ".meta.json"
 	if data, err := os.ReadFile(metaPath); err == nil {
 		var meta agentMeta
-		if json.Unmarshal(data, &meta) == nil {
+		if err := json.Unmarshal(data, &meta); err != nil {
+			log.Printf("debug: unmarshal meta.json (session=%s, path=%s): %v", ev.SessionID, metaPath, err)
+		} else {
 			p.metaCache[ev.SessionID] = &meta
 		}
 	}

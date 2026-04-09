@@ -4,6 +4,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -275,7 +276,9 @@ func ParseLine(line []byte) (*Event, error) {
 	// Tool result metadata from toolUseResult (on user/tool_result lines).
 	if len(raw.ToolUseResult) > 0 {
 		var tr rawToolResult
-		if json.Unmarshal(raw.ToolUseResult, &tr) == nil {
+		if err := json.Unmarshal(raw.ToolUseResult, &tr); err != nil {
+			log.Printf("debug: unmarshal toolUseResult (uuid=%s): %v", raw.UUID, err)
+		} else {
 			msg.DurationMs = tr.DurationMs
 			if tr.Success != nil {
 				msg.Success = tr.Success
@@ -387,6 +390,7 @@ func extractContent(raw json.RawMessage) contentInfo {
 	// Try array of content blocks.
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
+		log.Printf("debug: unmarshal content blocks: %v (prefix: %.80s)", err, raw)
 		return contentInfo{}
 	}
 
@@ -425,7 +429,9 @@ func extractContent(raw json.RawMessage) contentInfo {
 			// Extract tool input detail.
 			if len(b.Input) > 0 {
 				var inp map[string]interface{}
-				if json.Unmarshal(b.Input, &inp) == nil {
+				if err := json.Unmarshal(b.Input, &inp); err != nil {
+					log.Printf("debug: unmarshal tool input (tool=%s): %v", b.Name, err)
+				} else {
 					switch b.Name {
 					case "Agent":
 						desc, _ := inp["description"].(string)
@@ -511,16 +517,17 @@ func extractToolResultContent(raw json.RawMessage) string {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal(raw, &blocks); err == nil {
-		var parts []string
-		for _, b := range blocks {
-			if b.Text != "" {
-				parts = append(parts, b.Text)
-			}
-		}
-		return strings.Join(parts, " ")
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		log.Printf("debug: unmarshal tool result content: %v (prefix: %.80s)", err, raw)
+		return ""
 	}
-	return ""
+	var parts []string
+	for _, b := range blocks {
+		if b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // truncate returns at most n runes from s (valid UTF-8 boundary aware).
