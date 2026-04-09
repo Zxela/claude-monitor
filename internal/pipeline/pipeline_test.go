@@ -298,6 +298,17 @@ func TestProcess_RebuildDedupFromDB(t *testing.T) {
 	}
 }
 
+// populateMetaCacheForTest fills the meta cache with n synthetic entries for testing.
+func (p *Pipeline) populateMetaCacheForTest(n int) {
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("sess-%d", i)
+		p.metaCache[id] = &agentMeta{Name: id}
+		p.metaOrder = append(p.metaOrder, id)
+	}
+}
+
 func TestLoadMeta_EvictsOldestHalf(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
@@ -307,11 +318,7 @@ func TestLoadMeta_EvictsOldestHalf(t *testing.T) {
 	defer p.Stop()
 
 	// Pre-populate cache with 501 entries (exceeds maxMetaCache=500).
-	for i := 0; i < 501; i++ {
-		id := fmt.Sprintf("sess-%d", i)
-		p.metaCache[id] = &agentMeta{Name: id}
-		p.metaOrder = append(p.metaOrder, id)
-	}
+	p.populateMetaCacheForTest(501)
 
 	if len(p.metaCache) != 501 {
 		t.Fatalf("setup: expected 501 entries, got %d", len(p.metaCache))
