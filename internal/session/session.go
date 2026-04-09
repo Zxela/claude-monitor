@@ -2,6 +2,8 @@
 package session
 
 import (
+	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -54,6 +56,7 @@ type Session struct {
 	TaskDescription string          `json:"taskDescription"`
 	Version        string           `json:"version,omitempty"`
 	Entrypoint     string           `json:"entrypoint,omitempty"`
+	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
@@ -89,7 +92,14 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 
 	// Prevent unbounded growth of the deduplication maps.
 	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
-		sess.SeenMessageIDs = make(map[string]bool)
+		log.Printf("session %s: dedup map exceeded %d entries, clearing non-error entries", sess.ID, maxSeenMessageIDs)
+		preserved := make(map[string]bool)
+		for k, v := range sess.SeenMessageIDs {
+			if strings.HasPrefix(k, "err:") {
+				preserved[k] = v
+			}
+		}
+		sess.SeenMessageIDs = preserved
 	}
 	// Note: we do NOT cap SeenMessageCosts — clearing it would break the
 	// delta-based cost accumulation (cleared entries re-add full cost).

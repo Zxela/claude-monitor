@@ -47,6 +47,17 @@ export async function open(sid: string): Promise<void> {
 }
 
 export function close(): void {
+  // Clean up canvas event listeners to prevent accumulation
+  if (canvas) {
+    canvas.removeEventListener('mousedown', onMouseDown);
+    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('mouseup', onMouseUp);
+    canvas.removeEventListener('mouseleave', onMouseUp);
+    canvas.removeEventListener('wheel', onWheel);
+  }
+  canvas = null;
+  ctx = null;
+  tooltip = null;
   events = [];
   window.removeEventListener('resize', resizeCanvas);
 }

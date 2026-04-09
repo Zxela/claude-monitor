@@ -81,6 +81,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	// Stage 1: Parse
 	event, err := parser.ParseLine(ev.Line)
 	if err != nil {
+		if !ev.Bootstrap {
+			log.Printf("parse error (%s): %v (line prefix: %.120s)", ev.FilePath, err, ev.Line)
+		}
 		return
 	}
 
@@ -221,6 +224,15 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		s.Entrypoint = msg.Entrypoint
 	}
 
+	// Track which file is providing events for this session.
+	// Log when the source file changes (e.g. after compact or file rotation).
+	if s.SourceFile == "" {
+		s.SourceFile = ev.FilePath
+	} else if s.SourceFile != ev.FilePath {
+		log.Printf("session %s: source file changed from %s to %s", ev.SessionID, s.SourceFile, ev.FilePath)
+		s.SourceFile = ev.FilePath
+	}
+
 	// Session naming
 	if msg.Type == "custom-title" && msg.ContentText != "" {
 		s.SessionName = msg.ContentText
@@ -321,8 +333,16 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		s.LastActive = time.Now()
 	}
 
+	// On compact/summary, reset message-ID dedup (IDs change after compact)
+	// but preserve cost tracking to maintain running totals.
+	if msg.Type == "summary" {
+		s.SeenMessageIDs = make(map[string]bool)
+	}
+
 	// Status
-	if msg.StopReason == "end_turn" {
+	if msg.Type == "summary" {
+		s.Status = "thinking" // session stays active through compact
+	} else if msg.StopReason == "end_turn" {
 		s.Status = "waiting"
 	} else if msg.StopReason == "tool_use" {
 		s.Status = "tool_use"

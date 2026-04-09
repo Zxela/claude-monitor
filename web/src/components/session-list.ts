@@ -81,11 +81,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     }
   }
   if (changed.has('focusedSessionId')) {
-    listEl?.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach(card => {
-      card.classList.toggle('focused', card.dataset.sessionId === _state.focusedSessionId);
-    });
-    const focused = listEl?.querySelector<HTMLElement>('.focused');
-    if (focused) focused.scrollIntoView({ block: 'nearest' });
+    renderList();
   }
 }
 
@@ -299,7 +295,21 @@ function renderList(): void {
     listEl.appendChild(group);
   }
 
+  // Apply focused class to the focused session's card (must happen during render,
+  // not in a separate state change handler, since innerHTML clears previous classes).
+  if (state.focusedSessionId) {
+    listEl.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach(card => {
+      card.classList.toggle('focused', card.dataset.sessionId === state.focusedSessionId);
+    });
+  }
+
   listEl.scrollTop = scrollTop;
+
+  // Scroll focused element into view
+  if (state.focusedSessionId) {
+    const focused = listEl.querySelector<HTMLElement>('.focused');
+    if (focused) focused.scrollIntoView({ block: 'nearest' });
+  }
 
   // Scroll selected session into view
   if (state.selectedSessionId) {

@@ -104,7 +104,8 @@ document.addEventListener('keydown', (e) => {
       const ids = getVisibleSessionIds();
       if (ids.length === 0) break;
       const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : -1;
-      const next = ids[Math.min(idx + 1, ids.length - 1)];
+      // If focused session not in visible list, start from the top
+      const next = idx === -1 ? ids[0] : ids[Math.min(idx + 1, ids.length - 1)];
       update({ focusedSessionId: next });
       break;
     }
@@ -112,8 +113,9 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       const ids = getVisibleSessionIds();
       if (ids.length === 0) break;
-      const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : ids.length;
-      const prev = ids[Math.max(idx - 1, 0)];
+      const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : -1;
+      // If focused session not in visible list, start from the bottom
+      const prev = idx === -1 ? ids[ids.length - 1] : ids[Math.max(idx - 1, 0)];
       update({ focusedSessionId: prev });
       break;
     }
