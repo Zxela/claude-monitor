@@ -295,7 +295,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     );
 
     if (merged.length === 0) {
-      feedContent.innerHTML = '<div class="feed-empty">No events match the current filters</div>';
+      feedContent.innerHTML = '<div class="feed-empty">No events in this session yet</div>';
       return;
     }
 
