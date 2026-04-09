@@ -30,7 +30,11 @@ var (
 	homeDirErr  error
 )
 
-const pollInterval = 5 * time.Second
+const (
+	pollInterval       = 5 * time.Second
+	activePollInterval = 500 * time.Millisecond
+	activeWindow       = 30 * time.Second // how long after last emit a file is considered "active"
+)
 
 // defaultBasePaths are the well-known locations Claude Code writes session files.
 var defaultBasePaths = []string{
@@ -55,9 +59,10 @@ type Event struct {
 
 // fileState tracks our read position within a single JSONL file.
 type fileState struct {
-	path    string
-	offset  int64
-	partial []byte // incomplete line carried across reads
+	path     string
+	offset   int64
+	partial  []byte    // incomplete line carried across reads
+	lastEmit time.Time // last time an event was emitted for this file
 }
 
 // Watcher monitors JSONL files and emits Events for each new line.
@@ -225,6 +230,9 @@ func (w *Watcher) run(ctx context.Context) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	activeTicker := time.NewTicker(activePollInterval)
+	defer activeTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -252,6 +260,17 @@ func (w *Watcher) run(ctx context.Context) {
 				return
 			}
 			log.Printf("watcher fsnotify error: %v", err)
+
+		case <-activeTicker.C:
+			// Fast re-read for recently active session files.
+			w.mu.Lock()
+			now := time.Now()
+			for _, state := range w.states {
+				if now.Sub(state.lastEmit) < activeWindow {
+					w.readNewLines(state.path)
+				}
+			}
+			w.mu.Unlock()
 
 		case <-ticker.C:
 			// Poll for newly created JSONL files.
@@ -444,6 +463,12 @@ func (w *Watcher) emit(filePath string, line []byte) {
 		Line:       append([]byte(nil), line...), // copy
 		Label:      label,
 		Bootstrap:  w.bootstrapping,
+	}
+
+	if !w.bootstrapping {
+		if state, ok := w.states[filePath]; ok {
+			state.lastEmit = time.Now()
+		}
 	}
 
 	if w.bootstrapping && w.bootstrapCB != nil {
