@@ -2,9 +2,10 @@
 package store
 
 import (
-	"compress/gzip"
 	"bytes"
+	"compress/gzip"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -31,7 +32,9 @@ const eventSelectCols = `e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.mes
 	e.duration_ms, e.success, COALESCE(e.stderr,''), e.interrupted, e.truncated,
 	e.agent_duration_ms, e.agent_tokens, e.agent_tool_use_count, COALESCE(e.agent_type,''),
 	COALESCE(e.subtype,''), e.turn_message_count, e.hook_count, COALESCE(e.hook_infos,''), COALESCE(e.level,''),
-	e.is_meta, COALESCE(e.version,''), COALESCE(e.entrypoint,'')`
+	e.is_meta, COALESCE(e.version,''), COALESCE(e.entrypoint,''),
+	COALESCE(e.tool_use_ids,''), COALESCE(e.cwd,''), COALESCE(e.git_branch,''),
+	e.is_sidechain, COALESCE(e.agent_name,''), COALESCE(e.team_name,'')`
 
 // sessionSelectCols is the column list used by all session SELECT queries.
 // Must match the scan order in scanSessionRows().
@@ -157,6 +160,13 @@ type EventRow struct {
 	IsMeta            bool    `json:"isMeta,omitempty"`
 	Version           string  `json:"version,omitempty"`
 	Entrypoint        string  `json:"entrypoint,omitempty"`
+	// Per-event metadata (migration 010)
+	ToolUseIDs  string `json:"toolUseIds,omitempty"`
+	CWD         string `json:"cwd,omitempty"`
+	GitBranch   string `json:"gitBranch,omitempty"`
+	IsSidechain bool   `json:"isSidechain,omitempty"`
+	AgentName   string `json:"agentName,omitempty"`
+	TeamName    string `json:"teamName,omitempty"`
 }
 
 // AggregateResult holds aggregate statistics across sessions.
@@ -781,9 +791,11 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 duration_ms, success, stderr, interrupted, truncated,
 		 agent_duration_ms, agent_tokens, agent_tool_use_count, agent_type,
 		 subtype, turn_message_count, hook_count, hook_infos, level,
-		 is_meta, version, entrypoint)
+		 is_meta, version, entrypoint,
+		 tool_use_ids, cwd, git_branch, is_sidechain, agent_name, team_name)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		        ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, COALESCE(message_id, uuid)) DO UPDATE SET
 		 content_preview=excluded.content_preview,
 		 cost_usd=excluded.cost_usd,
@@ -810,7 +822,13 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 level=excluded.level,
 		 is_meta=excluded.is_meta,
 		 version=excluded.version,
-		 entrypoint=excluded.entrypoint`)
+		 entrypoint=excluded.entrypoint,
+		 tool_use_ids=excluded.tool_use_ids,
+		 cwd=excluded.cwd,
+		 git_branch=excluded.git_branch,
+		 is_sidechain=excluded.is_sidechain,
+		 agent_name=excluded.agent_name,
+		 team_name=excluded.team_name`)
 	if err != nil {
 		return fmt.Errorf("prepare event stmt: %w", err)
 	}
@@ -845,6 +863,13 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			messageID = &ev.MessageID
 		}
 
+		var toolUseIDsJSON string
+		if len(ev.ToolUseIDs) > 0 {
+			if b, err := json.Marshal(ev.ToolUseIDs); err == nil {
+				toolUseIDsJSON = string(b)
+			}
+		}
+
 		result, err := eventStmt.Exec(
 			ei.SessionID, ev.UUID, messageID, ev.Type, ev.Role,
 			ev.ContentText, ev.ToolName, ev.ToolDetail,
@@ -858,6 +883,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			ev.AgentDurationMs, ev.AgentTokens, ev.AgentToolUseCount, ev.AgentType,
 			ev.Subtype, ev.TurnMessageCount, ev.HookCount, ev.HookInfos, ev.Level,
 			ev.IsMeta, ev.Version, ev.Entrypoint,
+			toolUseIDsJSON, ev.CWD, ev.GitBranch, ev.IsSidechain, ev.AgentName, ev.TeamName,
 		)
 		if err != nil {
 			return fmt.Errorf("insert event: %w", err)
@@ -979,6 +1005,7 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 			&agentDurationMs, &agentTokens, &agentToolUseCount, &r.AgentType,
 			&r.Subtype, &turnMessageCount, &hookCount, &r.HookInfos, &r.Level,
 			&r.IsMeta, &r.Version, &r.Entrypoint,
+			&r.ToolUseIDs, &r.CWD, &r.GitBranch, &r.IsSidechain, &r.AgentName, &r.TeamName,
 			&fullContent,
 		); err != nil {
 			return result, err

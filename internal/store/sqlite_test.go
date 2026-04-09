@@ -385,6 +385,63 @@ func TestListRecentEvents(t *testing.T) {
 	}
 }
 
+func TestPersistBatch_EventMetadataRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	db.SaveSession(&session.Session{
+		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
+	})
+
+	batch := &EventBatch{Events: []EventInsert{{
+		SessionID: "s1",
+		Event: &parser.Event{
+			Type:        "assistant",
+			ContentText: "working on feature",
+			Timestamp:   time.Now(),
+			UUID:        "uuid-meta-001",
+			ToolUseIDs:  []string{"tu-1", "tu-2", "tu-3"},
+			CWD:         "/home/user/project",
+			GitBranch:   "feature/new-thing",
+			IsSidechain: true,
+			AgentName:   "code-reviewer",
+			TeamName:    "engineering",
+		},
+	}}}
+
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
+
+	events, err := db.ListEvents("s1", 100, 0)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+
+	ev := events[0]
+	if ev.ToolUseIDs != `["tu-1","tu-2","tu-3"]` {
+		t.Errorf("ToolUseIDs: got %q, want %q", ev.ToolUseIDs, `["tu-1","tu-2","tu-3"]`)
+	}
+	if ev.CWD != "/home/user/project" {
+		t.Errorf("CWD: got %q, want %q", ev.CWD, "/home/user/project")
+	}
+	if ev.GitBranch != "feature/new-thing" {
+		t.Errorf("GitBranch: got %q, want %q", ev.GitBranch, "feature/new-thing")
+	}
+	if !ev.IsSidechain {
+		t.Error("IsSidechain: got false, want true")
+	}
+	if ev.AgentName != "code-reviewer" {
+		t.Errorf("AgentName: got %q, want %q", ev.AgentName, "code-reviewer")
+	}
+	if ev.TeamName != "engineering" {
+		t.Errorf("TeamName: got %q, want %q", ev.TeamName, "engineering")
+	}
+}
+
 // --- Trend test helpers ---
 
 func insertTestSession(t *testing.T, db *DB, id string, startedAt time.Time, cost float64, input, output, cacheRead, cacheCreate int64) {
