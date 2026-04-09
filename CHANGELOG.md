@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/Zxela/claude-monitor/compare/v3.0.0...v3.0.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* Phase 5 — UI polish, feed layout, graceful shutdown, percentile sort ([#139](https://github.com/Zxela/claude-monitor/issues/139)) ([f7293cc](https://github.com/Zxela/claude-monitor/commit/f7293ccb6bf7a3e3615a9ebefd4415af56175b3d))
+
 ## [3.0.0](https://github.com/Zxela/claude-monitor/compare/v2.2.0...v3.0.0) (2026-04-09)
 
 
