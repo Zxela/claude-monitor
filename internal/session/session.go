@@ -44,9 +44,9 @@ type Session struct {
 	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt      time.Time        `json:"startedAt"`
 	Status         string           `json:"status"` // idle, thinking, tool_use, waiting
-	SeenMessageIDs   map[string]bool          `json:"-"` // tracks message IDs to deduplicate streaming chunks
-	SeenMessageCosts map[string]MessageCosts  `json:"-"` // tracks per-message cost/tokens for dedup
-	SeenMessageOrder []string                 `json:"-"` // insertion order for LRU eviction
+	seenMessageIDs   map[string]bool          `json:"-"` // tracks message IDs to deduplicate streaming chunks
+	seenMessageCosts map[string]MessageCosts  `json:"-"` // tracks per-message cost/tokens for dedup
+	seenMessageOrder []string                 `json:"-"` // insertion order for LRU eviction
 	ParentID       string           `json:"parentId,omitempty"`
 	Children       []string         `json:"children,omitempty"`
 	CWD            string           `json:"cwd,omitempty"`
@@ -58,6 +58,60 @@ type Session struct {
 	Version        string           `json:"version,omitempty"`
 	Entrypoint     string           `json:"entrypoint,omitempty"`
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
+}
+
+// HasSeenMessageID reports whether the given key has been recorded.
+func (s *Session) HasSeenMessageID(key string) bool {
+	return s.seenMessageIDs[key]
+}
+
+// MarkMessageIDSeen records a message-ID key and appends it to the insertion-order list.
+func (s *Session) MarkMessageIDSeen(key string) {
+	if s.seenMessageIDs == nil {
+		s.seenMessageIDs = make(map[string]bool)
+	}
+	s.seenMessageIDs[key] = true
+	s.seenMessageOrder = append(s.seenMessageOrder, key)
+}
+
+// GetMessageCosts returns the previously recorded cost entry for a message ID.
+// If no entry exists, the zero value is returned.
+func (s *Session) GetMessageCosts(msgID string) MessageCosts {
+	if s.seenMessageCosts == nil {
+		return MessageCosts{}
+	}
+	return s.seenMessageCosts[msgID]
+}
+
+// SetMessageCosts stores the cost/token snapshot for a message ID.
+func (s *Session) SetMessageCosts(msgID string, mc MessageCosts) {
+	if s.seenMessageCosts == nil {
+		s.seenMessageCosts = make(map[string]MessageCosts)
+	}
+	s.seenMessageCosts[msgID] = mc
+}
+
+// AppendSeenOrder appends a key to the insertion-order list without marking it as seen.
+// Use MarkMessageIDSeen when you also need to record the ID in the dedup map.
+func (s *Session) AppendSeenOrder(key string) {
+	s.seenMessageOrder = append(s.seenMessageOrder, key)
+}
+
+// SeenOrderLen returns the length of the insertion-order list.
+func (s *Session) SeenOrderLen() int {
+	return len(s.seenMessageOrder)
+}
+
+// ResetMessageIDs clears the dedup map and insertion-order list (e.g. on compact/summary).
+func (s *Session) ResetMessageIDs() {
+	s.seenMessageIDs = make(map[string]bool)
+	s.seenMessageOrder = nil
+}
+
+// SetDedupState bulk-sets the dedup maps, used when restoring state from the database.
+func (s *Session) SetDedupState(ids map[string]bool, costs map[string]MessageCosts) {
+	s.seenMessageIDs = ids
+	s.seenMessageCosts = costs
 }
 
 // Store is a thread-safe registry of sessions keyed by session ID.
@@ -93,28 +147,28 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 
 	// Prevent unbounded growth of the deduplication maps.
 	// Evict the oldest half of non-error entries instead of clearing everything.
-	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
-		half := len(sess.SeenMessageOrder) / 2
+	if len(sess.seenMessageIDs) > maxSeenMessageIDs {
+		half := len(sess.seenMessageOrder) / 2
 		evicted := 0
 		for i := 0; i < half; i++ {
-			key := sess.SeenMessageOrder[i]
+			key := sess.seenMessageOrder[i]
 			if strings.HasPrefix(key, "err:") {
 				continue // keep error entries
 			}
-			delete(sess.SeenMessageIDs, key)
+			delete(sess.seenMessageIDs, key)
 			evicted++
 		}
 		// Rebuild order with surviving entries only.
-		surviving := make([]string, 0, len(sess.SeenMessageOrder)-evicted)
-		for _, key := range sess.SeenMessageOrder {
-			if sess.SeenMessageIDs[key] {
+		surviving := make([]string, 0, len(sess.seenMessageOrder)-evicted)
+		for _, key := range sess.seenMessageOrder {
+			if sess.seenMessageIDs[key] {
 				surviving = append(surviving, key)
 			}
 		}
-		sess.SeenMessageOrder = surviving
+		sess.seenMessageOrder = surviving
 		log.Printf("session %s: dedup map exceeded %d entries, evicted oldest %d", sess.ID, maxSeenMessageIDs, evicted)
 	}
-	// Note: we do NOT cap SeenMessageCosts — clearing it would break the
+	// Note: we do NOT cap seenMessageCosts — clearing it would break the
 	// delta-based cost accumulation (cleared entries re-add full cost).
 	// 10k entries ≈ 500KB, acceptable for correctness.
 
@@ -150,9 +204,9 @@ func (s *Store) All() []*Session {
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		cp := *sess
-		cp.SeenMessageIDs = nil    // don't share internal dedup map
-		cp.SeenMessageCosts = nil  // don't share internal dedup map
-		cp.SeenMessageOrder = nil  // don't share internal dedup slice
+		cp.seenMessageIDs = nil    // don't share internal dedup map
+		cp.seenMessageCosts = nil  // don't share internal dedup map
+		cp.seenMessageOrder = nil  // don't share internal dedup slice
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
 		if cp.ParentID != "" && cp.Status == "waiting" {
@@ -208,9 +262,9 @@ func (s *Store) Get(id string) (*Session, bool) {
 		return nil, false
 	}
 	cp := *sess
-	cp.SeenMessageIDs = nil
-	cp.SeenMessageCosts = nil
-	cp.SeenMessageOrder = nil
+	cp.seenMessageIDs = nil
+	cp.seenMessageCosts = nil
+	cp.seenMessageOrder = nil
 	return &cp, true
 }
 

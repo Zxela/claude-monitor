@@ -95,7 +95,11 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	// Stage 2: Resolve Repo
 	var resolvedRepo *repo.Repo
 	if event.CWD != "" {
-		resolvedRepo, _ = p.resolver.Resolve(event.CWD, ev.Label)
+		var resolveErr error
+		resolvedRepo, resolveErr = p.resolver.Resolve(event.CWD, ev.Label)
+		if resolveErr != nil {
+			log.Printf("debug: repo resolve (%s): %v", event.CWD, resolveErr)
+		}
 	}
 
 	// Pre-read subagent meta.json (only for new sessions).
@@ -110,8 +114,7 @@ func (p *Pipeline) Process(ev watcher.Event) {
 			// Also restore session aggregates so totals aren't reset to zero.
 			dbSess, _ := p.db.GetSession(ev.SessionID)
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
-				s.SeenMessageIDs = ids
-				s.SeenMessageCosts = costs
+				s.SetDedupState(ids, costs)
 				if dbSess != nil {
 					s.TotalCost = dbSess.TotalCost
 					s.InputTokens = dbSess.InputTokens
@@ -225,10 +228,19 @@ func (p *Pipeline) flushLoop() {
 }
 
 // applyEvent updates session state from a parsed event.
+// It delegates to focused helpers for each concern.
 func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo) {
+	p.applyRepoResolution(s, msg, r)
+	p.applySessionMeta(s, msg, ev)
+	p.applyParentDetection(s, msg, ev)
+	p.applyCostDedup(s, msg)
+	p.applyStatusUpdate(s, msg, ev)
+}
+
+// applyRepoResolution persists the resolved repo and copies CWD/branch/model metadata.
+func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo) {
 	if r != nil && s.RepoID == "" {
 		s.RepoID = r.ID
-		// Persist the repo record
 		if err := p.db.UpsertRepo(r); err != nil {
 			log.Printf("upsert repo error: %v", err)
 		}
@@ -249,9 +261,11 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 	if msg.Entrypoint != "" && s.Entrypoint == "" {
 		s.Entrypoint = msg.Entrypoint
 	}
+}
 
+// applySessionMeta updates session naming, source file tracking, and task description.
+func (p *Pipeline) applySessionMeta(s *session.Session, msg *parser.Event, ev watcher.Event) {
 	// Track which file is providing events for this session.
-	// Log when the source file changes (e.g. after compact or file rotation).
 	if s.SourceFile == "" {
 		s.SourceFile = ev.FilePath
 	} else if s.SourceFile != ev.FilePath {
@@ -266,7 +280,31 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		s.SessionName = msg.ContentText
 	}
 
-	// Parent detection (subagents)
+	// Task description from first user message
+	if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" {
+		desc := msg.ContentText
+		if len([]rune(desc)) > 200 {
+			desc = string([]rune(desc)[:200])
+		}
+		s.TaskDescription = desc
+
+		// Fallback name for subagents without meta.json
+		if s.ParentID != "" && s.SessionName == "" {
+			aid := s.ID
+			if strings.HasPrefix(aid, "agent-") {
+				aid = aid[6:]
+			}
+			if len(aid) > 8 {
+				aid = aid[:8]
+			}
+			s.SessionName = "agent " + aid
+		}
+	}
+}
+
+// applyParentDetection sets ParentID for subagents and team agents.
+func (p *Pipeline) applyParentDetection(s *session.Session, msg *parser.Event, ev watcher.Event) {
+	// Subagent detection via sidechain/parentUUID
 	if msg.IsSidechain || msg.ParentUUID != "" {
 		if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
 			if s.ParentID == "" {
@@ -296,16 +334,15 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 			}
 		}
 	}
+}
 
+// applyCostDedup handles error tracking, cost/token dedup, and message counting.
+func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
 	// Error tracking
 	if msg.IsError && msg.MessageID != "" {
-		if s.SeenMessageIDs == nil {
-			s.SeenMessageIDs = make(map[string]bool)
-		}
 		errKey := "err:" + msg.MessageID
-		if !s.SeenMessageIDs[errKey] {
-			s.SeenMessageIDs[errKey] = true
-			s.SeenMessageOrder = append(s.SeenMessageOrder, errKey)
+		if !s.HasSeenMessageID(errKey) {
+			s.MarkMessageIDSeen(errKey)
 			s.ErrorCount++
 		}
 	} else if msg.IsError {
@@ -314,33 +351,26 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 
 	// Cost/token dedup
 	if msg.MessageID != "" && (msg.CostUSD > 0 || msg.InputTokens > 0 || msg.OutputTokens > 0) {
-		if s.SeenMessageCosts == nil {
-			s.SeenMessageCosts = make(map[string]session.MessageCosts)
-		}
-		prev := s.SeenMessageCosts[msg.MessageID]
+		prev := s.GetMessageCosts(msg.MessageID)
 		s.TotalCost += msg.CostUSD - prev.CostUSD
 		s.InputTokens += msg.InputTokens - prev.InputTokens
 		s.OutputTokens += msg.OutputTokens - prev.OutputTokens
 		s.CacheReadTokens += msg.CacheReadTokens - prev.CacheReadTokens
 		s.CacheCreationTokens += msg.CacheCreationTokens - prev.CacheCreationTokens
-		s.SeenMessageCosts[msg.MessageID] = session.MessageCosts{
+		s.SetMessageCosts(msg.MessageID, session.MessageCosts{
 			CostUSD:             msg.CostUSD,
 			InputTokens:         msg.InputTokens,
 			OutputTokens:        msg.OutputTokens,
 			CacheReadTokens:     msg.CacheReadTokens,
 			CacheCreationTokens: msg.CacheCreationTokens,
-		}
+		})
 	}
 
 	// Message count (conversation turns only)
 	if msg.IsConversationTurn() {
-		if s.SeenMessageIDs == nil {
-			s.SeenMessageIDs = make(map[string]bool)
-		}
 		if msg.MessageID != "" {
-			if !s.SeenMessageIDs[msg.MessageID] {
-				s.SeenMessageIDs[msg.MessageID] = true
-				s.SeenMessageOrder = append(s.SeenMessageOrder, msg.MessageID)
+			if !s.HasSeenMessageID(msg.MessageID) {
+				s.MarkMessageIDSeen(msg.MessageID)
 				s.MessageCount++
 			}
 		} else {
@@ -350,7 +380,10 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 
 	// Event count (all JSONL lines)
 	s.EventCount++
+}
 
+// applyStatusUpdate updates timestamps, handles summary resets, and sets session status.
+func (p *Pipeline) applyStatusUpdate(s *session.Session, msg *parser.Event, ev watcher.Event) {
 	// Timestamps
 	if !msg.Timestamp.IsZero() {
 		s.LastActive = msg.Timestamp
@@ -364,8 +397,7 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 	// On compact/summary, reset message-ID dedup (IDs change after compact)
 	// but preserve cost tracking to maintain running totals.
 	if msg.Type == "summary" {
-		s.SeenMessageIDs = make(map[string]bool)
-		s.SeenMessageOrder = nil
+		s.ResetMessageIDs()
 	}
 
 	// Status
@@ -381,27 +413,6 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		s.Status = "thinking"
 	} else if msg.Role == "user" {
 		s.Status = "thinking"
-	}
-
-	// Task description from first user message
-	if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" {
-		desc := msg.ContentText
-		if len([]rune(desc)) > 200 {
-			desc = string([]rune(desc)[:200])
-		}
-		s.TaskDescription = desc
-
-		// Fallback name for subagents without meta.json
-		if s.ParentID != "" && s.SessionName == "" {
-			aid := s.ID
-			if strings.HasPrefix(aid, "agent-") {
-				aid = aid[6:]
-			}
-			if len(aid) > 8 {
-				aid = aid[:8]
-			}
-			s.SessionName = "agent " + aid
-		}
 	}
 }
 

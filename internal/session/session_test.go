@@ -205,22 +205,19 @@ func TestMessageCosts_DedupStreamingChunks(t *testing.T) {
 
 	for _, c := range chunks {
 		s.Upsert("dedup-session", func(sess *Session) {
-			if sess.SeenMessageCosts == nil {
-				sess.SeenMessageCosts = make(map[string]MessageCosts)
-			}
-			prev := sess.SeenMessageCosts[c.msgID]
+			prev := sess.GetMessageCosts(c.msgID)
 			sess.TotalCost += c.cost - prev.CostUSD
 			sess.InputTokens += c.input - prev.InputTokens
 			sess.OutputTokens += c.output - prev.OutputTokens
 			sess.CacheReadTokens += c.cacheRead - prev.CacheReadTokens
 			sess.CacheCreationTokens += c.cacheCreate - prev.CacheCreationTokens
-			sess.SeenMessageCosts[c.msgID] = MessageCosts{
+			sess.SetMessageCosts(c.msgID, MessageCosts{
 				CostUSD:             c.cost,
 				InputTokens:         c.input,
 				OutputTokens:        c.output,
 				CacheReadTokens:     c.cacheRead,
 				CacheCreationTokens: c.cacheCreate,
-			}
+			})
 		})
 	}
 
@@ -264,16 +261,13 @@ func TestMessageCosts_MultipleMessages(t *testing.T) {
 
 	for _, m := range messages {
 		s.Upsert("multi-msg-session", func(sess *Session) {
-			if sess.SeenMessageCosts == nil {
-				sess.SeenMessageCosts = make(map[string]MessageCosts)
-			}
-			prev := sess.SeenMessageCosts[m.msgID]
+			prev := sess.GetMessageCosts(m.msgID)
 			sess.TotalCost += m.cost - prev.CostUSD
 			sess.OutputTokens += m.output - prev.OutputTokens
-			sess.SeenMessageCosts[m.msgID] = MessageCosts{
+			sess.SetMessageCosts(m.msgID, MessageCosts{
 				CostUSD:      m.cost,
 				OutputTokens: m.output,
-			}
+			})
 		})
 	}
 
@@ -298,23 +292,19 @@ func TestLRUEviction_EvictsOldestHalf(t *testing.T) {
 
 	// Seed with >10k message IDs plus a few error entries.
 	s.Upsert("lru-session", func(sess *Session) {
-		sess.SeenMessageIDs = make(map[string]bool)
 		// Add 50 error entries first.
 		for i := 0; i < 50; i++ {
 			key := fmt.Sprintf("err:e%d", i)
-			sess.SeenMessageIDs[key] = true
-			sess.SeenMessageOrder = append(sess.SeenMessageOrder, key)
+			sess.MarkMessageIDSeen(key)
 		}
 		// Add 10001 normal entries (enough to exceed the cap after the update returns).
 		for i := 0; i < 10001; i++ {
 			key := fmt.Sprintf("msg-%d", i)
-			sess.SeenMessageIDs[key] = true
-			sess.SeenMessageOrder = append(sess.SeenMessageOrder, key)
+			sess.MarkMessageIDSeen(key)
 		}
-		// Also set up SeenMessageCosts to verify they are not touched.
-		sess.SeenMessageCosts = make(map[string]MessageCosts)
-		sess.SeenMessageCosts["cost-1"] = MessageCosts{CostUSD: 0.01}
-		sess.SeenMessageCosts["cost-2"] = MessageCosts{CostUSD: 0.02}
+		// Also set up seenMessageCosts to verify they are not touched.
+		sess.SetMessageCosts("cost-1", MessageCosts{CostUSD: 0.01})
+		sess.SetMessageCosts("cost-2", MessageCosts{CostUSD: 0.02})
 	})
 
 	// Retrieve the internal session (via another Upsert that does nothing)
@@ -324,14 +314,14 @@ func TestLRUEviction_EvictsOldestHalf(t *testing.T) {
 	var errSurvived int
 	var costEntries int
 	s.Upsert("lru-session", func(sess *Session) {
-		afterIDs = len(sess.SeenMessageIDs)
-		afterOrder = len(sess.SeenMessageOrder)
-		for k := range sess.SeenMessageIDs {
+		afterIDs = len(sess.seenMessageIDs)
+		afterOrder = sess.SeenOrderLen()
+		for k := range sess.seenMessageIDs {
 			if strings.HasPrefix(k, "err:") {
 				errSurvived++
 			}
 		}
-		costEntries = len(sess.SeenMessageCosts)
+		costEntries = len(sess.seenMessageCosts)
 	})
 
 	// Total was 10051 entries. Oldest half of order = 10051/2 = 5025 entries.
@@ -339,7 +329,7 @@ func TestLRUEviction_EvictsOldestHalf(t *testing.T) {
 	// Remaining: 10051 - 4975 = 5076 entries in the map.
 	if afterIDs > maxSeenMessageIDs {
 		// Eviction should have reduced the map size.
-		t.Errorf("SeenMessageIDs still exceeds cap: got %d, want <= %d", afterIDs, maxSeenMessageIDs)
+		t.Errorf("seenMessageIDs still exceeds cap: got %d, want <= %d", afterIDs, maxSeenMessageIDs)
 	}
 
 	// All 50 error entries must survive.
@@ -347,14 +337,14 @@ func TestLRUEviction_EvictsOldestHalf(t *testing.T) {
 		t.Errorf("error entries survived: got %d, want 50", errSurvived)
 	}
 
-	// SeenMessageOrder should be consistent with SeenMessageIDs.
+	// seenMessageOrder should be consistent with seenMessageIDs.
 	if afterOrder != afterIDs {
-		t.Errorf("SeenMessageOrder length (%d) != SeenMessageIDs length (%d)", afterOrder, afterIDs)
+		t.Errorf("seenMessageOrder length (%d) != seenMessageIDs length (%d)", afterOrder, afterIDs)
 	}
 
-	// SeenMessageCosts must not be touched.
+	// seenMessageCosts must not be touched.
 	if costEntries != 2 {
-		t.Errorf("SeenMessageCosts entries: got %d, want 2", costEntries)
+		t.Errorf("seenMessageCosts entries: got %d, want 2", costEntries)
 	}
 }
 
