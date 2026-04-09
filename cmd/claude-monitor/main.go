@@ -21,8 +21,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zxela-claude/claude-monitor/internal/autopsy"
 	"github.com/zxela-claude/claude-monitor/internal/docker"
 	"github.com/zxela-claude/claude-monitor/internal/hub"
+	"github.com/zxela-claude/claude-monitor/internal/mcp"
 	"github.com/zxela-claude/claude-monitor/internal/parser"
 	"github.com/zxela-claude/claude-monitor/internal/pipeline"
 	"github.com/zxela-claude/claude-monitor/internal/repo"
@@ -39,6 +41,14 @@ var version = "dev"
 
 // validContainerName matches safe Docker container names (alphanumeric, dash, underscore, dot).
 var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// shortID returns the first 8 characters of an ID for use in filenames.
+func shortID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
 
 // writeJSONError writes a JSON error response with the given message and status code.
 func writeJSONError(w http.ResponseWriter, msg string, code int) {
@@ -210,6 +220,28 @@ echo "claude-monitor started in background"
 	}
 }
 
+func handleMCP() {
+	// All logging goes to stderr — stdout is reserved for JSON-RPC.
+	log.SetOutput(os.Stderr)
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("cannot determine home directory: %v", err)
+	}
+	dbPath := filepath.Join(homeDir, ".claude-monitor", "history.db")
+
+	db, err := store.Open(dbPath)
+	if err != nil {
+		log.Fatalf("cannot open database: %v", err)
+	}
+	defer db.Close()
+
+	server := mcp.NewServer(db, version, os.Stdin, os.Stdout)
+	if err := server.Run(); err != nil {
+		log.Fatalf("mcp server error: %v", err)
+	}
+}
+
 // requireSession looks up a session by path parameter "id" and writes an HTTP
 // error if not found.
 func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
@@ -293,12 +325,17 @@ func main() {
 		handleHook(os.Args[2:])
 		return
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "mcp" {
+		handleMCP()
+		return
+	}
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `claude-monitor — real-time observability dashboard for Claude Code sessions.
 
 Usage:
   claude-monitor [flags]
+  claude-monitor mcp
   claude-monitor hook install
   claude-monitor migrate [status|rollback]
   claude-monitor --version
@@ -914,6 +951,54 @@ Examples:
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(events)
+	})
+
+	// Session autopsy — auto-generated markdown summary.
+	mux.HandleFunc("GET /api/sessions/{id}/autopsy", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+
+		// Get session from DB.
+		row, err := historyDB.GetSession(id)
+		if err != nil {
+			writeJSONError(w, "failed to get session", http.StatusInternalServerError)
+			return
+		}
+		if row == nil {
+			writeJSONError(w, "session not found", http.StatusNotFound)
+			return
+		}
+
+		// Get all events for the session.
+		events, err := historyDB.ListEvents(id, 10000, 0)
+		if err != nil {
+			writeJSONError(w, "failed to list events", http.StatusInternalServerError)
+			return
+		}
+
+		// Get child sessions (subagents).
+		children, err := historyDB.ListChildSessions(id)
+		if err != nil {
+			// Non-fatal: just proceed with no children.
+			children = nil
+		}
+
+		summary := autopsy.Generate(row, events, children)
+
+		// Return format based on ?format= query param.
+		format := r.URL.Query().Get("format")
+		if format == "" {
+			format = "json"
+		}
+
+		switch format {
+		case "md", "markdown":
+			w.Header().Set("Content-Type", "text/markdown")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"autopsy-%s.md\"", shortID(id)))
+			w.Write([]byte(autopsy.RenderMarkdown(summary)))
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(summary)
+		}
 	})
 
 	// Replay — returns events from DB for playback.

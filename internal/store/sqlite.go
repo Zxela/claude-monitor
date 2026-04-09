@@ -405,6 +405,17 @@ func (d *DB) ListSessionsByRepo(repoID string, limit, offset int) ([]SessionRow,
 	return scanSessionRows(rows)
 }
 
+// ListChildSessions returns all sessions whose parent_id matches the given session ID.
+func (d *DB) ListChildSessions(parentID string) ([]SessionRow, error) {
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+		FROM sessions WHERE parent_id = ? ORDER BY started_at`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
 // AggregateStatsByRepo returns aggregate statistics for a single repo.
 func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 	r := &AggregateResult{
@@ -487,6 +498,29 @@ func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 		result = append(result, r)
 	}
 	return result, rows.Err()
+}
+
+// ListMostExpensiveSessions returns sessions sorted by cost descending.
+// If since is non-zero, only sessions started on or after that time are included.
+func (d *DB) ListMostExpensiveSessions(since time.Time, limit int) ([]SessionRow, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	query := `SELECT ` + sessionSelectCols + ` FROM sessions`
+	var args []interface{}
+	if !since.IsZero() {
+		query += ` WHERE started_at >= ?`
+		args = append(args, since.Format(time.RFC3339))
+	}
+	query += ` ORDER BY total_cost DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
 }
 
 // AggregateStats returns aggregate statistics. Includes ALL sessions (no parent filter).
