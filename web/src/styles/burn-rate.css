@@ -7,7 +7,7 @@
   background: var(--bg-secondary, #16162a);
   border: 1px solid var(--border, #2a2a4a);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   font-family: monospace;
   font-size: 12px;
   color: var(--text-primary, #e0e0e0);
@@ -140,7 +140,7 @@
 .burn-rate-settings {
   padding: 0 16px 12px;
 }
-.burn-rate-settings input[type="number"] {
+.burn-rate-settings input[type='number'] {
   background: var(--bg-tertiary, #2a2a4a);
   border: 1px solid var(--border, #2a2a4a);
   border-radius: 4px;

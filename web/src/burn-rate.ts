@@ -24,7 +24,8 @@ function getActiveSessionTotals(): { costRate: number; tokenTotal: number; total
     if (sess.isActive) {
       costRate += sess.costRate;
     }
-    tokenTotal += sess.inputTokens + sess.cacheReadTokens + sess.cacheCreationTokens + sess.outputTokens;
+    tokenTotal +=
+      sess.inputTokens + sess.cacheReadTokens + sess.cacheCreationTokens + sess.outputTokens;
   }
   return { costRate, tokenTotal, totalCost };
 }

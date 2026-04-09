@@ -1,4 +1,12 @@
-import type { Session, GroupedSessions, Event, Stats, StorageInfo, RepoEntry, TrendResult } from './types';
+import type {
+  Session,
+  GroupedSessions,
+  Event,
+  Stats,
+  StorageInfo,
+  RepoEntry,
+  TrendResult,
+} from './types';
 
 const BASE = '';
 

@@ -6,7 +6,16 @@ export interface RenderOptions {
   showSessionId?: string;
 }
 
-type MessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'agent' | 'hook' | 'error' | 'command' | 'system';
+type MessageType =
+  | 'user'
+  | 'assistant'
+  | 'tool_use'
+  | 'tool_result'
+  | 'agent'
+  | 'hook'
+  | 'error'
+  | 'command'
+  | 'system';
 
 /** Strip MCP prefixes from tool names to get a readable short name.
  *  e.g. "mcp__plugin_playwright_playwright__browser_click" → "browser_click"
@@ -27,15 +36,24 @@ const COMMAND_CAVEAT_RE = /<local-command-caveat>[\s\S]*?<\/local-command-caveat
 export function detectType(msg: ParsedMessage): MessageType {
   if (msg.isError) return 'error';
   if (msg.hookEvent) return 'hook';
-  if (msg.role === 'user' && msg.contentPreview && COMMAND_RE.test(msg.contentPreview)) return 'command';
+  if (msg.role === 'user' && msg.contentPreview && COMMAND_RE.test(msg.contentPreview))
+    return 'command';
   // Caveat-only messages (preceding actual command) are also commands
-  if (msg.role === 'user' && msg.contentPreview && msg.contentPreview.includes('<local-command-caveat>') && !COMMAND_RE.test(msg.contentPreview)) return 'command';
+  if (
+    msg.role === 'user' &&
+    msg.contentPreview &&
+    msg.contentPreview.includes('<local-command-caveat>') &&
+    !COMMAND_RE.test(msg.contentPreview)
+  )
+    return 'command';
   // Agent tool calls show as 'agent' type, not 'tool_use'
   if (msg.isAgent && msg.role === 'assistant') return 'agent';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
   // Fallback: detect agent/tool_use from content preview when fields weren't persisted (streaming race)
-  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[agent')) return 'agent';
-  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[tool: ')) return 'tool_use';
+  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[agent'))
+    return 'agent';
+  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[tool: '))
+    return 'tool_use';
   if (msg.forToolUseId) return 'tool_result';
   if (msg.type === 'agent' || msg.type === 'agent-name') return 'agent';
   if (msg.role === 'user') return 'user';
@@ -46,7 +64,7 @@ export function detectType(msg: ParsedMessage): MessageType {
 /** Extract a clean display string from a command message's raw XML content. */
 function formatCommand(raw: string): string {
   // Strip the caveat boilerplate
-  let text = raw.replace(COMMAND_CAVEAT_RE, '').trim();
+  const text = raw.replace(COMMAND_CAVEAT_RE, '').trim();
   const nameMatch = text.match(COMMAND_RE);
   const msgMatch = text.match(COMMAND_MSG_RE);
   const name = nameMatch ? nameMatch[1].trim() : '';
@@ -104,9 +122,13 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     let agentBody = rawText;
     if (!agentLabel) {
       const m = rawText.match(/^\[agent(?::\s*([^\]]*))?\]\s*(.*)/);
-      if (m) { agentLabel = m[1]?.trim() || ''; agentBody = m[2]?.trim() || ''; }
+      if (m) {
+        agentLabel = m[1]?.trim() || '';
+        agentBody = m[2]?.trim() || '';
+      }
     }
-    const display = agentLabel && agentBody ? `${agentLabel}: ${agentBody}` : agentLabel || agentBody;
+    const display =
+      agentLabel && agentBody ? `${agentLabel}: ${agentBody}` : agentLabel || agentBody;
     content = display ? `Agent: ${truncate(display, 80)}` : 'Agent';
     contentClass = 'tool';
     fullContent = rawText || detail;
@@ -115,12 +137,16 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     let name = msg.toolName || '';
     if (!name) {
       const m = rawText.match(/^\[tool:\s*([^\]]+)\]/);
-      if (m) { name = m[1].trim(); rawText = rawText.replace(m[0], '').trim(); }
+      if (m) {
+        name = m[1].trim();
+        rawText = rawText.replace(m[0], '').trim();
+      }
     }
     const short = shortToolName(name);
     // Try to extract a readable summary from the JSON params
     const summary = extractToolSummary(name, fullText) || detail || rawText;
-    content = short && summary ? `${short}: ${truncate(summary, 90)}` : short || truncate(summary, 90);
+    content =
+      short && summary ? `${short}: ${truncate(summary, 90)}` : short || truncate(summary, 90);
     contentClass = 'tool';
     // Prefer full JSON input (from fullContent) for expand, fall back to detail/rawText
     fullContent = formatToolExpand(name, fullText) || detail || rawText;
@@ -154,12 +180,14 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   }
 
   const hasMore = fullContent.length > content.length;
-  const isAgentEntry = type === 'agent' && (msg.isAgent || msg.contentPreview?.startsWith('[agent'));
+  const isAgentEntry =
+    type === 'agent' && (msg.isAgent || msg.contentPreview?.startsWith('[agent'));
 
   // Build metadata badges (duration, interrupted, truncated)
   let badges = '';
   if (msg.durationMs != null && msg.durationMs > 0) {
-    const dur = msg.durationMs >= 1000 ? `${(msg.durationMs / 1000).toFixed(1)}s` : `${msg.durationMs}ms`;
+    const dur =
+      msg.durationMs >= 1000 ? `${(msg.durationMs / 1000).toFixed(1)}s` : `${msg.durationMs}ms`;
     badges += `<span class="fe-duration">${dur}</span>`;
   }
   if (msg.interrupted) badges += '<span class="fe-badge fe-interrupted">interrupted</span>';
@@ -169,10 +197,14 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     `<span class="fe-time">${time}</span>` +
     `<span class="fe-type ${type}">[${type}]</span>` +
     `<span class="fe-content ${contentClass}">${escapeHtml(content)}</span>` +
-    (hasMore ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>' : '') +
+    (hasMore
+      ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>'
+      : '') +
     (isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : '') +
     badges +
-    (opts.showSessionId ? `<span class="fe-sid" title="${escapeHtml(opts.showSessionId)}">${escapeHtml(opts.showSessionId.slice(0, 12))}</span>` : '');
+    (opts.showSessionId
+      ? `<span class="fe-sid" title="${escapeHtml(opts.showSessionId)}">${escapeHtml(opts.showSessionId.slice(0, 12))}</span>`
+      : '');
 
   if (hasMore) {
     let expanded = false;
@@ -244,7 +276,8 @@ function extractToolSummary(toolName: string, jsonStr: string): string {
     if (toolName === 'Bash' && obj.command) return `$ ${obj.command.slice(0, 100)}`;
     if ((toolName === 'Read' || toolName === 'Write') && obj.file_path) return obj.file_path;
     if (toolName === 'Edit' && obj.file_path) return obj.file_path;
-    if (toolName === 'Grep' && obj.pattern) return `/${obj.pattern}/${obj.path ? ' in ' + obj.path : ''}`;
+    if (toolName === 'Grep' && obj.pattern)
+      return `/${obj.pattern}/${obj.path ? ' in ' + obj.path : ''}`;
     if (toolName === 'Glob' && obj.pattern) return obj.pattern;
     if (toolName === 'Agent' && obj.description) return obj.description;
     if (toolName === 'Skill' && obj.skill) return obj.skill;
@@ -260,7 +293,7 @@ function extractToolSummary(toolName: string, jsonStr: string): string {
     if (obj.description) return obj.description;
     // If it's a simple object with 1-2 keys, show them compactly
     const keys = Object.keys(obj);
-    if (keys.length <= 2) return keys.map(k => `${k}: ${String(obj[k]).slice(0, 40)}`).join(', ');
+    if (keys.length <= 2) return keys.map((k) => `${k}: ${String(obj[k]).slice(0, 40)}`).join(', ');
     return '';
   } catch {
     return '';

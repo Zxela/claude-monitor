@@ -1,11 +1,33 @@
-import { Chart, LineController, BarController, DoughnutController, LineElement, BarElement, ArcElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend, Filler } from 'chart.js';
+import {
+  Chart,
+  LineController,
+  BarController,
+  DoughnutController,
+  LineElement,
+  BarElement,
+  ArcElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Tooltip,
+  Legend,
+  Filler,
+} from 'chart.js';
 
 // Register only the components we use (tree-shaking)
 Chart.register(
-  LineController, BarController, DoughnutController,
-  LineElement, BarElement, ArcElement, PointElement,
-  LinearScale, CategoryScale,
-  Tooltip, Legend, Filler
+  LineController,
+  BarController,
+  DoughnutController,
+  LineElement,
+  BarElement,
+  ArcElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Tooltip,
+  Legend,
+  Filler,
 );
 
 export const COLORS = {

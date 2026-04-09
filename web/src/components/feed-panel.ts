@@ -28,7 +28,17 @@ const MAX_ENTRIES = 500;
 // originating tool_use call's display type for consistent grouping/styling.
 const toolUseMap = new Map<string, string>(); // toolUseId -> displayType
 
-const FILTER_TYPES = ['all', 'user', 'assistant', 'tool_use', 'tool_result', 'agent', 'command', 'hook', 'error'] as const;
+const FILTER_TYPES = [
+  'all',
+  'user',
+  'assistant',
+  'tool_use',
+  'tool_result',
+  'agent',
+  'command',
+  'hook',
+  'error',
+] as const;
 
 let multiSessionLoaded = false;
 
@@ -127,13 +137,17 @@ function renderFeedPanel(): void {
   feedContent.className = 'feed-content';
   feedContent.setAttribute('aria-live', 'polite');
   const sess = state.selectedSessionId ? state.sessions.get(state.selectedSessionId) : null;
-  feedContent.setAttribute('aria-label', sess?.isActive !== false ? 'Live event feed' : 'Session history');
+  feedContent.setAttribute(
+    'aria-label',
+    sess?.isActive !== false ? 'Live event feed' : 'Session history',
+  );
   feedContent.innerHTML = state.selectedSessionId
     ? '<div class="feed-empty">Waiting for events in this session\u2026</div>'
     : '<div class="feed-empty">Select a session to view its event feed</div>';
   feedContent.addEventListener('scroll', () => {
     if (!feedContent) return;
-    const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
+    const atBottom =
+      feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
     autoScroll = atBottom;
     scrollLockBtn?.classList.toggle('visible', !atBottom);
   });
@@ -141,13 +155,17 @@ function renderFeedPanel(): void {
   // highlights all entries in the same group (tool_use + hooks + tool_result).
   feedContent.addEventListener('mouseover', (e) => {
     const entry = (e.target as HTMLElement).closest<HTMLElement>('.feed-entry[data-group-id]');
-    if (!entry) { clearGroupHighlight(); return; }
+    if (!entry) {
+      clearGroupHighlight();
+      return;
+    }
     const groupId = entry.dataset.groupId;
     if (!groupId || groupId === currentHighlightGroup) return;
     clearGroupHighlight();
     currentHighlightGroup = groupId;
-    feedContent!.querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`)
-      .forEach(el => el.classList.add('group-highlight'));
+    feedContent!
+      .querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`)
+      .forEach((el) => el.classList.add('group-highlight'));
   });
   feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
@@ -171,7 +189,7 @@ function updateHeader(): void {
   if (!headerEl) return;
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
-    const name = sess ? (sessionDisplayName(sess)) : state.selectedSessionId;
+    const name = sess ? sessionDisplayName(sess) : state.selectedSessionId;
     const isLive = sess?.isActive ?? false;
     const label = isLive ? 'LIVE FEED' : 'SESSION HISTORY';
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
@@ -179,7 +197,9 @@ function updateHeader(): void {
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
-    backBtn?.addEventListener('click', () => { update({ selectedSessionId: null }); });
+    backBtn?.addEventListener('click', () => {
+      update({ selectedSessionId: null });
+    });
     backBtn?.addEventListener('keydown', (e) => {
       if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
         e.preventDefault();
@@ -205,7 +225,7 @@ function updateHeader(): void {
 function handleFilterClick(type: string, e: MouseEvent): void {
   if (type === 'all') {
     // Toggle: if all on → all off, if any off → all on
-    const allOn = FILTER_TYPES.every(t => t === 'all' || state.feedTypeFilters[t]);
+    const allOn = FILTER_TYPES.every((t) => t === 'all' || state.feedTypeFilters[t]);
     const filters: Record<string, boolean> = {};
     for (const t of FILTER_TYPES) {
       if (t !== 'all') filters[t] = !allOn;
@@ -214,7 +234,7 @@ function handleFilterClick(type: string, e: MouseEvent): void {
   } else if (e.shiftKey) {
     const filters: Record<string, boolean> = {};
     for (const t of FILTER_TYPES) {
-      if (t !== 'all') filters[t] = (t === type);
+      if (t !== 'all') filters[t] = t === type;
     }
     update({ feedTypeFilters: filters });
   } else {
@@ -232,7 +252,7 @@ function handleFilterClick(type: string, e: MouseEvent): void {
 
 function updateFilterButtons(): void {
   if (!filterBar) return;
-  filterBar.querySelectorAll<HTMLButtonElement>('.feed-filter-btn').forEach(btn => {
+  filterBar.querySelectorAll<HTMLButtonElement>('.feed-filter-btn').forEach((btn) => {
     const t = btn.dataset.type!;
     if (t === 'all') return;
     btn.classList.toggle('active', state.feedTypeFilters[t] ?? true);
@@ -242,7 +262,7 @@ function updateFilterButtons(): void {
 function applyFilters(): void {
   if (!feedContent) return;
   let visibleCount = 0;
-  feedContent.querySelectorAll<HTMLElement>('.feed-entry').forEach(entry => {
+  feedContent.querySelectorAll<HTMLElement>('.feed-entry').forEach((entry) => {
     const type = entry.dataset.type || 'system';
     const visible = state.feedTypeFilters[type] ?? true;
     entry.style.display = visible ? '' : 'none';
@@ -263,7 +283,6 @@ function applyFilters(): void {
   }
 }
 
-
 async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
@@ -280,18 +299,19 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     // Deduplicate: DB may contain duplicate rows from re-bootstraps.
     // Use timestamp + content as a fingerprint since IDs aren't stable.
     const seen = new Set<string>();
-    const dedup = (events: typeof messages) => events.filter(e => {
-      const key = `${e.timestamp}|${e.contentPreview ?? ''}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    const dedup = (events: typeof messages) =>
+      events.filter((e) => {
+        const key = `${e.timestamp}|${e.contentPreview ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
     // Merge pinned events (errors + agents) that aren't in the recent window.
     const recentDeduped = dedup(messages);
     const missingPinned = dedup(pinned);
     const merged = [...missingPinned, ...recentDeduped].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
 
     if (merged.length === 0) {
@@ -306,13 +326,15 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     // Restore saved scroll position for this session
     const savedScroll = scrollPositions.get(sessionId);
     if (savedScroll !== undefined && feedContent) {
-        feedContent.scrollTop = savedScroll;
-        autoScroll = false;
+      feedContent.scrollTop = savedScroll;
+      autoScroll = false;
     }
 
     // Auto-expand and scroll to search-highlighted event
     if (state.searchHighlightEventId != null && feedContent) {
-      const target = feedContent.querySelector<HTMLElement>(`[data-event-id="${state.searchHighlightEventId}"]`);
+      const target = feedContent.querySelector<HTMLElement>(
+        `[data-event-id="${state.searchHighlightEventId}"]`,
+      );
       if (target) {
         // Expand the content if it has an expand button
         const expandBtn = target.querySelector<HTMLElement>('.fe-expand');
@@ -336,7 +358,7 @@ async function loadMultiSessionEvents(): Promise<void> {
   if (!feedContent) return;
   if (state.selectedSessionId) return; // only for multi-session mode
 
-  const activeSessions = Array.from(state.sessions.values()).filter(s => s.isActive);
+  const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
   if (activeSessions.length === 0) return;
 
   try {
@@ -344,11 +366,12 @@ async function loadMultiSessionEvents(): Promise<void> {
     const perSession = await Promise.all(
       activeSessions.map(async (sess) => {
         const events = await fetchSessionEvents(sess.id, 20);
-        return events.map(e => ({ ...e, _sessionName: sessionDisplayName(sess) }));
-      })
+        return events.map((e) => ({ ...e, _sessionName: sessionDisplayName(sess) }));
+      }),
     );
 
-    const allEvents = perSession.flat()
+    const allEvents = perSession
+      .flat()
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
     // Deduplicate
@@ -366,8 +389,9 @@ async function loadMultiSessionEvents(): Promise<void> {
 
 function clearGroupHighlight(): void {
   if (!currentHighlightGroup || !feedContent) return;
-  feedContent.querySelectorAll('.group-highlight')
-    .forEach(el => el.classList.remove('group-highlight'));
+  feedContent
+    .querySelectorAll('.group-highlight')
+    .forEach((el) => el.classList.remove('group-highlight'));
   currentHighlightGroup = null;
 }
 
@@ -445,9 +469,10 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
 
   if (autoScroll && feedContent) {
     // Re-check scroll position to avoid race with scroll events
-    const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 60;
+    const atBottom =
+      feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 60;
     if (atBottom) {
-        feedContent.scrollTop = feedContent.scrollHeight;
+      feedContent.scrollTop = feedContent.scrollHeight;
     }
   }
 }

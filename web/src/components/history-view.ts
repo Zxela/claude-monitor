@@ -3,7 +3,12 @@ import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions } from '../api';
-import { formatDurationSecs, formatTokens, sessionDisplayName, effectiveInputTokens } from '../utils';
+import {
+  formatDurationSecs,
+  formatTokens,
+  sessionDisplayName,
+  effectiveInputTokens,
+} from '../utils';
 import '../styles/views.css';
 
 let container: HTMLElement | null = null;
@@ -15,23 +20,53 @@ const collapsedParents = new Set<string>();
 type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
 
 const COLUMNS: Column[] = [
-  { key: 'lastActive', label: 'Date', cls: 'col-dim', fmt: r => r.lastActive ? new Date(r.lastActive).toLocaleString() : '' },
-  { key: 'projectName', label: 'Name', fmt: r => sessionDisplayName(r) },
-  { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: r => `$${r.totalCost.toFixed(2)}` },
-  { key: 'duration', label: 'Duration', cls: 'col-dim', fmt: r => {
-    if (!r.startedAt || !r.lastActive) return '';
-    const secs = (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000;
-    return formatDurationSecs(secs);
-  }},
-  { key: 'tokens', label: 'Tokens', cls: 'col-tokens', fmt: r => formatTokens(effectiveInputTokens(r) + r.outputTokens) },
-  { key: 'cache', label: 'Cache%', cls: 'col-cache', fmt: r => {
-    const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
-    if (total === 0) return '';
-    return `${Math.round(r.cacheReadTokens / total * 100)}%`;
-  }},
-  { key: 'messageCount', label: 'Msgs', fmt: r => String(r.messageCount) },
-  { key: 'errorCount', label: 'Errors', cls: 'col-err', fmt: r => r.errorCount > 0 ? String(r.errorCount) : '' },
-  { key: 'model', label: 'Model', cls: 'col-model', fmt: r => (r.model || '').replace('claude-', '') },
+  {
+    key: 'lastActive',
+    label: 'Date',
+    cls: 'col-dim',
+    fmt: (r) => (r.lastActive ? new Date(r.lastActive).toLocaleString() : ''),
+  },
+  { key: 'projectName', label: 'Name', fmt: (r) => sessionDisplayName(r) },
+  { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: (r) => `$${r.totalCost.toFixed(2)}` },
+  {
+    key: 'duration',
+    label: 'Duration',
+    cls: 'col-dim',
+    fmt: (r) => {
+      if (!r.startedAt || !r.lastActive) return '';
+      const secs = (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000;
+      return formatDurationSecs(secs);
+    },
+  },
+  {
+    key: 'tokens',
+    label: 'Tokens',
+    cls: 'col-tokens',
+    fmt: (r) => formatTokens(effectiveInputTokens(r) + r.outputTokens),
+  },
+  {
+    key: 'cache',
+    label: 'Cache%',
+    cls: 'col-cache',
+    fmt: (r) => {
+      const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
+      if (total === 0) return '';
+      return `${Math.round((r.cacheReadTokens / total) * 100)}%`;
+    },
+  },
+  { key: 'messageCount', label: 'Msgs', fmt: (r) => String(r.messageCount) },
+  {
+    key: 'errorCount',
+    label: 'Errors',
+    cls: 'col-err',
+    fmt: (r) => (r.errorCount > 0 ? String(r.errorCount) : ''),
+  },
+  {
+    key: 'model',
+    label: 'Model',
+    cls: 'col-model',
+    fmt: (r) => (r.model || '').replace('claude-', ''),
+  },
 ];
 
 export function render(mount: HTMLElement): void {
@@ -47,7 +82,10 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       loadData();
     } else {
       // Clear any pending refresh timer when leaving history view
-      if (historyRefreshTimer) { clearTimeout(historyRefreshTimer); historyRefreshTimer = null; }
+      if (historyRefreshTimer) {
+        clearTimeout(historyRefreshTimer);
+        historyRefreshTimer = null;
+      }
     }
   }
   if (changed.has('historyShowSubagents') && state.view === 'history') {
@@ -65,7 +103,7 @@ async function loadData(): Promise<void> {
   try {
     const raw = await fetchSessions(200, 0);
     // Filter out trivial sessions (no cost, no tokens, few messages)
-    data = raw.filter(s => s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3);
+    data = raw.filter((s) => s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3);
     if (state.view !== 'history') return; // Re-check after async
     show();
   } catch (err) {
@@ -74,8 +112,10 @@ async function loadData(): Promise<void> {
 }
 
 function exportCsv(): void {
-  const headers = COLUMNS.map(c => c.label);
-  const rows = sortData([...data]).map(r => COLUMNS.map(c => `"${c.fmt(r).replace(/"/g, '""')}"`).join(','));
+  const headers = COLUMNS.map((c) => c.label);
+  const rows = sortData([...data]).map((r) =>
+    COLUMNS.map((c) => `"${c.fmt(r).replace(/"/g, '""')}"`).join(','),
+  );
   const csv = [headers.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -134,7 +174,7 @@ function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] 
   }
 
   const sorted = sortData(parents);
-  return sorted.map(parent => ({
+  return sorted.map((parent) => ({
     parent,
     children: sortData(childrenByParent.get(parent.id) || []),
   }));
@@ -153,12 +193,13 @@ function show(): void {
 
   const exportBtn = document.createElement('button');
   exportBtn.textContent = 'EXPORT CSV';
-  exportBtn.style.cssText = 'padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
+  exportBtn.style.cssText =
+    'padding:4px 12px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
   exportBtn.addEventListener('click', exportCsv);
   toolbar.appendChild(exportBtn);
 
   // Check if any subagents exist in data
-  const hasSubagents = data.some(r => r.parentId);
+  const hasSubagents = data.some((r) => r.parentId);
   if (hasSubagents) {
     const toggleLabel = document.createElement('label');
     toggleLabel.className = 'history-subagent-toggle';
@@ -191,12 +232,20 @@ function show(): void {
     }
     th.innerHTML = `${col.label}${sortCol === col.key ? `<span class="sort-arrow">${sortAsc ? '▲' : '▼'}</span>` : ''}`;
     const sortByCol = () => {
-      if (sortCol === col.key) { sortAsc = !sortAsc; } else { sortCol = col.key; sortAsc = false; }
+      if (sortCol === col.key) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col.key;
+        sortAsc = false;
+      }
       show();
     };
     th.addEventListener('click', sortByCol);
     th.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortByCol(); }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        sortByCol();
+      }
     });
     headerRow.appendChild(th);
   }
@@ -241,7 +290,10 @@ function show(): void {
         show();
       });
       triangle.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triangle.click(); }
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          triangle.click();
+        }
       });
       nameCell.insertBefore(triangle, nameCell.firstChild);
 
@@ -284,10 +336,15 @@ function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
   tr.setAttribute('tabindex', '0');
   tr.setAttribute('role', 'button');
   tr.setAttribute('aria-label', `View session: ${COLUMNS[1].fmt(row)}`);
-  const openSession = () => { update({ selectedSessionId: row.id, view: 'list' }); };
+  const openSession = () => {
+    update({ selectedSessionId: row.id, view: 'list' });
+  };
   tr.addEventListener('click', openSession);
   tr.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSession(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openSession();
+    }
   });
   return tr;
 }
@@ -296,24 +353,43 @@ function sortData(rows: Session[]): Session[] {
   return rows.sort((a, b) => {
     let va: number | string, vb: number | string;
     switch (sortCol) {
-      case 'tokens': va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0); vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0); break;
-      case 'projectName': va = sessionDisplayName(a).toLowerCase(); vb = sessionDisplayName(b).toLowerCase(); break;
-      case 'model': va = a.model || ''; vb = b.model || ''; break;
-      case 'lastActive': va = a.lastActive || ''; vb = b.lastActive || ''; break;
+      case 'tokens':
+        va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0);
+        vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0);
+        break;
+      case 'projectName':
+        va = sessionDisplayName(a).toLowerCase();
+        vb = sessionDisplayName(b).toLowerCase();
+        break;
+      case 'model':
+        va = a.model || '';
+        vb = b.model || '';
+        break;
+      case 'lastActive':
+        va = a.lastActive || '';
+        vb = b.lastActive || '';
+        break;
       default: {
         const numericAccessors: Record<string, (r: Session) => number> = {
-          totalCost: r => r.totalCost,
-          duration: r => r.startedAt && r.lastActive ? (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000 : 0,
-          messageCount: r => r.messageCount,
-          errorCount: r => r.errorCount,
-          cache: r => { const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0); return t > 0 ? r.cacheReadTokens / t * 100 : 0; },
+          totalCost: (r) => r.totalCost,
+          duration: (r) =>
+            r.startedAt && r.lastActive
+              ? (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000
+              : 0,
+          messageCount: (r) => r.messageCount,
+          errorCount: (r) => r.errorCount,
+          cache: (r) => {
+            const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
+            return t > 0 ? (r.cacheReadTokens / t) * 100 : 0;
+          },
         };
         const accessor = numericAccessors[sortCol];
         va = accessor ? accessor(a) : 0;
         vb = accessor ? accessor(b) : 0;
       }
     }
-    const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
+    const cmp =
+      typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
     return sortAsc ? cmp : -cmp;
   });
 }

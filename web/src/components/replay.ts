@@ -28,7 +28,10 @@ export function open(sessionId: string): void {
 
 function close(): void {
   stopPlayback();
-  if (panel) { panel.remove(); panel = null; }
+  if (panel) {
+    panel.remove();
+    panel = null;
+  }
   update({ replaySessionId: null, replayPlaying: false });
 }
 
@@ -122,7 +125,9 @@ function onScrub(): void {
 
 function startPlayback(): void {
   if (!state.replaySessionId || manifestEvents.length === 0) return;
-  const speed = parseFloat((container?.querySelector('.replay-speed') as HTMLSelectElement)?.value ?? '1');
+  const speed = parseFloat(
+    (container?.querySelector('.replay-speed') as HTMLSelectElement)?.value ?? '1',
+  );
 
   // Clear placeholder
   if (feedEl && currentIndex === 0) {
@@ -194,4 +199,3 @@ export function stepBackward(): void {
     updateProgress();
   }
 }
-

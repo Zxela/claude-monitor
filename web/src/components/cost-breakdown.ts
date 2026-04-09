@@ -8,11 +8,18 @@ let popover: HTMLElement | null = null;
 
 /** Close the cost breakdown if open. Called by other dialogs to avoid overlap. */
 export function dismiss(): void {
-  if (popover) { popover.remove(); popover = null; }
+  if (popover) {
+    popover.remove();
+    popover = null;
+  }
 }
 
 export function toggle(anchor: HTMLElement): void {
-  if (popover) { popover.remove(); popover = null; return; }
+  if (popover) {
+    popover.remove();
+    popover = null;
+    return;
+  }
   dismissBudget();
 
   const stats = state.stats;
@@ -37,7 +44,7 @@ export function toggle(anchor: HTMLElement): void {
   popover.setAttribute('role', 'dialog');
   popover.setAttribute('aria-modal', 'false');
   popover.setAttribute('aria-label', 'Cost breakdown');
-  popover.addEventListener('click', e => e.stopPropagation());
+  popover.addEventListener('click', (e) => e.stopPropagation());
 
   // Build content
   popover.innerHTML = `
@@ -63,9 +70,12 @@ export function toggle(anchor: HTMLElement): void {
     'claude-opus-4-6': COLORS.purple,
     'claude-sonnet-4-6': COLORS.cyan,
     'claude-haiku-4-5-20251001': COLORS.green,
-    'unknown': COLORS.statusIdle,
+    unknown: COLORS.statusIdle,
   };
-  const cx = 60, cy = 60, r = 45, inner = 25;
+  const cx = 60,
+    cy = 60,
+    r = 45,
+    inner = 25;
   let angle = -Math.PI / 2;
   const legend = popover.querySelector('.cb-legend')!;
 
@@ -104,14 +114,15 @@ export function toggle(anchor: HTMLElement): void {
   const bars = popover.querySelectorAll<HTMLElement>('.cb-bar-fill');
   const vals = popover.querySelectorAll<HTMLElement>('.cb-bar-val');
   if (totalTok > 0) {
-    bars[0].style.width = `${(totalInput / totalTok * 100).toFixed(0)}%`;
+    bars[0].style.width = `${((totalInput / totalTok) * 100).toFixed(0)}%`;
     bars[0].style.background = COLORS.user;
-    bars[1].style.width = `${(totalOutput / totalTok * 100).toFixed(0)}%`;
+    bars[1].style.width = `${((totalOutput / totalTok) * 100).toFixed(0)}%`;
     bars[1].style.background = COLORS.orange;
-    bars[2].style.width = `${(totalCache / totalTok * 100).toFixed(0)}%`;
+    bars[2].style.width = `${((totalCache / totalTok) * 100).toFixed(0)}%`;
     bars[2].style.background = COLORS.green;
   }
-  const fmt = (n: number) => n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}k` : String(n);
+  const fmt = (n: number) =>
+    n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
   vals[0].textContent = fmt(totalInput);
   vals[1].textContent = fmt(totalOutput);
   vals[2].textContent = fmt(totalCache);
@@ -131,6 +142,12 @@ export function toggle(anchor: HTMLElement): void {
   anchor.parentElement!.appendChild(popover);
 
   // Close on outside click
-  const closeHandler = () => { if (popover) { popover.remove(); popover = null; } document.removeEventListener('click', closeHandler); };
+  const closeHandler = () => {
+    if (popover) {
+      popover.remove();
+      popover = null;
+    }
+    document.removeEventListener('click', closeHandler);
+  };
   setTimeout(() => document.addEventListener('click', closeHandler), 0);
 }

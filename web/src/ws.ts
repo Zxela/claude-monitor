@@ -25,20 +25,24 @@ export function connect(): void {
     reconnectDelay = 2000; // Reset backoff on successful connection
 
     // Re-fetch sessions to reconcile state missed during disconnect
-    fetchGroupedSessions().then(grouped => {
-      const allSessions = [
-        ...grouped.active,
-        ...grouped.lastHour,
-        ...grouped.today,
-        ...grouped.yesterday,
-        ...grouped.thisWeek,
-        ...grouped.older,
-      ];
-      for (const sess of allSessions) {
-        updateSession(sess);
-      }
-      update({ grouped });
-    }).catch(() => { /* ignore — WS is connected, sessions will arrive via events */ });
+    fetchGroupedSessions()
+      .then((grouped) => {
+        const allSessions = [
+          ...grouped.active,
+          ...grouped.lastHour,
+          ...grouped.today,
+          ...grouped.yesterday,
+          ...grouped.thisWeek,
+          ...grouped.older,
+        ];
+        for (const sess of allSessions) {
+          updateSession(sess);
+        }
+        update({ grouped });
+      })
+      .catch(() => {
+        /* ignore — WS is connected, sessions will arrive via events */
+      });
   };
 
   ws.onclose = () => {

@@ -11,7 +11,9 @@ export function loadSettings(): void {
   try {
     const saved = localStorage.getItem('notif-settings');
     if (saved) settings = JSON.parse(saved);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function saveSettings(s: NotifSettings): void {

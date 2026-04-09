@@ -28,10 +28,10 @@ export function render(container: HTMLElement): void {
     <button data-filter="recent" class="active">RECENT (<span id="fc-recent"></span>)</button>
     <button data-filter="all">ALL (<span id="fc-all"></span>)</button>
   `;
-  filterBar.querySelectorAll('button').forEach(btn => {
+  filterBar.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeFilter = btn.dataset.filter as typeof activeFilter;
-      filterBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      filterBar.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       renderList();
     });
@@ -56,21 +56,40 @@ export function render(container: HTMLElement): void {
   if (keydownHandler) document.removeEventListener('keydown', keydownHandler);
   keydownHandler = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.key === '1') { activeFilter = 'active'; renderList(); updateFilterBar(); }
-    if (e.key === '2') { activeFilter = 'recent'; renderList(); updateFilterBar(); }
-    if (e.key === '3') { activeFilter = 'all'; renderList(); updateFilterBar(); }
+    if (e.key === '1') {
+      activeFilter = 'active';
+      renderList();
+      updateFilterBar();
+    }
+    if (e.key === '2') {
+      activeFilter = 'recent';
+      renderList();
+      updateFilterBar();
+    }
+    if (e.key === '3') {
+      activeFilter = 'all';
+      renderList();
+      updateFilterBar();
+    }
   };
   document.addEventListener('keydown', keydownHandler);
 }
 
 function updateFilterBar(): void {
-  el?.querySelectorAll('.session-filter-bar button').forEach(btn => {
-    (btn as HTMLElement).classList.toggle('active', (btn as HTMLElement).dataset.filter === activeFilter);
+  el?.querySelectorAll('.session-filter-bar button').forEach((btn) => {
+    (btn as HTMLElement).classList.toggle(
+      'active',
+      (btn as HTMLElement).dataset.filter === activeFilter,
+    );
   });
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('selectedSessionId') || changed.has('renderVersion') || changed.has('repoFilter')) {
+  if (
+    changed.has('selectedSessionId') ||
+    changed.has('renderVersion') ||
+    changed.has('repoFilter')
+  ) {
     renderList();
   }
   if (changed.has('sessions')) {
@@ -94,7 +113,7 @@ function renderList(): void {
   // Exception: parents with active children stay as "waiting" — work is still happening.
   for (const sess of state.sessions.values()) {
     if (sess.isActive && !isSessionActive(sess.lastActive)) {
-      const hasActiveChild = (sess.children ?? []).some(id => {
+      const hasActiveChild = (sess.children ?? []).some((id) => {
         const child = state.sessions.get(id);
         return child && isSessionActive(child.lastActive);
       });
@@ -107,9 +126,12 @@ function renderList(): void {
     }
   }
 
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-  const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-  const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 7);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - 7);
   const recentCutoff = now - 4 * 3600_000; // 4 hours
 
   // Group sessions
@@ -137,18 +159,25 @@ function renderList(): void {
   if (state.selectedSessionId) {
     const sel = state.sessions.get(state.selectedSessionId);
     // Find the parent if this is a subagent
-    const target = sel?.parentId ? state.sessions.get(sel.parentId) ?? sel : sel;
+    const target = sel?.parentId ? (state.sessions.get(sel.parentId) ?? sel) : sel;
     if (target && !isSessionActive(target.lastActive)) {
       const ms = new Date(target.lastActive).getTime();
-      let groupKey: string | null = null;
-      if (now - ms < 3600_000) groupKey = 'lastHour';
-      else if (ms >= todayStart.getTime()) groupKey = 'today';
-      else if (ms >= yesterdayStart.getTime()) groupKey = 'yesterday';
-      else if (ms >= weekStart.getTime()) groupKey = 'thisWeek';
-      else groupKey = 'older';
+      const groupKey =
+        now - ms < 3600_000
+          ? 'lastHour'
+          : ms >= todayStart.getTime()
+            ? 'today'
+            : ms >= yesterdayStart.getTime()
+              ? 'yesterday'
+              : ms >= weekStart.getTime()
+                ? 'thisWeek'
+                : 'older';
 
       // Switch to 'all' filter if the group isn't visible under current filter
-      if (activeFilter === 'active' || (activeFilter === 'recent' && groupKey !== 'lastHour' && groupKey !== 'today')) {
+      if (
+        activeFilter === 'active' ||
+        (activeFilter === 'recent' && groupKey !== 'lastHour' && groupKey !== 'today')
+      ) {
         activeFilter = 'all';
         updateFilterBar();
       }
@@ -164,22 +193,33 @@ function renderList(): void {
   const filter = state.repoFilter;
 
   // Update filter counts — only count top-level, non-trivial sessions (no subagents) to match group display
-  const isTrivialCount = (s: Session) => s.totalCost === 0 && (s.inputTokens + s.outputTokens + s.cacheReadTokens) === 0 && s.messageCount < 4;
-  const topLevelFilter = (s: Session) => !s.parentId && !isTrivialCount(s) && (!filter || s.cwd === filter || s.sessionName === filter);
-  const recentCount = active.length + [...lastHour, ...today].filter(s => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff).length;
+  const isTrivialCount = (s: Session) =>
+    s.totalCost === 0 &&
+    s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
+    s.messageCount < 4;
+  const topLevelFilter = (s: Session) =>
+    !s.parentId && !isTrivialCount(s) && (!filter || s.cwd === filter || s.sessionName === filter);
+  const recentCount =
+    active.length +
+    [...lastHour, ...today].filter(
+      (s) => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
+    ).length;
   const totalCount = Array.from(state.sessions.values()).filter(topLevelFilter).length;
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
-  if (fcActive) fcActive.textContent = String(active.filter(s => !s.parentId).length);
+  if (fcActive) fcActive.textContent = String(active.filter((s) => !s.parentId).length);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
   // Filter: top-level only, repo filter, and skip trivial sessions (no cost, no tokens, few messages)
-  const isTrivial = (s: Session) => s.totalCost === 0 && (s.inputTokens + s.outputTokens + s.cacheReadTokens) === 0 && s.messageCount < 4;
+  const isTrivial = (s: Session) =>
+    s.totalCost === 0 &&
+    s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
+    s.messageCount < 4;
   const topLevel = (sessions: Session[], includeTrivial = false) =>
-    (filter ? sessions.filter(s => s.cwd === filter || s.sessionName === filter) : sessions)
-      .filter(s => !s.parentId)
-      .filter(s => includeTrivial || !isTrivial(s));
+    (filter ? sessions.filter((s) => s.cwd === filter || s.sessionName === filter) : sessions)
+      .filter((s) => !s.parentId)
+      .filter((s) => includeTrivial || !isTrivial(s));
   const sort = (sessions: Session[]) =>
     sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 
@@ -206,10 +246,10 @@ function renderList(): void {
       renderCompact(sess, section);
       const children = activeChildrenOf.get(sess.id);
       if (children && children.length > 0) {
-        const familyIds = new Set([sess.id, ...children.map(c => c.id)]);
+        const familyIds = new Set([sess.id, ...children.map((c) => c.id)]);
         if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
           // Active parents: only show active children
-          const activeOnly = sort([...children]).filter(c => c.isActive);
+          const activeOnly = sort([...children]).filter((c) => c.isActive);
           for (const child of activeOnly) renderCompact(child, section);
         }
       }
@@ -276,7 +316,7 @@ function renderList(): void {
       // For inactive parents: show children inline when this family is selected
       const children = childrenOf.get(sess.id);
       if (children && children.length > 0) {
-        const familyIds = new Set([sess.id, ...children.map(c => c.id)]);
+        const familyIds = new Set([sess.id, ...children.map((c) => c.id)]);
         if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
           for (const child of sort([...children])) renderCompact(child, items);
         }
@@ -287,7 +327,11 @@ function renderList(): void {
       const btn = document.createElement('button');
       btn.className = 'show-all-btn';
       btn.textContent = `SHOW ALL ${filtered.length} SESSIONS`;
-      btn.addEventListener('click', (e) => { e.stopPropagation(); showAllGroups.add(key); renderList(); });
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showAllGroups.add(key);
+        renderList();
+      });
       items.appendChild(btn);
     }
 
@@ -298,7 +342,7 @@ function renderList(): void {
   // Apply focused class to the focused session's card (must happen during render,
   // not in a separate state change handler, since innerHTML clears previous classes).
   if (state.focusedSessionId) {
-    listEl.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach(card => {
+    listEl.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach((card) => {
       card.classList.toggle('focused', card.dataset.sessionId === state.focusedSessionId);
     });
   }
