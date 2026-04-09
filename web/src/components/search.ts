@@ -103,7 +103,12 @@ function renderResults(): void {
         <div class="search-result-body">${highlightMatch(searchPreview(result, state.searchQuery), state.searchQuery)}</div>
       `;
       el.addEventListener('click', () => {
-        update({ selectedSessionId: sessionId, searchOpen: false, searchQuery: '', searchHighlightEventId: result.id ?? null });
+        update({
+          selectedSessionId: sessionId,
+          searchOpen: false,
+          searchQuery: '',
+          searchHighlightEventId: result.id ?? null,
+        });
         const searchInput = document.querySelector<HTMLInputElement>('[data-search]');
         if (searchInput) searchInput.value = '';
       });
@@ -132,7 +137,7 @@ function searchPreview(r: Event, query?: string): string {
     if (detail && detail.toLowerCase().includes(q)) return name ? `${name}: ${detail}` : detail;
     if (cp && cp.toLowerCase().includes(q)) return cp;
     // Try individual words
-    const words = q.split(/\s+/).filter(w => w.length > 1);
+    const words = q.split(/\s+/).filter((w) => w.length > 1);
     for (const w of words) {
       if (detail && detail.toLowerCase().includes(w)) return name ? `${name}: ${detail}` : detail;
     }
@@ -171,7 +176,7 @@ function highlightMatch(text: string, query: string): string {
   // Find the best match position — try full query first, then individual words
   let matchIdx = lowerText.indexOf(query.toLowerCase());
   if (matchIdx < 0) {
-    const words = query.split(/\s+/).filter(w => w.length > 1);
+    const words = query.split(/\s+/).filter((w) => w.length > 1);
     for (const word of words) {
       matchIdx = lowerText.indexOf(word.toLowerCase());
       if (matchIdx >= 0) break;
@@ -184,7 +189,8 @@ function highlightMatch(text: string, query: string): string {
       const padding = Math.floor((maxLen - query.length) / 2);
       const start = Math.max(0, matchIdx - padding);
       const end = Math.min(text.length, start + maxLen);
-      truncated = (start > 0 ? '...' : '') + text.substring(start, end) + (end < text.length ? '...' : '');
+      truncated =
+        (start > 0 ? '...' : '') + text.substring(start, end) + (end < text.length ? '...' : '');
     } else {
       truncated = text.substring(0, maxLen) + '...';
     }
@@ -192,10 +198,8 @@ function highlightMatch(text: string, query: string): string {
 
   const escaped = escapeHtml(truncated);
   // Highlight all query words individually
-  const words = query.split(/\s+/).filter(w => w.length > 1);
-  const pattern = words.length > 0
-    ? words.map(escapeRegex).join('|')
-    : escapeRegex(query);
+  const words = query.split(/\s+/).filter((w) => w.length > 1);
+  const pattern = words.length > 0 ? words.map(escapeRegex).join('|') : escapeRegex(query);
   const re = new RegExp(`(${pattern})`, 'gi');
   return escaped.replace(re, '<mark>$1</mark>');
 }

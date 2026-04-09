@@ -1,11 +1,20 @@
 // web/src/components/session-card.ts
 import type { Session } from '../types';
 import { state, update } from '../state';
-import { escapeHtml, escapeAttr, formatTokens, formatDurationSecs, timeAgo, sessionDisplayName, stripInternalTags, effectiveInputTokens } from '../utils';
+import {
+  escapeHtml,
+  escapeAttr,
+  formatTokens,
+  formatDurationSecs,
+  timeAgo,
+  sessionDisplayName,
+  stripInternalTags,
+  effectiveInputTokens,
+} from '../utils';
 import { getLastTool } from '../tool-tracker';
 
 function getCostTier(cost: number): string {
-  if (cost < 0.50) return 'cost-tier-low';
+  if (cost < 0.5) return 'cost-tier-low';
   if (cost < 2) return 'cost-tier-mid';
   if (cost < 5) return 'cost-tier-high';
   return 'cost-tier-extreme';
@@ -18,14 +27,13 @@ function getDotClass(session: Session): string {
   return 'dot-active';
 }
 
-
 export function renderExpanded(session: Session, container: HTMLElement): HTMLElement {
   const el = document.createElement('div');
   el.className = 'session-card';
   el.dataset.sessionId = session.id;
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
-  if (!!session.parentId) el.classList.add('subagent');
+  if (session.parentId) el.classList.add('subagent');
   if (session.isActive) el.classList.add('active-card');
 
   const dotClass = getDotClass(session);
@@ -34,7 +42,11 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   const statusClass = `status-${session.status}`;
 
   const dotLabel = session.isActive
-    ? (session.status === 'thinking' ? 'Status: thinking' : session.status === 'tool_use' ? 'Status: using tool' : 'Status: active')
+    ? session.status === 'thinking'
+      ? 'Status: thinking'
+      : session.status === 'tool_use'
+        ? 'Status: using tool'
+        : 'Status: active'
     : 'Status: idle';
 
   el.setAttribute('role', 'button');
@@ -47,11 +59,13 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
         <span class="session-dot ${dotClass}" aria-label="${dotLabel}" role="img"></span>
         <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
         ${session.model ? `<span class="model">${escapeHtml(session.model.replace('claude-', '').replace('-4-6', ''))}</span>` : ''}
-        ${session.status !== 'idle'
-          ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
-          : session.isActive
-            ? '<span class="session-status-badge status-live">LIVE</span>'
-            : ''}
+        ${
+          session.status !== 'idle'
+            ? `<span class="session-status-badge ${statusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
+            : session.isActive
+              ? '<span class="session-status-badge status-live">LIVE</span>'
+              : ''
+        }
       </div>
       <div class="session-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription || ''))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription || ''), 80))}</div>
       <div class="session-stats">
@@ -76,7 +90,9 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
 
   // Card click: select session
   const selectSession = () => {
-    const updates: Record<string, unknown> = { selectedSessionId: session.id === state.selectedSessionId ? null : session.id };
+    const updates: Record<string, unknown> = {
+      selectedSessionId: session.id === state.selectedSessionId ? null : session.id,
+    };
     if (state.view !== 'list') updates.view = 'list';
     update(updates);
   };
@@ -99,7 +115,15 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       e.stopPropagation();
       update({
         selectedSessionId: session.id,
-        feedTypeFilters: { user: false, assistant: false, tool_use: false, tool_result: false, agent: false, hook: false, error: true },
+        feedTypeFilters: {
+          user: false,
+          assistant: false,
+          tool_use: false,
+          tool_result: false,
+          agent: false,
+          hook: false,
+          error: true,
+        },
       });
     };
     errEl.addEventListener('click', filterErrors);
@@ -120,7 +144,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   el.dataset.sessionId = session.id;
 
   if (session.id === state.selectedSessionId) el.classList.add('selected');
-  if (!!session.parentId) el.classList.add('subagent');
+  if (session.parentId) el.classList.add('subagent');
   if (session.isActive) el.classList.add('active-card');
 
   const dotClass = getDotClass(session);
@@ -128,7 +152,11 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   const displayName = sessionDisplayName(session);
 
   const compactDotLabel = session.isActive
-    ? (session.status === 'thinking' ? 'Status: thinking' : session.status === 'tool_use' ? 'Status: using tool' : 'Status: active')
+    ? session.status === 'thinking'
+      ? 'Status: thinking'
+      : session.status === 'tool_use'
+        ? 'Status: using tool'
+        : 'Status: active'
     : 'Status: idle';
 
   el.setAttribute('role', 'button');
@@ -142,9 +170,11 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       <span class="session-dot ${dotClass}" aria-label="${compactDotLabel}" role="img"></span>
       <span class="session-name" title="${escapeAttr(displayName)}">${escapeHtml(displayName)}</span>
       ${session.model ? `<span class="model">${escapeHtml(session.model.replace('claude-', '').replace('-4-6', ''))}</span>` : ''}
-      ${session.status !== 'idle'
-        ? `<span class="session-status-badge ${compactStatusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
-        : ''}
+      ${
+        session.status !== 'idle'
+          ? `<span class="session-status-badge ${compactStatusClass}">${session.status === 'tool_use' ? 'TOOL' : escapeHtml(session.status.toUpperCase())}</span>`
+          : ''
+      }
     </div>
     ${session.taskDescription ? `<div class="compact-task-desc" title="${escapeAttr(stripInternalTags(session.taskDescription))}">${escapeHtml(truncate(stripInternalTags(session.taskDescription), 60))}</div>` : ''}
     <div class="compact-meta">
@@ -157,7 +187,9 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   `;
 
   const selectCompactSession = () => {
-    const updates: Record<string, unknown> = { selectedSessionId: session.id === state.selectedSessionId ? null : session.id };
+    const updates: Record<string, unknown> = {
+      selectedSessionId: session.id === state.selectedSessionId ? null : session.id,
+    };
     if (state.view !== 'list') updates.view = 'list';
     update(updates);
   };
@@ -179,7 +211,15 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       e.stopPropagation();
       update({
         selectedSessionId: session.id,
-        feedTypeFilters: { user: false, assistant: false, tool_use: false, tool_result: false, agent: false, hook: false, error: true },
+        feedTypeFilters: {
+          user: false,
+          assistant: false,
+          tool_use: false,
+          tool_result: false,
+          agent: false,
+          hook: false,
+          error: true,
+        },
       });
     };
     errEl.addEventListener('click', filterErrors);

@@ -33,10 +33,16 @@ export function toggle(): void {
   `;
 
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) { overlay!.remove(); overlay = null; }
+    if (e.target === overlay) {
+      overlay!.remove();
+      overlay = null;
+    }
   });
   overlay.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { overlay!.remove(); overlay = null; }
+    if (e.key === 'Escape') {
+      overlay!.remove();
+      overlay = null;
+    }
   });
 
   document.body.appendChild(overlay);

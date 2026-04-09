@@ -74,7 +74,9 @@ subscribe((_state, changed) => {
 
 function getVisibleSessionIds(): string[] {
   const cards = document.querySelectorAll<HTMLElement>('[data-session-id]');
-  return Array.from(cards).map(c => c.dataset.sessionId!).filter(Boolean);
+  return Array.from(cards)
+    .map((c) => c.dataset.sessionId!)
+    .filter(Boolean);
 }
 
 // Keyboard shortcuts
@@ -121,7 +123,10 @@ document.addEventListener('keydown', (e) => {
     }
     case 'Enter': {
       if (state.focusedSessionId) {
-        update({ selectedSessionId: state.focusedSessionId === state.selectedSessionId ? null : state.focusedSessionId });
+        update({
+          selectedSessionId:
+            state.focusedSessionId === state.selectedSessionId ? null : state.focusedSessionId,
+        });
       }
       break;
     }
@@ -133,7 +138,10 @@ document.addEventListener('keydown', (e) => {
     }
     case 'ArrowLeft': {
       if (state.focusedSessionId) {
-        update({ selectedSessionId: state.selectedSessionId === state.focusedSessionId ? null : state.focusedSessionId });
+        update({
+          selectedSessionId:
+            state.selectedSessionId === state.focusedSessionId ? null : state.focusedSessionId,
+        });
       }
       break;
     }
@@ -172,8 +180,10 @@ async function init() {
     if (feedArea) {
       const banner = document.createElement('div');
       banner.className = 'error-banner';
-      banner.style.cssText = 'background:rgba(255,60,60,0.15);color:#ff6b6b;padding:8px 12px;font-size:12px;border:1px solid rgba(255,60,60,0.3);border-radius:4px;margin:8px;';
-      banner.textContent = 'Failed to load sessions. Check that the server is running and try refreshing.';
+      banner.style.cssText =
+        'background:rgba(255,60,60,0.15);color:#ff6b6b;padding:8px 12px;font-size:12px;border:1px solid rgba(255,60,60,0.3);border-radius:4px;margin:8px;';
+      banner.textContent =
+        'Failed to load sessions. Check that the server is running and try refreshing.';
       feedArea.prepend(banner);
     }
   }

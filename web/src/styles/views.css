@@ -14,7 +14,9 @@
   cursor: grab;
 }
 
-.graph-container canvas:active { cursor: grabbing; }
+.graph-container canvas:active {
+  cursor: grabbing;
+}
 
 .graph-tooltip {
   position: absolute;
@@ -30,7 +32,9 @@
   display: none;
 }
 
-.graph-tooltip.visible { display: block; }
+.graph-tooltip.visible {
+  display: block;
+}
 
 /* Table and History shared */
 .view-overlay {
@@ -61,7 +65,9 @@
   white-space: nowrap;
 }
 
-.view-overlay th:hover { color: var(--text); }
+.view-overlay th:hover {
+  color: var(--text);
+}
 
 .sort-arrow {
   margin-left: 4px;
@@ -77,16 +83,35 @@
   max-width: 200px;
 }
 
-.view-overlay tr:hover { background: rgba(255,255,255,0.03); }
-.view-overlay tr.selected-row { background: var(--bg-hover); }
+.view-overlay tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.view-overlay tr.selected-row {
+  background: var(--bg-hover);
+}
 
-.view-overlay .col-cost { color: var(--yellow); }
-.view-overlay .col-rate { color: var(--yellow); }
-.view-overlay .col-tokens { color: var(--cyan); }
-.view-overlay .col-cache { color: var(--purple); }
-.view-overlay .col-err { color: var(--red); }
-.view-overlay .col-model { color: var(--text-dim); font-size: 11px; }
-.view-overlay .col-dim { color: var(--text-dim); }
+.view-overlay .col-cost {
+  color: var(--yellow);
+}
+.view-overlay .col-rate {
+  color: var(--yellow);
+}
+.view-overlay .col-tokens {
+  color: var(--cyan);
+}
+.view-overlay .col-cache {
+  color: var(--purple);
+}
+.view-overlay .col-err {
+  color: var(--red);
+}
+.view-overlay .col-model {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.view-overlay .col-dim {
+  color: var(--text-dim);
+}
 
 /* Budget */
 .budget-popover {
@@ -98,7 +123,7 @@
   border-radius: 6px;
   padding: 12px;
   z-index: 200;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   min-width: 200px;
 }
 
@@ -131,7 +156,9 @@
   border-radius: 3px;
 }
 
-.budget-popover button:hover { background: var(--border); }
+.budget-popover button:hover {
+  background: var(--border);
+}
 
 .budget-banner {
   background: rgba(248, 81, 73, 0.15);
@@ -144,20 +171,30 @@
   justify-content: space-between;
 }
 
-.budget-banner.hidden { display: none; }
+.budget-banner.hidden {
+  display: none;
+}
 
-.over-budget { color: var(--red) !important; animation: budgetPulse 1s infinite; }
+.over-budget {
+  color: var(--red) !important;
+  animation: budgetPulse 1s infinite;
+}
 
 @keyframes budgetPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Help overlay */
 .help-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -180,7 +217,9 @@
   margin-top: 16px;
 }
 
-.help-content h3:first-child { margin-top: 0; }
+.help-content h3:first-child {
+  margin-top: 0;
+}
 
 .help-row {
   display: flex;
@@ -199,7 +238,9 @@
   color: var(--text);
 }
 
-.help-row span { color: var(--text-dim); }
+.help-row span {
+  color: var(--text-dim);
+}
 
 /* Cost breakdown popover */
 .cost-breakdown {
@@ -211,7 +252,7 @@
   border-radius: 6px;
   padding: 12px;
   z-index: 200;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   width: 280px;
 }
 
@@ -230,7 +271,9 @@
   margin-bottom: 8px;
 }
 
-.cb-legend { flex: 1; }
+.cb-legend {
+  flex: 1;
+}
 
 .cb-section {
   font-size: 10px;
@@ -250,7 +293,9 @@
   margin: 2px 0;
 }
 
-.cb-bar-row span:first-child { min-width: 40px; }
+.cb-bar-row span:first-child {
+  min-width: 40px;
+}
 
 .cb-bar {
   flex: 1;
@@ -340,10 +385,18 @@
   flex-shrink: 0;
 }
 
-.sequence-dot.thinking { background: #ffcc00; }
-.sequence-dot.tool-use { background: #4488ff; }
-.sequence-dot.active { background: #00ff88; }
-.sequence-dot.idle { background: #44445a; }
+.sequence-dot.thinking {
+  background: #ffcc00;
+}
+.sequence-dot.tool-use {
+  background: #4488ff;
+}
+.sequence-dot.active {
+  background: #00ff88;
+}
+.sequence-dot.idle {
+  background: #44445a;
+}
 
 .sequence-connector {
   color: var(--text-dim, #666);

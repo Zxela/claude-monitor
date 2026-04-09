@@ -3,7 +3,13 @@ import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { loadSettings, saveSettings, getSettings, notify } from '../notifications';
 import { dismiss as dismissCostBreakdown } from './cost-breakdown';
-import { getSamples, getCurrentRate, getTokenRate, getProjectedDailyCost, getDepletionMinutes } from '../burn-rate';
+import {
+  getSamples,
+  getCurrentRate,
+  getTokenRate,
+  getProjectedDailyCost,
+  getDepletionMinutes,
+} from '../burn-rate';
 import { formatTokens, sessionDisplayName, escapeHtml } from '../utils';
 import '../styles/burn-rate.css';
 
@@ -20,8 +26,14 @@ export function dismiss(): void {
 }
 
 function closePanel(): void {
-  if (panel) { panel.remove(); panel = null; }
-  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  if (panel) {
+    panel.remove();
+    panel = null;
+  }
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
   sparkCanvas = null;
 }
 
@@ -50,7 +62,10 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
 
   gearBtn.addEventListener('click', openFromGear);
   gearBtn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFromGear(e); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openFromGear(e);
+    }
   });
 
   // Make $/MIN stat also open the panel, anchored to the rate stat
@@ -84,7 +99,7 @@ function togglePanel(anchor: HTMLElement): void {
   panel.className = 'burn-rate-panel';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Cost intelligence');
-  panel.addEventListener('click', e => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
 
   renderPanelContent();
 
@@ -105,7 +120,7 @@ function renderPanelContent(): void {
   const projected = getProjectedDailyCost(totalCost);
   const samples = getSamples();
 
-  const activeSessions = Array.from(state.sessions.values()).filter(s => s.isActive);
+  const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
   const prevSettings = panel.querySelector('.burn-rate-settings') as HTMLElement | null;
   const settingsOpen = prevSettings !== null && prevSettings.style.display !== 'none';
 
@@ -233,10 +248,14 @@ function renderPanelContent(): void {
     renderPanelContent();
   });
   settingsEl.querySelector('.notif-budget')?.addEventListener('change', (e) => {
-    const s = getSettings(); s.budget = (e.target as HTMLInputElement).checked; saveSettings(s);
+    const s = getSettings();
+    s.budget = (e.target as HTMLInputElement).checked;
+    saveSettings(s);
   });
   settingsEl.querySelector('.notif-error')?.addEventListener('change', (e) => {
-    const s = getSettings(); s.error = (e.target as HTMLInputElement).checked; saveSettings(s);
+    const s = getSettings();
+    s.error = (e.target as HTMLInputElement).checked;
+    saveSettings(s);
   });
 }
 
@@ -262,7 +281,7 @@ function updatePanelValues(): void {
   drawSparkline(samples);
 
   // Update active sessions
-  const activeSessions = Array.from(state.sessions.values()).filter(s => s.isActive);
+  const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
   const sessSection = panel.querySelector('.burn-rate-sessions');
   if (sessSection) {
     const rows = sessSection.querySelectorAll('.burn-rate-session-row');
@@ -296,11 +315,17 @@ function updatePanelValues(): void {
     const barColor = pct >= 100 ? '#ff6b6b' : pct >= 80 ? '#ffa64a' : '#4ae68a';
     const depletionMin = getDepletionMinutes(budget, totalCost);
     const fill = panel.querySelector('.burn-rate-budget-fill') as HTMLElement | null;
-    if (fill) { fill.style.width = `${pct}%`; fill.style.background = barColor; }
+    if (fill) {
+      fill.style.width = `${pct}%`;
+      fill.style.background = barColor;
+    }
     const budgetText = panel.querySelector('.burn-rate-budget-text');
-    if (budgetText) budgetText.innerHTML = `<span>${pct.toFixed(0)}%</span><span>$${totalCost.toFixed(2)} / $${budget}</span>`;
+    if (budgetText)
+      budgetText.innerHTML = `<span>${pct.toFixed(0)}%</span><span>$${totalCost.toFixed(2)} / $${budget}</span>`;
     const depletion = panel.querySelector('.burn-rate-depletion');
-    if (depletion) depletion.textContent = depletionMin !== null ? `Depletes in ~${formatMinutes(depletionMin)} at current rate` : '';
+    if (depletion)
+      depletion.textContent =
+        depletionMin !== null ? `Depletes in ~${formatMinutes(depletionMin)} at current rate` : '';
   }
 }
 
@@ -321,7 +346,7 @@ function drawSparkline(samples: { timestamp: number; costRate: number }[]): void
     return;
   }
 
-  const rates = samples.map(s => s.costRate);
+  const rates = samples.map((s) => s.costRate);
   const maxRate = Math.max(...rates, 0.001);
   const minRate = Math.min(...rates);
   const range = maxRate - minRate || 0.001;
@@ -373,7 +398,11 @@ function checkBudget(): void {
       banner.querySelector('button')!.addEventListener('click', () => {
         update({ budgetDismissed: true });
       });
-      notify('budget', 'Budget Exceeded', `Total spend $${total.toFixed(0)} exceeds $${state.budgetThreshold}`);
+      notify(
+        'budget',
+        'Budget Exceeded',
+        `Total spend $${total.toFixed(0)} exceeds $${state.budgetThreshold}`,
+      );
     } else {
       banner.className = 'budget-banner hidden';
     }

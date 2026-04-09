@@ -9,7 +9,8 @@ import '../styles/analytics.css';
 
 let container: HTMLElement | null = null;
 let root: HTMLElement | null = null;
-let currentWindow: TrendWindow = (localStorage.getItem('claude-monitor-analytics-window') as TrendWindow) || '7d';
+let currentWindow: TrendWindow =
+  (localStorage.getItem('claude-monitor-analytics-window') as TrendWindow) || '7d';
 let currentRepo: string | undefined;
 let repos: RepoEntry[] = [];
 let trendData: TrendResult | null = null;
@@ -19,7 +20,9 @@ let loading = false;
 function getCardState(): Record<string, boolean> {
   try {
     return JSON.parse(localStorage.getItem('claude-monitor-analytics-cards') || '{}');
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 
 function setCardState(id: string, expanded: boolean): void {
@@ -47,7 +50,10 @@ function show(): void {
   if (!container) return;
 
   // Remove any existing root
-  if (root) { root.remove(); root = null; }
+  if (root) {
+    root.remove();
+    root = null;
+  }
 
   root = document.createElement('div');
   root.className = 'analytics-view';
@@ -134,7 +140,7 @@ function show(): void {
 
 function updateToolbar(): void {
   if (!root) return;
-  root.querySelectorAll<HTMLButtonElement>('.analytics-win-btn').forEach(btn => {
+  root.querySelectorAll<HTMLButtonElement>('.analytics-win-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.textContent === currentWindow.toUpperCase());
   });
 }

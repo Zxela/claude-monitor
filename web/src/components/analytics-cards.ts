@@ -24,22 +24,24 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'area line chart',
     defaultExpanded: true,
     render(canvas, data) {
-      const labels = data.buckets.map(b => b.date);
-      const values = data.buckets.map(b => b.cost);
+      const labels = data.buckets.map((b) => b.date);
+      const values = data.buckets.map((b) => b.cost);
       const opts = darkTheme() as any;
       return new Chart(canvas, {
         type: 'line',
         data: {
           labels,
-          datasets: [{
-            label: 'Cost ($)',
-            data: values,
-            borderColor: COLORS.green,
-            backgroundColor: COLORS.green + '33',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 2,
-          }],
+          datasets: [
+            {
+              label: 'Cost ($)',
+              data: values,
+              borderColor: COLORS.green,
+              backgroundColor: COLORS.green + '33',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+            },
+          ],
         },
         options: opts,
       });
@@ -51,7 +53,7 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'stacked bar',
     defaultExpanded: true,
     render(canvas, data) {
-      const labels = data.buckets.map(b => b.date);
+      const labels = data.buckets.map((b) => b.date);
       const opts = darkTheme() as any;
       opts.scales.x.stacked = true;
       opts.scales.y.stacked = true;
@@ -61,10 +63,26 @@ const CARD_DEFS: CardDef[] = [
         data: {
           labels,
           datasets: [
-            { label: 'Cache Read', data: data.buckets.map(b => b.cacheReadTokens), backgroundColor: COLORS.green },
-            { label: 'Input', data: data.buckets.map(b => b.inputTokens), backgroundColor: COLORS.blue },
-            { label: 'Cache Create', data: data.buckets.map(b => b.cacheCreationTokens), backgroundColor: COLORS.purple },
-            { label: 'Output', data: data.buckets.map(b => b.outputTokens), backgroundColor: COLORS.orange },
+            {
+              label: 'Cache Read',
+              data: data.buckets.map((b) => b.cacheReadTokens),
+              backgroundColor: COLORS.green,
+            },
+            {
+              label: 'Input',
+              data: data.buckets.map((b) => b.inputTokens),
+              backgroundColor: COLORS.blue,
+            },
+            {
+              label: 'Cache Create',
+              data: data.buckets.map((b) => b.cacheCreationTokens),
+              backgroundColor: COLORS.purple,
+            },
+            {
+              label: 'Output',
+              data: data.buckets.map((b) => b.outputTokens),
+              backgroundColor: COLORS.orange,
+            },
           ],
         },
         options: opts,
@@ -77,19 +95,21 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'horizontal bar',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.byRepo.map(r => r.repoName || r.repoId);
-      const values = data.byRepo.map(r => r.cost);
+      const labels = data.byRepo.map((r) => r.repoName || r.repoId);
+      const values = data.byRepo.map((r) => r.cost);
       const opts = darkTheme() as any;
       opts.indexAxis = 'y';
       return new Chart(canvas, {
         type: 'bar',
         data: {
           labels,
-          datasets: [{
-            label: 'Cost ($)',
-            data: values,
-            backgroundColor: COLORS.blue,
-          }],
+          datasets: [
+            {
+              label: 'Cost ($)',
+              data: values,
+              backgroundColor: COLORS.blue,
+            },
+          ],
         },
         options: opts,
       });
@@ -101,9 +121,16 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'doughnut',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.byModel.map(m => m.model);
-      const values = data.byModel.map(m => m.cost);
-      const colors = [COLORS.green, COLORS.blue, COLORS.purple, COLORS.orange, COLORS.red, COLORS.yellow];
+      const labels = data.byModel.map((m) => m.model);
+      const values = data.byModel.map((m) => m.cost);
+      const colors = [
+        COLORS.green,
+        COLORS.blue,
+        COLORS.purple,
+        COLORS.orange,
+        COLORS.red,
+        COLORS.yellow,
+      ];
       const opts = darkTheme() as any;
       // Doughnut doesn't use x/y scales
       delete opts.scales;
@@ -111,10 +138,12 @@ const CARD_DEFS: CardDef[] = [
         type: 'doughnut',
         data: {
           labels,
-          datasets: [{
-            data: values,
-            backgroundColor: colors.slice(0, labels.length),
-          }],
+          datasets: [
+            {
+              data: values,
+              backgroundColor: colors.slice(0, labels.length),
+            },
+          ],
         },
         options: opts,
       });
@@ -126,8 +155,8 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'line chart',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.buckets.map(b => b.date);
-      const values = data.buckets.map(b => b.cacheHitPct);
+      const labels = data.buckets.map((b) => b.date);
+      const values = data.buckets.map((b) => b.cacheHitPct);
       const opts = darkTheme() as any;
       opts.scales.y.min = 0;
       opts.scales.y.max = 100;
@@ -135,15 +164,17 @@ const CARD_DEFS: CardDef[] = [
         type: 'line',
         data: {
           labels,
-          datasets: [{
-            label: 'Cache Hit %',
-            data: values,
-            borderColor: COLORS.orange,
-            backgroundColor: COLORS.orange + '33',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 2,
-          }],
+          datasets: [
+            {
+              label: 'Cache Hit %',
+              data: values,
+              borderColor: COLORS.orange,
+              backgroundColor: COLORS.orange + '33',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+            },
+          ],
         },
         options: opts,
       });
@@ -155,16 +186,34 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'multi-line',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.buckets.map(b => b.date);
+      const labels = data.buckets.map((b) => b.date);
       const opts = darkTheme() as any;
       return new Chart(canvas, {
         type: 'line',
         data: {
           labels,
           datasets: [
-            { label: 'Average', data: data.buckets.map(b => b.avgSessionCost), borderColor: COLORS.blue, tension: 0.3, pointRadius: 2 },
-            { label: 'Median', data: data.buckets.map(b => b.medianSessionCost), borderColor: COLORS.green, tension: 0.3, pointRadius: 2 },
-            { label: 'P95', data: data.buckets.map(b => b.p95SessionCost), borderColor: COLORS.red, tension: 0.3, pointRadius: 2 },
+            {
+              label: 'Average',
+              data: data.buckets.map((b) => b.avgSessionCost),
+              borderColor: COLORS.blue,
+              tension: 0.3,
+              pointRadius: 2,
+            },
+            {
+              label: 'Median',
+              data: data.buckets.map((b) => b.medianSessionCost),
+              borderColor: COLORS.green,
+              tension: 0.3,
+              pointRadius: 2,
+            },
+            {
+              label: 'P95',
+              data: data.buckets.map((b) => b.p95SessionCost),
+              borderColor: COLORS.red,
+              tension: 0.3,
+              pointRadius: 2,
+            },
           ],
         },
         options: opts,
@@ -177,23 +226,25 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'line chart',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.buckets.map(b => b.date);
-      const values = data.buckets.map(b => b.avgSessionTokens);
+      const labels = data.buckets.map((b) => b.date);
+      const values = data.buckets.map((b) => b.avgSessionTokens);
       const opts = darkTheme() as any;
       opts.scales.y.ticks = { ...opts.scales.y.ticks, callback: (v: number) => formatTokens(v) };
       return new Chart(canvas, {
         type: 'line',
         data: {
           labels,
-          datasets: [{
-            label: 'Avg Tokens/Session',
-            data: values,
-            borderColor: COLORS.purple,
-            backgroundColor: COLORS.purple + '33',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 2,
-          }],
+          datasets: [
+            {
+              label: 'Avg Tokens/Session',
+              data: values,
+              borderColor: COLORS.purple,
+              backgroundColor: COLORS.purple + '33',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+            },
+          ],
         },
         options: opts,
       });
@@ -205,22 +256,24 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'line chart',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.buckets.map(b => b.date);
-      const values = data.buckets.map(b => b.outputInputRatio);
+      const labels = data.buckets.map((b) => b.date);
+      const values = data.buckets.map((b) => b.outputInputRatio);
       const opts = darkTheme() as any;
       return new Chart(canvas, {
         type: 'line',
         data: {
           labels,
-          datasets: [{
-            label: 'Output/Input',
-            data: values,
-            borderColor: COLORS.yellow,
-            backgroundColor: COLORS.yellow + '33',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 2,
-          }],
+          datasets: [
+            {
+              label: 'Output/Input',
+              data: values,
+              borderColor: COLORS.yellow,
+              backgroundColor: COLORS.yellow + '33',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+            },
+          ],
         },
         options: opts,
       });
@@ -279,7 +332,10 @@ export function renderCards(
         body.style.display = 'none';
         header.querySelector('.analytics-card-toggle')!.textContent = '▶';
         const existing = charts.get(def.id);
-        if (existing) { existing.destroy(); charts.delete(def.id); }
+        if (existing) {
+          existing.destroy();
+          charts.delete(def.id);
+        }
         onToggle(def.id, false);
       } else {
         // Expand

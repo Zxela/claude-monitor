@@ -66,7 +66,7 @@ export function render(container: HTMLElement): void {
   const searchBox = el.querySelector('.search-box');
   const viewToggle = el.querySelector('.view-toggle');
 
-  stats.forEach(stat => collapsible.appendChild(stat));
+  stats.forEach((stat) => collapsible.appendChild(stat));
   if (searchBox) collapsible.appendChild(searchBox);
   if (viewToggle) collapsible.appendChild(viewToggle);
 
@@ -79,12 +79,16 @@ export function render(container: HTMLElement): void {
   });
 
   // Escape key closes collapsible
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && collapsible.classList.contains('open')) {
-      collapsible.classList.remove('open');
-      hamburger.setAttribute('aria-expanded', 'false');
-    }
-  }, { signal });
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Escape' && collapsible.classList.contains('open')) {
+        collapsible.classList.remove('open');
+        hamburger.setAttribute('aria-expanded', 'false');
+      }
+    },
+    { signal },
+  );
 
   container.appendChild(el);
 
@@ -94,14 +98,14 @@ export function render(container: HTMLElement): void {
   statRate = el.querySelector('[data-stat="rate"]');
   searchInput = el.querySelector('[data-search]');
 
-  el.querySelectorAll<HTMLButtonElement>('.view-btn').forEach(btn => {
+  el.querySelectorAll<HTMLButtonElement>('.view-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view as AppState['view'];
       update({ view });
     });
   });
 
-  el.querySelectorAll<HTMLButtonElement>('.win-btn').forEach(btn => {
+  el.querySelectorAll<HTMLButtonElement>('.win-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const win = btn.dataset.window as StatsWindow;
       localStorage.setItem('claude-monitor-stats-window', win);
@@ -122,12 +126,16 @@ export function render(container: HTMLElement): void {
     }
   });
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement !== searchInput) {
-      e.preventDefault();
-      searchInput!.focus();
-    }
-  }, { signal });
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === '/' && document.activeElement !== searchInput) {
+        e.preventDefault();
+        searchInput!.focus();
+      }
+    },
+    { signal },
+  );
 
   subscribe(onStateChange);
 
@@ -158,13 +166,15 @@ export function render(container: HTMLElement): void {
 }
 
 function refreshStats(): void {
-  fetchStats(state.statsWindow).then(stats => {
-    update({ stats });
-  }).catch(() => {});
+  fetchStats(state.statsWindow)
+    .then((stats) => {
+      update({ stats });
+    })
+    .catch(() => {});
 }
 
 function updateWindowButtons(): void {
-  el?.querySelectorAll<HTMLButtonElement>('.win-btn').forEach(btn => {
+  el?.querySelectorAll<HTMLButtonElement>('.win-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.window === state.statsWindow);
   });
 }
@@ -177,7 +187,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     updateWindowButtons();
   }
   if (changed.has('view')) {
-    el?.querySelectorAll<HTMLButtonElement>('.view-btn').forEach(btn => {
+    el?.querySelectorAll<HTMLButtonElement>('.view-btn').forEach((btn) => {
       const isActive = btn.dataset.view === state.view;
       btn.classList.toggle('active', isActive);
       btn.setAttribute('aria-pressed', String(isActive));
@@ -205,7 +215,9 @@ function updateStats(): void {
   const stats = state.stats;
   if (!stats) return;
   // Count only top-level active sessions (no subagents) to match sidebar
-  const activeTopLevel = Array.from(state.sessions.values()).filter(s => s.isActive && !s.parentId).length;
+  const activeTopLevel = Array.from(state.sessions.values()).filter(
+    (s) => s.isActive && !s.parentId,
+  ).length;
   setVal(statActive, String(activeTopLevel));
   setVal(statCost, `$${stats.totalCost.toFixed(0)}`);
   setVal(statCache, stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—');

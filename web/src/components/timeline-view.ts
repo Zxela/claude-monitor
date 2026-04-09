@@ -139,7 +139,8 @@ function getColor(evt: TimelineEvent): string {
 
 function draw(): void {
   if (!ctx || !canvas || !container || events.length === 0) return;
-  const w = container.clientWidth, h = container.clientHeight;
+  const w = container.clientWidth,
+    h = container.clientHeight;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const laneH = (h - 30) / 3; // 30px for top time labels
@@ -167,7 +168,7 @@ function draw(): void {
   ctx.fillStyle = '#8888aa';
   ctx.font = '9px monospace';
   ctx.textAlign = 'center';
-  const step = Math.max(1000, Math.pow(10, Math.floor(Math.log10(1 / pixelsPerMs * 100))));
+  const step = Math.max(1000, Math.pow(10, Math.floor(Math.log10((1 / pixelsPerMs) * 100))));
   for (let t = 0; ; t += step) {
     const x = t * pixelsPerMs + offsetX;
     if (x > w) break;
@@ -183,7 +184,14 @@ function draw(): void {
   // Build spans: group consecutive events in the same lane into bars.
   // A span starts when an event enters a lane and ends when the next event
   // is in a different lane, or there's a gap > 2s in the same lane.
-  interface Span { start: number; end: number; lane: number; color: string; label: string; events: TimelineEvent[]; }
+  interface Span {
+    start: number;
+    end: number;
+    lane: number;
+    color: string;
+    label: string;
+    events: TimelineEvent[];
+  }
   const spans: Span[] = [];
   let cur: Span | null = null;
   const GAP_THRESHOLD = 2000; // 2s gap breaks a span
@@ -195,7 +203,7 @@ function draw(): void {
     // Duration: time until the next event in a different lane starts
     // (meaning this lane was "active" until then), or until the next
     // event in the same lane if it's close (continuation).
-    let end = ts;
+    let end: number;
     if (i < events.length - 1) {
       const nextTs = new Date(events[i + 1].timestamp).getTime();
       // If the next global event is in a different lane, this lane was
@@ -217,7 +225,14 @@ function draw(): void {
     } else {
       // Start new span
       if (cur) spans.push(cur);
-      cur = { start: ts, end, lane, color: getColor(evt), label: evt.toolName || evt.role || '', events: [evt] };
+      cur = {
+        start: ts,
+        end,
+        lane,
+        color: getColor(evt),
+        label: evt.toolName || evt.role || '',
+        events: [evt],
+      };
     }
   }
   if (cur) spans.push(cur);
@@ -340,7 +355,14 @@ function onWheel(e: WheelEvent): void {
   draw();
 }
 
-function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+function roundRect(
+  c: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
   c.beginPath();
   c.moveTo(x + r, y);
   c.lineTo(x + w - r, y);

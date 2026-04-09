@@ -73,10 +73,18 @@
   font-weight: bold;
   font-family: monospace;
 }
-.analytics-stat-val.green { color: #4ae68a; }
-.analytics-stat-val.blue { color: #6ab4ff; }
-.analytics-stat-val.orange { color: #ffa64a; }
-.analytics-stat-val.purple { color: #c49aff; }
+.analytics-stat-val.green {
+  color: #4ae68a;
+}
+.analytics-stat-val.blue {
+  color: #6ab4ff;
+}
+.analytics-stat-val.orange {
+  color: #ffa64a;
+}
+.analytics-stat-val.purple {
+  color: #c49aff;
+}
 .analytics-stat-label {
   font-size: 11px;
   color: var(--text-secondary, #888);

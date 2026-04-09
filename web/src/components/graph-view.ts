@@ -118,7 +118,7 @@ function renderSequence(wrapper: HTMLElement): void {
   const threshold = 120_000;
 
   const sessions = Array.from(state.sessions.values())
-    .filter(s => s.isActive || (now - new Date(s.lastActive).getTime()) < threshold)
+    .filter((s) => s.isActive || now - new Date(s.lastActive).getTime() < threshold)
     .sort((a, b) => {
       const aAttn = needsAttention(a) ? 1 : 0;
       const bAttn = needsAttention(b) ? 1 : 0;
@@ -131,7 +131,8 @@ function renderSequence(wrapper: HTMLElement): void {
 
   if (sessions.length === 0) {
     const empty = document.createElement('div');
-    empty.style.cssText = 'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 10px; letter-spacing: 1px; opacity: 0.4;';
+    empty.style.cssText =
+      'padding: 24px; text-align: center; color: var(--text-dim, #666); font-size: 10px; letter-spacing: 1px; opacity: 0.4;';
     empty.textContent = 'NO ACTIVE SESSIONS';
     list.appendChild(empty);
   }
@@ -146,15 +147,20 @@ function renderSequence(wrapper: HTMLElement): void {
     const name = sessionDisplayName(sess);
     const cost = `$${sess.totalCost.toFixed(2)}`;
     const statusClass = sess.isActive
-      ? (sess.status === 'thinking' ? 'thinking' : sess.status === 'tool_use' ? 'tool-use' : 'active')
+      ? sess.status === 'thinking'
+        ? 'thinking'
+        : sess.status === 'tool_use'
+          ? 'tool-use'
+          : 'active'
       : 'idle';
     const statusText = sess.isActive ? sess.status.replace('_', ' ') : 'done';
     const attn = needsAttention(sess);
     const attnBadge = attn
-      ? (sess.status === 'waiting' ? '<span style="color:#ffa64a;font-size:9px;margin-left:6px">WAITING</span>'
-        : '<span style="color:#ff6b6b;font-size:9px;margin-left:6px">ERROR</span>')
+      ? sess.status === 'waiting'
+        ? '<span style="color:#ffa64a;font-size:9px;margin-left:6px">WAITING</span>'
+        : '<span style="color:#ff6b6b;font-size:9px;margin-left:6px">ERROR</span>'
       : '';
-    const toolInfo = sess.status === 'tool_use' ? (getLastTool(sess.id) || '') : '';
+    const toolInfo = sess.status === 'tool_use' ? getLastTool(sess.id) || '' : '';
 
     entry.innerHTML = `
       <span class="sequence-time">${time}</span>
@@ -218,13 +224,13 @@ function rebuildNodes(): void {
   const visibleSessions: Session[] = [];
   for (const sess of state.sessions.values()) {
     const lastActive = new Date(sess.lastActive).getTime();
-    if (sess.isActive || (now - lastActive) < threshold) {
+    if (sess.isActive || now - lastActive < threshold) {
       visibleSessions.push(sess);
     }
   }
 
   // Include parents of visible nodes
-  const visibleIds = new Set(visibleSessions.map(s => s.id));
+  const visibleIds = new Set(visibleSessions.map((s) => s.id));
   for (const sess of visibleSessions) {
     if (sess.parentId && !visibleIds.has(sess.parentId)) {
       const parent = state.sessions.get(sess.parentId);
@@ -239,19 +245,23 @@ function rebuildNodes(): void {
   if (nodeIds === prevNodeIds) return;
   prevNodeIds = nodeIds;
 
-  const oldNodes = new Map(nodes.map(n => [n.id, n]));
+  const oldNodes = new Map(nodes.map((n) => [n.id, n]));
   const cx = logicalW / 2;
   const cy = logicalH / 2;
 
-  nodes = visibleSessions.map(sess => {
+  nodes = visibleSessions.map((sess) => {
     const old = oldNodes.get(sess.id);
     const radius = Math.min(30, Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8));
-    const color = !sess.isActive ? '#44445a'
-      : sess.status === 'thinking' ? '#ffcc00'
-      : sess.status === 'tool_use' ? '#4488ff'
-      : sess.status === 'waiting' ? '#ffa64a'
-      : '#00ff88';
-    const label = (sessionDisplayName(sess)).substring(0, 16);
+    const color = !sess.isActive
+      ? '#44445a'
+      : sess.status === 'thinking'
+        ? '#ffcc00'
+        : sess.status === 'tool_use'
+          ? '#4488ff'
+          : sess.status === 'waiting'
+            ? '#ffa64a'
+            : '#00ff88';
+    const label = sessionDisplayName(sess).substring(0, 16);
 
     return {
       id: sess.id,
@@ -259,12 +269,15 @@ function rebuildNodes(): void {
       y: old?.y ?? cy + (Math.random() - 0.5) * 200,
       vx: old?.vx ?? 0,
       vy: old?.vy ?? 0,
-      radius, color, label, session: sess,
+      radius,
+      color,
+      label,
+      session: sess,
     };
   });
 
   // Rebuild cached nodeMap
-  nodeMap = new Map(nodes.map(n => [n.id, n]));
+  nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
   edges = [];
   for (const sess of visibleSessions) {
@@ -286,11 +299,15 @@ function updateNodeColors(): void {
     const sess = state.sessions.get(n.id);
     if (!sess) continue;
     n.session = sess;
-    const newColor = !sess.isActive ? '#44445a'
-      : sess.status === 'thinking' ? '#ffcc00'
-      : sess.status === 'tool_use' ? '#4488ff'
-      : sess.status === 'waiting' ? '#ffa64a'
-      : '#00ff88';
+    const newColor = !sess.isActive
+      ? '#44445a'
+      : sess.status === 'thinking'
+        ? '#ffcc00'
+        : sess.status === 'tool_use'
+          ? '#4488ff'
+          : sess.status === 'waiting'
+            ? '#ffa64a'
+            : '#00ff88';
     if (n.color !== newColor) {
       n.color = newColor;
       needsRedraw = true;
@@ -298,7 +315,7 @@ function updateNodeColors(): void {
     n.radius = Math.min(30, Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8));
   }
   // If any node needs attention, ensure animation is running
-  const anyAttention = nodes.some(n => needsAttention(n.session));
+  const anyAttention = nodes.some((n) => needsAttention(n.session));
   if (anyAttention && animFrame === null && state.view === 'graph') {
     settledFrames = 0;
     startAnimation();
@@ -315,30 +332,41 @@ function simulate(): void {
   // Repulsion
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i], b = nodes[j];
-      const dx = b.x - a.x, dy = b.y - a.y;
+      const a = nodes[i],
+        b = nodes[j];
+      const dx = b.x - a.x,
+        dy = b.y - a.y;
       const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
       const force = 2000 / (dist * dist);
-      const fx = (dx / dist) * force, fy = (dy / dist) * force;
-      a.vx -= fx; a.vy -= fy;
-      b.vx += fx; b.vy += fy;
+      const fx = (dx / dist) * force,
+        fy = (dy / dist) * force;
+      a.vx -= fx;
+      a.vy -= fy;
+      b.vx += fx;
+      b.vy += fy;
     }
   }
 
   // Attraction along edges (use cached nodeMap)
   for (const edge of edges) {
-    const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
+    const a = nodeMap.get(edge.source),
+      b = nodeMap.get(edge.target);
     if (!a || !b) continue;
-    const dx = b.x - a.x, dy = b.y - a.y;
+    const dx = b.x - a.x,
+      dy = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     const force = (dist - 100) * 0.01;
-    const fx = (dx / dist) * force, fy = (dy / dist) * force;
-    a.vx += fx; a.vy += fy;
-    b.vx -= fx; b.vy -= fy;
+    const fx = (dx / dist) * force,
+      fy = (dy / dist) * force;
+    a.vx += fx;
+    a.vy += fy;
+    b.vx -= fx;
+    b.vy -= fy;
   }
 
   // Center gravity + damping + bounds
-  const cx = w / 2, cy = h / 2;
+  const cx = w / 2,
+    cy = h / 2;
   for (const n of nodes) {
     n.vx += (cx - n.x) * 0.001;
     n.vy += (cy - n.y) * 0.001;
@@ -353,8 +381,10 @@ function simulate(): void {
   }
 
   // Idle detection: check if all velocities are below threshold
-  const allSettled = nodes.every(n => Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD);
-  const anyAttention = nodes.some(n => needsAttention(n.session));
+  const allSettled = nodes.every(
+    (n) => Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD,
+  );
+  const anyAttention = nodes.some((n) => needsAttention(n.session));
   if (allSettled && !anyAttention) {
     settledFrames++;
   } else if (!allSettled) {
@@ -370,7 +400,8 @@ function draw(): void {
   ctx.strokeStyle = 'rgba(100,100,140,0.3)';
   ctx.lineWidth = 1;
   for (const edge of edges) {
-    const a = nodeMap.get(edge.source), b = nodeMap.get(edge.target);
+    const a = nodeMap.get(edge.source),
+      b = nodeMap.get(edge.target);
     if (!a || !b) continue;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
@@ -422,7 +453,8 @@ function draw(): void {
 
 function getNodeAt(x: number, y: number): GraphNode | null {
   for (const n of nodes) {
-    const dx = x - n.x, dy = y - n.y;
+    const dx = x - n.x,
+      dy = y - n.y;
     if (dx * dx + dy * dy < (n.radius + 4) * (n.radius + 4)) return n;
   }
   return null;
@@ -443,7 +475,8 @@ function onMouseDown(e: MouseEvent): void {
 function onMouseMove(e: MouseEvent): void {
   if (!canvas || !tooltip) return;
   const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const mx = e.clientX - rect.left,
+    my = e.clientY - rect.top;
 
   if (dragging) {
     dragging.x = mx;
@@ -460,12 +493,17 @@ function onMouseMove(e: MouseEvent): void {
   if (node) {
     const sess = node.session;
     const statusText = sess.isActive ? sess.status.replace('_', ' ').toUpperCase() : 'DONE';
-    const statusClass = sess.status === 'waiting' ? 'color:#ffa64a'
-      : sess.status === 'thinking' ? 'color:#ffcc00'
-      : sess.status === 'tool_use' ? 'color:#4488ff'
-      : 'color:#888';
-    const toolName = sess.status === 'tool_use' ? (getLastTool(sess.id) || '') : '';
-    const errHtml = sess.errorCount > 0 ? `<div style="color:#ff6b6b">${sess.errorCount} errors</div>` : '';
+    const statusClass =
+      sess.status === 'waiting'
+        ? 'color:#ffa64a'
+        : sess.status === 'thinking'
+          ? 'color:#ffcc00'
+          : sess.status === 'tool_use'
+            ? 'color:#4488ff'
+            : 'color:#888';
+    const toolName = sess.status === 'tool_use' ? getLastTool(sess.id) || '' : '';
+    const errHtml =
+      sess.errorCount > 0 ? `<div style="color:#ff6b6b">${sess.errorCount} errors</div>` : '';
 
     tooltip.innerHTML = `
       <div><b>${escapeHtml(node.label)}</b> <span style="${statusClass};font-size:9px">${statusText}</span></div>
