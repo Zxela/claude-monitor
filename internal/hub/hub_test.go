@@ -169,16 +169,21 @@ func TestHub_BroadcastAfterClientUnregistered(t *testing.T) {
 	}
 	h.register <- client2
 
-	want := []byte(`{"still":"alive"}`)
-	h.Broadcast(want)
+	want := `{"still":"alive"}`
+	h.Broadcast([]byte(want))
 
-	select {
-	case got := <-client2.send:
-		if string(got) != string(want) {
-			t.Errorf("received %q, want %q", string(got), string(want))
+	// Drain messages until we find the expected one. The earlier broadcast
+	// (to no clients) may still be buffered and delivered to client2.
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case got := <-client2.send:
+			if string(got) == want {
+				return // success
+			}
+		case <-timeout:
+			t.Fatal("timeout: hub stopped working after broadcast to unregistered client")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout: hub stopped working after broadcast to unregistered client")
 	}
 }
 
