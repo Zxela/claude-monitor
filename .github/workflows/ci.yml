@@ -55,9 +55,16 @@ jobs:
 
       - name: Check no debug code
         run: |
-          if grep -rn 'fmt\.Println\|log\.Fatal\b' internal/ cmd/ --include='*.go' | grep -v '_test.go' | grep -v 'log.Fatalf'; then
-            echo "WARNING: Found debug print statements"
+          if grep -rn 'fmt\.Println' internal/ --include='*.go' | grep -v '_test.go'; then
+            echo "::error::Found fmt.Println debug statements in internal/"
+            exit 1
           fi
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+        continue-on-error: true
 
   # Create or update the release PR on pushes to main
   release-please:
