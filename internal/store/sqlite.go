@@ -366,6 +366,36 @@ func (d *DB) SaveSession(s *session.Session) error {
 	return err
 }
 
+// LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
+// This is used to rebuild in-memory dedup state after a restart, preventing double-counting.
+func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]session.MessageCosts, error) {
+	rows, err := d.db.Query(`
+		SELECT message_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+		FROM events
+		WHERE session_id = ? AND message_id IS NOT NULL AND message_id != ''
+		GROUP BY message_id
+		HAVING MAX(id)`, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	ids := make(map[string]bool)
+	costs := make(map[string]session.MessageCosts)
+	for rows.Next() {
+		var mid string
+		var mc session.MessageCosts
+		if err := rows.Scan(&mid, &mc.CostUSD, &mc.InputTokens, &mc.OutputTokens, &mc.CacheReadTokens, &mc.CacheCreationTokens); err != nil {
+			return nil, nil, err
+		}
+		ids[mid] = true
+		if mc.CostUSD > 0 || mc.InputTokens > 0 || mc.OutputTokens > 0 {
+			costs[mid] = mc
+		}
+	}
+	return ids, costs, rows.Err()
+}
+
 // ListSessions returns sessions ordered by ended_at descending.
 func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 	if limit <= 0 {
