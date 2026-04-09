@@ -1008,8 +1008,8 @@ Examples:
 
 	// Health check.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if err := historyDB.Ping(); err != nil {
-			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			writeJSON(w, map[string]interface{}{"ok": false, "db": err.Error()})
 			return
