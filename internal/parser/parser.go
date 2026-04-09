@@ -196,59 +196,66 @@ func computeCost(model string, usage rawUsage) float64 {
 		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
 }
 
-// ParseLine unmarshals a single JSONL line and returns an Event.
-func ParseLine(line []byte) (*Event, error) {
+// isErrorContent returns true when text looks like an error message from a tool result.
+func isErrorContent(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "error ") ||
+		strings.Contains(lower, "command failed") ||
+		strings.Contains(lower, "exited with error")
+}
+
+// unmarshalLine decodes a JSONL line into the intermediate rawMessage struct.
+func unmarshalLine(line []byte) (*rawMessage, error) {
 	var raw rawMessage
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil, fmt.Errorf("json unmarshal: %w", err)
 	}
+	return &raw, nil
+}
 
+// buildBaseEvent constructs the core Event fields from a rawMessage: identity,
+// tokens, cost, timestamps, and session-level metadata.
+func buildBaseEvent(raw *rawMessage) *Event {
 	usage := raw.Message.Usage
-	cacheReadTokens := usage.CacheReadInputTokens
-	cacheCreationTokens := usage.CacheCreationInputTokens
-
 	cost := computeCost(raw.Message.Model, usage)
 
 	msg := &Event{
-		Type:         raw.Type,
-		MessageID:    raw.Message.ID,
-		Role:         raw.Message.Role,
-		CostUSD:      cost,
-		InputTokens:  usage.InputTokens,
-		OutputTokens: usage.OutputTokens,
-		CacheReadTokens:     cacheReadTokens,
-		CacheCreationTokens: cacheCreationTokens,
-		Timestamp:    raw.Timestamp,
-		SessionID:    raw.SessionID,
-		UUID:         raw.UUID,
+		Type:                raw.Type,
+		MessageID:           raw.Message.ID,
+		Role:                raw.Message.Role,
+		CostUSD:             cost,
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		CacheReadTokens:     usage.CacheReadInputTokens,
+		CacheCreationTokens: usage.CacheCreationInputTokens,
+		Timestamp:           raw.Timestamp,
+		SessionID:           raw.SessionID,
+		UUID:                raw.UUID,
+		ParentUUID:          raw.ParentUUID,
+		CWD:                 raw.CWD,
+		GitBranch:           raw.GitBranch,
+		Model:               raw.Message.Model,
+		IsSidechain:         raw.IsSidechain,
+		TeamName:            raw.TeamName,
+		AgentName:           raw.AgentName,
+		// Session-level metadata (carried on most JSONL lines).
+		IsMeta:     raw.IsMeta,
+		Version:    raw.Version,
+		Entrypoint: raw.Entrypoint,
 	}
 
-	msg.ParentUUID = raw.ParentUUID
-	msg.CWD = raw.CWD
-	msg.GitBranch = raw.GitBranch
-	msg.Model = raw.Message.Model
-	msg.IsSidechain = raw.IsSidechain
-	msg.TeamName = raw.TeamName
-	msg.AgentName = raw.AgentName
 	if raw.Message.StopReason != nil {
 		msg.StopReason = *raw.Message.StopReason
 	}
+
 	// Treat queue-operation/enqueue as a user message (real-time user input).
 	if raw.Type == "queue-operation" && raw.Operation == "enqueue" {
 		msg.Type = "user"
 		msg.Role = "user"
 	}
 
-	// Session-level metadata (carried on most JSONL lines).
-	msg.IsMeta = raw.IsMeta
-	msg.Version = raw.Version
-	msg.Entrypoint = raw.Entrypoint
-
 	// Compact/summary events (context compaction in Claude Code).
-	// After a /compact, Claude Code emits a "summary" line containing the
-	// compressed context.  We surface it in the feed so users can see when
-	// compaction happened, and downstream pipeline code uses the type to
-	// reset dedup state.
 	if raw.Type == "summary" {
 		msg.Subtype = "compact"
 		if raw.Summary != "" {
@@ -261,92 +268,126 @@ func ParseLine(line []byte) (*Event, error) {
 		}
 	}
 
-	// System message metadata (turn_duration, stop_hook_summary).
-	if raw.Type == "system" {
-		msg.Subtype = raw.Subtype
-		msg.DurationMs = raw.DurationMs
-		msg.TurnMessageCount = raw.MessageCount
-		msg.HookCount = raw.HookCount
-		if len(raw.HookInfos) > 0 {
-			msg.HookInfos = string(raw.HookInfos)
-		}
-		msg.Level = raw.Level
-	}
+	return msg
+}
 
-	// Tool result metadata from toolUseResult (on user/tool_result lines).
-	if len(raw.ToolUseResult) > 0 {
-		var tr rawToolResult
-		if err := json.Unmarshal(raw.ToolUseResult, &tr); err != nil {
-			log.Printf("debug: unmarshal toolUseResult (uuid=%s): %v", raw.UUID, err)
-		} else {
-			msg.DurationMs = tr.DurationMs
-			if tr.Success != nil {
-				msg.Success = tr.Success
-				if !*tr.Success {
-					msg.IsError = true
-				}
-			}
-			msg.Interrupted = tr.Interrupted
-			msg.Truncated = tr.Truncated
-			msg.Stderr = tr.Stderr
-			msg.AgentDurationMs = tr.TotalDurationMs
-			msg.AgentTokens = tr.TotalTokens
-			msg.AgentToolUseCount = tr.TotalToolUseCount
-			msg.AgentType = tr.AgentType
-		}
+// applySystemMetadata populates system-specific fields (turn_duration,
+// stop_hook_summary) when the raw line is a system message.
+func applySystemMetadata(msg *Event, raw *rawMessage) {
+	if raw.Type != "system" {
+		return
 	}
+	msg.Subtype = raw.Subtype
+	msg.DurationMs = raw.DurationMs
+	msg.TurnMessageCount = raw.MessageCount
+	msg.HookCount = raw.HookCount
+	if len(raw.HookInfos) > 0 {
+		msg.HookInfos = string(raw.HookInfos)
+	}
+	msg.Level = raw.Level
+}
 
-	// Extract hook data from progress messages.
-	if raw.Type == "progress" && raw.Data.Type == "hook_progress" {
-		msg.HookEvent = raw.Data.HookEvent
-		msg.HookName = raw.Data.HookName
-		// Extract tool name from hookName (e.g. "PostToolUse:Read" → "Read")
-		hookTool := raw.Data.HookName
-		if idx := strings.IndexByte(raw.Data.HookName, ':'); idx >= 0 {
-			hookTool = raw.Data.HookName[idx+1:]
-		}
-		// Include the hook command when available (shell command or "callback")
-		cmd := raw.Data.Command
-		if cmd != "" && cmd != "callback" {
-			msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
-			msg.ToolDetail = cmd
-			msg.FullContent = cmd
-		} else {
-			msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+// applyToolResultMetadata extracts metadata from the toolUseResult JSON field
+// found on user/tool_result lines.
+func applyToolResultMetadata(msg *Event, raw *rawMessage) {
+	if len(raw.ToolUseResult) == 0 {
+		return
+	}
+	var tr rawToolResult
+	if err := json.Unmarshal(raw.ToolUseResult, &tr); err != nil {
+		log.Printf("debug: unmarshal toolUseResult (uuid=%s): %v", raw.UUID, err)
+		return
+	}
+	msg.DurationMs = tr.DurationMs
+	if tr.Success != nil {
+		msg.Success = tr.Success
+		if !*tr.Success {
+			msg.IsError = true
 		}
 	}
+	msg.Interrupted = tr.Interrupted
+	msg.Truncated = tr.Truncated
+	msg.Stderr = tr.Stderr
+	msg.AgentDurationMs = tr.TotalDurationMs
+	msg.AgentTokens = tr.TotalTokens
+	msg.AgentToolUseCount = tr.TotalToolUseCount
+	msg.AgentType = tr.AgentType
+}
 
-	// Skip content extraction for hook messages (contentText already set above).
-	if msg.HookEvent == "" {
-		contentRaw := raw.Message.Content
-		if len(contentRaw) == 0 {
-			contentRaw = raw.Content
+// applyHookData extracts hook progress data from progress messages. Returns
+// true if hook data was applied (so content extraction can be skipped).
+func applyHookData(msg *Event, raw *rawMessage) bool {
+	if raw.Type != "progress" || raw.Data.Type != "hook_progress" {
+		return false
+	}
+	msg.HookEvent = raw.Data.HookEvent
+	msg.HookName = raw.Data.HookName
+
+	// Extract tool name from hookName (e.g. "PostToolUse:Read" -> "Read")
+	hookTool := raw.Data.HookName
+	if idx := strings.IndexByte(raw.Data.HookName, ':'); idx >= 0 {
+		hookTool = raw.Data.HookName[idx+1:]
+	}
+
+	msg.ContentText = fmt.Sprintf("[hook:%s] %s", raw.Data.HookEvent, hookTool)
+
+	// Include the hook command when available (shell command or "callback")
+	cmd := raw.Data.Command
+	if cmd != "" && cmd != "callback" {
+		msg.ToolDetail = cmd
+		msg.FullContent = cmd
+	}
+
+	return true
+}
+
+// applyContentData extracts content, tool metadata, and error flags from the
+// message or top-level content field.
+func applyContentData(msg *Event, raw *rawMessage) {
+	contentRaw := raw.Message.Content
+	if len(contentRaw) == 0 {
+		contentRaw = raw.Content
+	}
+	ci := extractContent(contentRaw)
+
+	msg.ContentText = ci.text
+	msg.ToolName = ci.toolName
+	msg.FullContent = ci.fullText
+	msg.ToolDetail = ci.toolDetail
+	msg.ToolUseID = ci.toolUseID
+	msg.ForToolUseID = ci.forToolUseID
+	msg.IsAgent = msg.ToolName == "Agent"
+	msg.IsError = msg.IsError || ci.isError
+
+	// Detect error indicators in content text when not already flagged.
+	if !msg.IsError && msg.ForToolUseID != "" && isErrorContent(ci.text) {
+		msg.IsError = true
+	}
+
+	// Populate ToolUseIDs for batched tool calls.
+	if len(ci.toolUseAll) > 1 {
+		ids := make([]string, len(ci.toolUseAll))
+		for i, tu := range ci.toolUseAll {
+			ids[i] = tu.ID
 		}
-		ci := extractContent(contentRaw)
-		msg.ContentText = ci.text
-		msg.ToolName = ci.toolName
-		msg.FullContent = ci.fullText
-		msg.ToolDetail = ci.toolDetail
-		msg.ToolUseID = ci.toolUseID
-		msg.ForToolUseID = ci.forToolUseID
-		msg.IsAgent = msg.ToolName == "Agent"
-		msg.IsError = msg.IsError || ci.isError
-		// Also detect error indicators in content text when not already flagged.
-		if !msg.IsError && msg.ForToolUseID != "" {
-			lower := strings.ToLower(ci.text)
-			if strings.HasPrefix(lower, "error:") || strings.HasPrefix(lower, "error ") ||
-				strings.Contains(lower, "command failed") || strings.Contains(lower, "exited with error") {
-				msg.IsError = true
-			}
-		}
-		// Populate ToolUseIDs for batched tool calls
-		if len(ci.toolUseAll) > 1 {
-			ids := make([]string, len(ci.toolUseAll))
-			for i, tu := range ci.toolUseAll {
-				ids[i] = tu.ID
-			}
-			msg.ToolUseIDs = ids
-		}
+		msg.ToolUseIDs = ids
+	}
+}
+
+// ParseLine unmarshals a single JSONL line and returns an Event.
+func ParseLine(line []byte) (*Event, error) {
+	raw, err := unmarshalLine(line)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := buildBaseEvent(raw)
+	applySystemMetadata(msg, raw)
+	applyToolResultMetadata(msg, raw)
+
+	// Hook messages set their own content; skip generic content extraction.
+	if !applyHookData(msg, raw) {
+		applyContentData(msg, raw)
 	}
 
 	return msg, nil
