@@ -21,6 +21,8 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/claude-monitor .
 EXPOSE 7700
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://localhost:7700/health || exit 1
 # Mount your .claude directories via volumes:
 # docker run -v ~/.claude:/home/node/.claude:ro -p 7700:7700 claude-monitor
 ENTRYPOINT ["./claude-monitor"]
