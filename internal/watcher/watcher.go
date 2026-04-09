@@ -189,7 +189,7 @@ func (w *Watcher) FindSessionFile(sessionID string) string {
 	for _, base := range w.basePaths {
 		expanded := expandHome(base)
 		var found string
-		_ = filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
+		if walkErr := filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil
 			}
@@ -198,7 +198,9 @@ func (w *Watcher) FindSessionFile(sessionID string) string {
 				return filepath.SkipAll
 			}
 			return nil
-		})
+		}); walkErr != nil {
+			log.Printf("watcher: walk error (%s): %v", expanded, walkErr)
+		}
 		if found != "" {
 			return found
 		}
@@ -289,8 +291,25 @@ func (w *Watcher) scanAll() {
 	}
 
 	// Clean up states for files that no longer exist on disk.
+	// Batch by parent directory to avoid per-file os.Stat calls.
+	dirFiles := make(map[string]map[string]bool)
 	for path := range w.states {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		dir := filepath.Dir(path)
+		if _, ok := dirFiles[dir]; !ok {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				dirFiles[dir] = map[string]bool{}
+				continue
+			}
+			m := make(map[string]bool, len(entries))
+			for _, e := range entries {
+				m[e.Name()] = true
+			}
+			dirFiles[dir] = m
+		}
+	}
+	for path := range w.states {
+		if !dirFiles[filepath.Dir(path)][filepath.Base(path)] {
 			log.Printf("watcher: removing stale state for deleted file %s", path)
 			delete(w.states, path)
 		}
@@ -329,7 +348,7 @@ func (w *Watcher) scanPathNoLock(base string) {
 	if _, err := os.Stat(expanded); os.IsNotExist(err) {
 		return
 	}
-	_ = filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
+	if walkErr := filepath.WalkDir(expanded, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
@@ -349,7 +368,9 @@ func (w *Watcher) scanPathNoLock(base string) {
 		}
 		w.mu.Unlock()
 		return nil
-	})
+	}); walkErr != nil {
+		log.Printf("watcher: walk error (%s): %v", expanded, walkErr)
+	}
 }
 
 // ensureTracked registers a JSONL file for watching if not already tracked.
