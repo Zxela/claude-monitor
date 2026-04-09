@@ -21,6 +21,7 @@ let headerEl: HTMLElement | null = null;
 let scrollLockBtn: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
+const scrollPositions = new Map<string, number>();
 const MAX_ENTRIES = 500;
 
 // Maps toolUseId -> displayType so tool_result messages can inherit their
@@ -53,6 +54,12 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
   if (sessionChanged || viewChanged) {
     if (state.view !== 'list') return; // other views take over the mount
+
+    // Save scroll position for the session we're leaving
+    if (sessionChanged && feedContent) {
+      const prevId = currentLoadSessionId || '__multi__';
+      scrollPositions.set(prevId, feedContent.scrollTop);
+    }
 
     if (state.selectedSessionId) {
       renderFeedPanel();
@@ -145,9 +152,6 @@ function renderFeedPanel(): void {
 
   // Scroll lock button — recreate on each render since container.innerHTML
   // clearing detaches any previously appended button from the DOM.
-  if (scrollLockBtn && scrollLockBtn.parentNode) {
-    scrollLockBtn.parentNode.removeChild(scrollLockBtn);
-  }
   scrollLockBtn = document.createElement('button');
   scrollLockBtn.className = 'scroll-lock-btn';
   scrollLockBtn.textContent = '▼ RESUME SCROLL';
@@ -158,7 +162,7 @@ function renderFeedPanel(): void {
       scrollLockBtn?.classList.remove('visible');
     }
   });
-  document.body.appendChild(scrollLockBtn);
+  feedContent.appendChild(scrollLockBtn);
 }
 
 function updateHeader(): void {
@@ -297,6 +301,13 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       appendMessage(msg as ParsedMessage);
     }
 
+    // Restore saved scroll position for this session
+    const savedScroll = scrollPositions.get(sessionId);
+    if (savedScroll !== undefined && feedContent) {
+        feedContent.scrollTop = savedScroll;
+        autoScroll = false;
+    }
+
     // Auto-expand and scroll to search-highlighted event
     if (state.searchHighlightEventId != null && feedContent) {
       const target = feedContent.querySelector<HTMLElement>(`[data-event-id="${state.searchHighlightEventId}"]`);
@@ -430,7 +441,11 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
     feedContent.removeChild(feedContent.firstChild!);
   }
 
-  if (autoScroll) {
-    feedContent.scrollTop = feedContent.scrollHeight;
+  if (autoScroll && feedContent) {
+    // Re-check scroll position to avoid race with scroll events
+    const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 60;
+    if (atBottom) {
+        feedContent.scrollTop = feedContent.scrollHeight;
+    }
   }
 }

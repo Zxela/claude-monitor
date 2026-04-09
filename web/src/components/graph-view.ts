@@ -179,9 +179,22 @@ function renderSequence(wrapper: HTMLElement): void {
 function hide(): void {
   stopAnimation();
   window.removeEventListener('resize', resizeCanvas);
+  // Clean up canvas event listeners to prevent accumulation
+  if (canvas) {
+    canvas.removeEventListener('mousedown', onMouseDown);
+    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('mouseup', onMouseUp);
+    canvas.removeEventListener('click', onClick);
+  }
   canvas = null;
   ctx = null;
   tooltip = null;
+  // Reset state so re-entering starts fresh
+  graphMode = 'graph';
+  nodes = [];
+  edges = [];
+  nodeMap = new Map();
+  prevNodeIds = '';
 }
 
 function resizeCanvas(): void {
