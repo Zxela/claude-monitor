@@ -135,12 +135,14 @@ func TestSkipDetail(t *testing.T) {
 		{&parser.Event{Type: "assistant"}, false},
 		{&parser.Event{Type: "user"}, false},
 		{&parser.Event{Type: "progress", HookEvent: "PreToolUse"}, false},
-		{&parser.Event{Type: "progress"}, true},  // non-hook progress
+		{&parser.Event{Type: "progress"}, false},
 		{&parser.Event{Type: "system"}, true},
+		{&parser.Event{Type: "system", Subtype: "turn_duration"}, false},
 		{&parser.Event{Type: "file-history-snapshot"}, true},
-		{&parser.Event{Type: "custom-title"}, true},
-		{&parser.Event{Type: "agent-name"}, true},
-		{&parser.Event{Type: "unknown-future-type"}, false}, // unknown defaults to sending
+		{&parser.Event{Type: "custom-title"}, false},
+		{&parser.Event{Type: "agent-name"}, false},
+		{&parser.Event{Type: "queue-operation"}, true},
+		{&parser.Event{Type: "unknown-future-type"}, false},
 	}
 
 	for _, tt := range tests {
