@@ -208,3 +208,88 @@ func TestFlush_PersistsEvents(t *testing.T) {
 		t.Errorf("event type: got %q, want user", events[0].Type)
 	}
 }
+
+func TestProcess_RebuildDedupFromDB(t *testing.T) {
+	db := openTestDB(t)
+	resolver := repo.NewResolver()
+	const sid = "dedup-rebuild-test"
+	ts := time.Now()
+
+	// --- Phase 1: Process events and persist to DB ---
+	sessions1 := session.NewStore()
+	p1 := New(sessions1, db, resolver, nil)
+
+	// Process two distinct messages with costs.
+	for i, msgID := range []string{"msg-aaa", "msg-bbb"} {
+		line := makeJSONL(t, map[string]interface{}{
+			"type":      "assistant",
+			"timestamp": ts.Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano),
+			"sessionId": sid,
+			"message": map[string]interface{}{
+				"id":   msgID,
+				"role": "assistant",
+				"content": "response " + msgID,
+				"usage": map[string]interface{}{
+					"input_tokens":  100,
+					"output_tokens": 50,
+				},
+				"model":       "claude-sonnet-4-6",
+				"stop_reason": "end_turn",
+			},
+			"costUSD": 0.01,
+		})
+		p1.Process(watcher.Event{SessionID: sid, Line: line, Bootstrap: true})
+	}
+	p1.Stop() // flushes to DB
+
+	sess1, ok := sessions1.Get(sid)
+	if !ok {
+		t.Fatal("session not found after phase 1")
+	}
+	origCost := sess1.TotalCost
+	origMsgCount := sess1.MessageCount
+	if origCost == 0 {
+		t.Fatal("expected non-zero cost after phase 1")
+	}
+	if origMsgCount != 2 {
+		t.Fatalf("expected 2 messages, got %d", origMsgCount)
+	}
+
+	// --- Phase 2: Simulate restart — fresh session store, same DB ---
+	sessions2 := session.NewStore()
+	p2 := New(sessions2, db, resolver, nil)
+	defer p2.Stop()
+
+	// Re-process the same event (msg-aaa) — simulates re-reading the JSONL after restart.
+	dupLine := makeJSONL(t, map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": ts.Format(time.RFC3339Nano),
+		"sessionId": sid,
+		"message": map[string]interface{}{
+			"id":   "msg-aaa",
+			"role": "assistant",
+			"content": "response msg-aaa",
+			"usage": map[string]interface{}{
+				"input_tokens":  100,
+				"output_tokens": 50,
+			},
+			"model":       "claude-sonnet-4-6",
+			"stop_reason": "end_turn",
+		},
+		"costUSD": 0.01,
+	})
+	p2.Process(watcher.Event{SessionID: sid, Line: dupLine, Bootstrap: true})
+
+	sess2, ok := sessions2.Get(sid)
+	if !ok {
+		t.Fatal("session not found after phase 2")
+	}
+
+	// Cost and message count must NOT have doubled.
+	if sess2.TotalCost != origCost {
+		t.Errorf("TotalCost: got %f, want %f (dedup should prevent double-counting)", sess2.TotalCost, origCost)
+	}
+	if sess2.MessageCount != origMsgCount {
+		t.Errorf("MessageCount: got %d, want %d (dedup should prevent double-counting)", sess2.MessageCount, origMsgCount)
+	}
+}

@@ -98,6 +98,27 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	isNew := !exists
 	if isNew {
 		p.loadMeta(ev)
+		// Rebuild dedup state from DB if this session was previously persisted.
+		// After a restart, in-memory dedup maps are empty, which would cause
+		// duplicate events to double-count costs, messages, and errors.
+		if ids, costs, err := p.db.LoadMessageDedup(ev.SessionID); err == nil && len(ids) > 0 {
+			// Also restore session aggregates so totals aren't reset to zero.
+			dbSess, _ := p.db.GetSession(ev.SessionID)
+			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
+				s.SeenMessageIDs = ids
+				s.SeenMessageCosts = costs
+				if dbSess != nil {
+					s.TotalCost = dbSess.TotalCost
+					s.InputTokens = dbSess.InputTokens
+					s.OutputTokens = dbSess.OutputTokens
+					s.CacheReadTokens = dbSess.CacheReadTokens
+					s.CacheCreationTokens = dbSess.CacheCreationTokens
+					s.MessageCount = dbSess.MessageCount
+					s.EventCount = dbSess.EventCount
+					s.ErrorCount = dbSess.ErrorCount
+				}
+			})
+		}
 	}
 
 	// Stage 3: Apply Session
