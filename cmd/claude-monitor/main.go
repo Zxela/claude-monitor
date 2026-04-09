@@ -367,7 +367,7 @@ Examples:
 		resolver.LoadCache(cached)
 	}
 
-	w, err := watcher.New([]string(extraPaths))
+	fw, err := watcher.New([]string(extraPaths))
 	if err != nil {
 		log.Fatalf("failed to create watcher: %v", err)
 	}
@@ -402,7 +402,7 @@ Examples:
 	defer pipe.Stop()
 
 	// Bootstrap callback: process through pipeline (no broadcast — handled internally).
-	w.SetBootstrapCallback(func(ev watcher.Event) {
+	fw.SetBootstrapCallback(func(ev watcher.Event) {
 		pipe.Process(ev)
 	})
 
@@ -434,7 +434,7 @@ Examples:
 		}()
 	}
 
-	events := w.Start(ctx)
+	events := fw.Start(ctx)
 
 	var dc *docker.Client
 	if *dockerEnabled {
@@ -452,10 +452,10 @@ Examples:
 						}
 						if ev.Added {
 							log.Printf("docker: watching %s (%s)", ev.HostPath, ev.ContainerName)
-							w.Add(ev.HostPath, ev.ContainerName)
+							fw.Add(ev.HostPath, ev.ContainerName)
 						} else {
 							log.Printf("docker: stopped watching %s (%s)", ev.HostPath, ev.ContainerName)
-							w.Remove(ev.HostPath)
+							fw.Remove(ev.HostPath)
 						}
 					case <-ctx.Done():
 						return
@@ -681,6 +681,7 @@ Examples:
 			CostRate            float64            `json:"costRate"`
 			CostByModel         map[string]float64 `json:"costByModel"`
 			CostByRepo          map[string]float64 `json:"costByRepo"`
+			DroppedEvents       int64              `json:"droppedEvents"`
 		}
 
 		now := time.Now()
@@ -724,6 +725,7 @@ Examples:
 			CostRate:            costRate,
 			CostByModel:         agg.CostByModel,
 			CostByRepo:          agg.CostByRepo,
+			DroppedEvents:       fw.DroppedEvents(),
 		}
 		if resp.CostByModel == nil { resp.CostByModel = make(map[string]float64) }
 		if resp.CostByRepo == nil { resp.CostByRepo = make(map[string]float64) }
@@ -1011,10 +1013,10 @@ Examples:
 		w.Header().Set("Content-Type", "application/json")
 		if err := historyDB.Ping(); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			writeJSON(w, map[string]interface{}{"ok": false, "db": err.Error()})
+			writeJSON(w, map[string]interface{}{"ok": false, "db": err.Error(), "droppedEvents": fw.DroppedEvents()})
 			return
 		}
-		writeJSON(w, map[string]interface{}{"ok": true, "db": "ok"})
+		writeJSON(w, map[string]interface{}{"ok": true, "db": "ok", "droppedEvents": fw.DroppedEvents()})
 	})
 
 	// Version endpoint.
