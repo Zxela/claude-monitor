@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/Zxela/claude-monitor/compare/v2.1.2...v2.2.0) (2026-04-09)
+
+
+### Features
+
+* add adaptive polling for recently-active session files ([#129](https://github.com/Zxela/claude-monitor/issues/129)) ([c6b507c](https://github.com/Zxela/claude-monitor/commit/c6b507cdd48f53d708e4d2fefbd68b651cb5d315)), closes [#103](https://github.com/Zxela/claude-monitor/issues/103)
+
 ## [2.1.2](https://github.com/Zxela/claude-monitor/compare/v2.1.1...v2.1.2) (2026-04-09)
 
 
