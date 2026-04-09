@@ -421,12 +421,12 @@ func (p *Pipeline) loadMeta(ev watcher.Event) {
 // skipDetail returns true for events that should only trigger a session_update,
 // not a full event broadcast.
 func skipDetail(event *parser.Event) bool {
-	if event.Type == "progress" && event.HookEvent == "" {
-		return true
-	}
 	switch event.Type {
-	case "system", "file-history-snapshot", "custom-title", "agent-name", "queue-operation":
+	case "file-history-snapshot", "queue-operation":
 		return true
+	case "system":
+		// Allow turn_duration through; skip other system subtypes.
+		return event.Subtype != "turn_duration"
 	}
 	return false
 }
