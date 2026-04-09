@@ -81,7 +81,12 @@ func TestUpsert_ThreadSafe(t *testing.T) {
 	// MessageCount may not be exactly 100 due to race in the increment
 	// (each goroutine reads and writes, not atomic), but the store must not crash/deadlock.
 	// The important thing is no data race and the session exists.
-	_ = sess
+	if sess.ID != "concurrent-session" {
+		t.Errorf("expected ID 'concurrent-session', got %q", sess.ID)
+	}
+	if sess.MessageCount == 0 {
+		t.Error("expected MessageCount > 0 after concurrent upserts")
+	}
 }
 
 func TestAll_ReturnsSnapshot(t *testing.T) {
