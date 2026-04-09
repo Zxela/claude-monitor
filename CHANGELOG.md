@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/Zxela/claude-monitor/compare/v3.0.1...v3.0.2) (2026-04-09)
+
+
+### Bug Fixes
+
+* move binary build into CI workflow to fix GITHUB_TOKEN event suppression ([#141](https://github.com/Zxela/claude-monitor/issues/141)) ([7ce4ac6](https://github.com/Zxela/claude-monitor/commit/7ce4ac6ac940f3c906b2bae6f7c467758a959f3e))
+
 ## [3.0.1](https://github.com/Zxela/claude-monitor/compare/v3.0.0...v3.0.1) (2026-04-09)
 
 
