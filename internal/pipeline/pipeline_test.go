@@ -2,16 +2,18 @@ package pipeline
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/zxela-claude/claude-monitor/internal/parser"
 	"github.com/zxela-claude/claude-monitor/internal/repo"
 	"github.com/zxela-claude/claude-monitor/internal/session"
 	"github.com/zxela-claude/claude-monitor/internal/store"
 	"github.com/zxela-claude/claude-monitor/internal/watcher"
-	"github.com/zxela-claude/claude-monitor/internal/parser"
 )
 
 func openTestDB(t *testing.T) *store.DB {
@@ -293,5 +295,73 @@ func TestProcess_RebuildDedupFromDB(t *testing.T) {
 	}
 	if sess2.MessageCount != origMsgCount {
 		t.Errorf("MessageCount: got %d, want %d (dedup should prevent double-counting)", sess2.MessageCount, origMsgCount)
+	}
+}
+
+func TestLoadMeta_EvictsOldestHalf(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	// Pre-populate cache with 501 entries (exceeds maxMetaCache=500).
+	for i := 0; i < 501; i++ {
+		id := fmt.Sprintf("sess-%d", i)
+		p.metaCache[id] = &agentMeta{Name: id}
+		p.metaOrder = append(p.metaOrder, id)
+	}
+
+	if len(p.metaCache) != 501 {
+		t.Fatalf("setup: expected 501 entries, got %d", len(p.metaCache))
+	}
+
+	// Create a temp .meta.json for the new session so loadMeta can read it.
+	tmpDir := t.TempDir()
+	newSessionID := "sess-new"
+	metaPath := filepath.Join(tmpDir, newSessionID+".meta.json")
+	metaJSON, _ := json.Marshal(agentMeta{Name: "new-agent", AgentType: "task"})
+	if err := os.WriteFile(metaPath, metaJSON, 0644); err != nil {
+		t.Fatalf("write meta.json: %v", err)
+	}
+
+	// Call loadMeta — the new entry pushes cache to 502, triggering eviction.
+	p.loadMeta(watcher.Event{
+		SessionID: newSessionID,
+		FilePath:  filepath.Join(tmpDir, newSessionID+".jsonl"),
+	})
+
+	// After eviction: oldest half (251 entries) removed from 502 total → 251 remain.
+	if len(p.metaCache) != 251 {
+		t.Errorf("cache size after eviction: got %d, want 251", len(p.metaCache))
+	}
+
+	// Oldest entries should be evicted.
+	for i := 0; i < 251; i++ {
+		id := fmt.Sprintf("sess-%d", i)
+		if _, ok := p.metaCache[id]; ok {
+			t.Errorf("expected %s to be evicted", id)
+			break
+		}
+	}
+
+	// Newest original entries should survive.
+	for i := 251; i < 501; i++ {
+		id := fmt.Sprintf("sess-%d", i)
+		if _, ok := p.metaCache[id]; !ok {
+			t.Errorf("expected %s to survive eviction", id)
+			break
+		}
+	}
+
+	// The newly loaded session should be present.
+	if _, ok := p.metaCache[newSessionID]; !ok {
+		t.Error("expected new session to be in cache")
+	}
+
+	// metaOrder should match cache size.
+	if len(p.metaOrder) != 251 {
+		t.Errorf("metaOrder length: got %d, want 251", len(p.metaOrder))
 	}
 }

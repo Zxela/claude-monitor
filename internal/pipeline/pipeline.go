@@ -46,6 +46,7 @@ type Pipeline struct {
 
 	metaMu    sync.Mutex
 	metaCache map[string]*agentMeta
+	metaOrder []string
 
 	bufMu  sync.Mutex
 	buffer []store.EventInsert
@@ -413,10 +414,15 @@ func (p *Pipeline) loadMeta(ev watcher.Event) {
 			log.Printf("debug: unmarshal meta.json (session=%s, path=%s): %v", ev.SessionID, metaPath, err)
 		} else {
 			p.metaCache[ev.SessionID] = &meta
+			p.metaOrder = append(p.metaOrder, ev.SessionID)
 		}
 	}
 	if len(p.metaCache) > maxMetaCache {
-		p.metaCache = make(map[string]*agentMeta)
+		half := len(p.metaOrder) / 2
+		for _, key := range p.metaOrder[:half] {
+			delete(p.metaCache, key)
+		}
+		p.metaOrder = p.metaOrder[half:]
 	}
 }
 
