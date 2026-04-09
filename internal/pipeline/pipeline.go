@@ -279,6 +279,7 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		errKey := "err:" + msg.MessageID
 		if !s.SeenMessageIDs[errKey] {
 			s.SeenMessageIDs[errKey] = true
+			s.SeenMessageOrder = append(s.SeenMessageOrder, errKey)
 			s.ErrorCount++
 		}
 	} else if msg.IsError {
@@ -313,6 +314,7 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 		if msg.MessageID != "" {
 			if !s.SeenMessageIDs[msg.MessageID] {
 				s.SeenMessageIDs[msg.MessageID] = true
+				s.SeenMessageOrder = append(s.SeenMessageOrder, msg.MessageID)
 				s.MessageCount++
 			}
 		} else {
@@ -337,6 +339,7 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 	// but preserve cost tracking to maintain running totals.
 	if msg.Type == "summary" {
 		s.SeenMessageIDs = make(map[string]bool)
+		s.SeenMessageOrder = nil
 	}
 
 	// Status

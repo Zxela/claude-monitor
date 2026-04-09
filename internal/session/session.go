@@ -46,6 +46,7 @@ type Session struct {
 	Status         string           `json:"status"` // idle, thinking, tool_use, waiting
 	SeenMessageIDs   map[string]bool          `json:"-"` // tracks message IDs to deduplicate streaming chunks
 	SeenMessageCosts map[string]MessageCosts  `json:"-"` // tracks per-message cost/tokens for dedup
+	SeenMessageOrder []string                 `json:"-"` // insertion order for LRU eviction
 	ParentID       string           `json:"parentId,omitempty"`
 	Children       []string         `json:"children,omitempty"`
 	CWD            string           `json:"cwd,omitempty"`
@@ -91,15 +92,27 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 	update(sess)
 
 	// Prevent unbounded growth of the deduplication maps.
+	// Evict the oldest half of non-error entries instead of clearing everything.
 	if len(sess.SeenMessageIDs) > maxSeenMessageIDs {
-		log.Printf("session %s: dedup map exceeded %d entries, clearing non-error entries", sess.ID, maxSeenMessageIDs)
-		preserved := make(map[string]bool)
-		for k, v := range sess.SeenMessageIDs {
-			if strings.HasPrefix(k, "err:") {
-				preserved[k] = v
+		half := len(sess.SeenMessageOrder) / 2
+		evicted := 0
+		for i := 0; i < half; i++ {
+			key := sess.SeenMessageOrder[i]
+			if strings.HasPrefix(key, "err:") {
+				continue // keep error entries
+			}
+			delete(sess.SeenMessageIDs, key)
+			evicted++
+		}
+		// Rebuild order with surviving entries only.
+		surviving := make([]string, 0, len(sess.SeenMessageOrder)-evicted)
+		for _, key := range sess.SeenMessageOrder {
+			if sess.SeenMessageIDs[key] {
+				surviving = append(surviving, key)
 			}
 		}
-		sess.SeenMessageIDs = preserved
+		sess.SeenMessageOrder = surviving
+		log.Printf("session %s: dedup map exceeded %d entries, evicted oldest %d", sess.ID, maxSeenMessageIDs, evicted)
 	}
 	// Note: we do NOT cap SeenMessageCosts — clearing it would break the
 	// delta-based cost accumulation (cleared entries re-add full cost).
@@ -137,8 +150,9 @@ func (s *Store) All() []*Session {
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		cp := *sess
-		cp.SeenMessageIDs = nil   // don't share internal dedup map
-		cp.SeenMessageCosts = nil // don't share internal dedup map
+		cp.SeenMessageIDs = nil    // don't share internal dedup map
+		cp.SeenMessageCosts = nil  // don't share internal dedup map
+		cp.SeenMessageOrder = nil  // don't share internal dedup slice
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
 		if cp.ParentID != "" && cp.Status == "waiting" {
@@ -196,6 +210,7 @@ func (s *Store) Get(id string) (*Session, bool) {
 	cp := *sess
 	cp.SeenMessageIDs = nil
 	cp.SeenMessageCosts = nil
+	cp.SeenMessageOrder = nil
 	return &cp, true
 }
 
