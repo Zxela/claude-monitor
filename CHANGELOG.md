@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/Zxela/claude-monitor/compare/v3.1.0...v3.1.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* hub test race — drain buffered broadcast before assertion ([f896237](https://github.com/Zxela/claude-monitor/commit/f896237e6f6e49020fce2d50d5a85e6a8b450f48))
+
 ## [3.1.0](https://github.com/Zxela/claude-monitor/compare/v3.0.2...v3.1.0) (2026-04-09)
 
 
