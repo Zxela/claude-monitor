@@ -702,3 +702,19 @@ func TestTrendByModel(t *testing.T) {
 		t.Errorf("sonnet cost: got %f, want 1.00", result.ByModel[1].Cost)
 	}
 }
+
+func TestPercentile(t *testing.T) {
+	data := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if got := percentile(data, 0.5); got != 6 {
+		t.Errorf("median of 1-10: got %v, want 6", got)
+	}
+	if got := percentile(data, 0.95); got != 10 {
+		t.Errorf("p95 of 1-10: got %v, want 10", got)
+	}
+	if got := percentile(nil, 0.5); got != 0 {
+		t.Errorf("percentile of nil: got %v, want 0", got)
+	}
+	if got := percentile([]float64{42}, 0.5); got != 42 {
+		t.Errorf("percentile of single element: got %v, want 42", got)
+	}
+}

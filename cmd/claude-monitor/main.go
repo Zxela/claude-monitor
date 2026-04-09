@@ -467,10 +467,12 @@ Examples:
 
 	// Process watcher events through the pipeline.
 	// The pipeline handles: parse → resolve repo → apply session → broadcast + batch persist.
+	eventsDone := make(chan struct{})
 	go func() {
 		for ev := range events {
 			pipe.Process(ev)
 		}
+		close(eventsDone)
 	}()
 
 	// Retention compaction — runs hourly, compresses/deletes old event content.
@@ -1053,11 +1055,17 @@ Examples:
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-quit
 		log.Printf("received signal %s, shutting down", sig)
+
+		// 1. Cancel context — stops watcher (closes events channel), docker watcher, retention ticker.
 		cancel()
 
-		// Pipeline.Stop() flushes remaining events and saves sessions.
-		// (Called via deferred pipe.Stop() in main)
+		// 2. Wait for event processing goroutine to drain remaining events.
+		<-eventsDone
 
+		// 3. Flush pipeline — saves batched events and session data.
+		pipe.Stop()
+
+		// 4. Shutdown HTTP server (closes WebSocket connections).
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutCancel()
 		if err := srv.Shutdown(shutCtx); err != nil {

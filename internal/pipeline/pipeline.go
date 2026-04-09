@@ -51,8 +51,9 @@ type Pipeline struct {
 	bufMu  sync.Mutex
 	buffer []store.EventInsert
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // New creates a Pipeline.
@@ -71,8 +72,11 @@ func New(sessions *session.Store, db *store.DB, resolver *repo.Resolver, broadca
 }
 
 // Stop flushes remaining events and stops the background flush goroutine.
+// Safe to call multiple times.
 func (p *Pipeline) Stop() {
-	close(p.stopCh)
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+	})
 	p.wg.Wait()
 	p.flush() // final flush
 }

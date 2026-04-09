@@ -128,7 +128,9 @@ function renderFeedPanel(): void {
   feedContent.setAttribute('aria-live', 'polite');
   const sess = state.selectedSessionId ? state.sessions.get(state.selectedSessionId) : null;
   feedContent.setAttribute('aria-label', sess?.isActive !== false ? 'Live event feed' : 'Session history');
-  feedContent.innerHTML = '<div class="feed-empty">No events yet — start a Claude Code session and activity will appear here automatically</div>';
+  feedContent.innerHTML = state.selectedSessionId
+    ? '<div class="feed-empty">Waiting for events in this session\u2026</div>'
+    : '<div class="feed-empty">Select a session to view its event feed</div>';
   feedContent.addEventListener('scroll', () => {
     if (!feedContent) return;
     const atBottom = feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
@@ -293,7 +295,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     );
 
     if (merged.length === 0) {
-      feedContent.innerHTML = '<div class="feed-empty">No events found</div>';
+      feedContent.innerHTML = '<div class="feed-empty">No events in this session yet</div>';
       return;
     }
 
