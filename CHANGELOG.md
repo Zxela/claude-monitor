@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.1.0](https://github.com/Zxela/claude-monitor/compare/v3.0.2...v3.1.0) (2026-04-09)
+
+
+### Features
+
+* **web:** add ESLint and Prettier with consistent formatting ([#156](https://github.com/Zxela/claude-monitor/issues/156)) ([aa397cb](https://github.com/Zxela/claude-monitor/commit/aa397cb01e92a6c3586412e115b3c5719f67b418))
+
+
+### Bug Fixes
+
+* add assertions to TestUpsert_ThreadSafe instead of discarding result ([#146](https://github.com/Zxela/claude-monitor/issues/146)) ([c35a36e](https://github.com/Zxela/claude-monitor/commit/c35a36e516dff370e7c476e7af9842e298649912))
+* add Docker HEALTHCHECK for container orchestration support ([#147](https://github.com/Zxela/claude-monitor/issues/147)) ([c00e0fa](https://github.com/Zxela/claude-monitor/commit/c00e0facab0b973b462b6aff972d3d400cdf080f))
+* extract populateMetaCacheForTest helper to avoid direct field manipulation in pipeline tests ([#151](https://github.com/Zxela/claude-monitor/issues/151)) ([1c30300](https://github.com/Zxela/claude-monitor/commit/1c303003d093ad8af04b84a61bea57155942b0c8))
+* harden debug code check and add golangci-lint to CI ([#153](https://github.com/Zxela/claude-monitor/issues/153)) ([3fb9c49](https://github.com/Zxela/claude-monitor/commit/3fb9c4921a0a0406bbb2d206edf6a1da3ac8407e))
+* improve watcher error handling and stale file cleanup performance ([#148](https://github.com/Zxela/claude-monitor/issues/148)) ([821051c](https://github.com/Zxela/claude-monitor/commit/821051c55e94aca1f42c3936c03c4af75feb2ef4))
+* pin vite and chart.js versions to exact semver ([#152](https://github.com/Zxela/claude-monitor/issues/152)) ([2f430c2](https://github.com/Zxela/claude-monitor/commit/2f430c237227bbda9c58c81bab975349b471470e))
+* pipeline + session improvements — log resolver errors, extract helpers, encapsulate dedup state ([#157](https://github.com/Zxela/claude-monitor/issues/157)) ([5a81452](https://github.com/Zxela/claude-monitor/commit/5a81452ca2506fd90009ae010a0c67c589dcf3db))
+* wrap store errors, log rollback failures, extract TrendData helpers ([#155](https://github.com/Zxela/claude-monitor/issues/155)) ([e7e260e](https://github.com/Zxela/claude-monitor/commit/e7e260ef3621ed426a35b93a7dd3bf1c8ebeddc0))
+
 ## [3.0.2](https://github.com/Zxela/claude-monitor/compare/v3.0.1...v3.0.2) (2026-04-09)
 
 
