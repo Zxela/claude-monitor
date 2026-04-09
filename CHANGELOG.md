@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/Zxela/claude-monitor/compare/v2.1.1...v2.1.2) (2026-04-09)
+
+
+### Bug Fixes
+
+* Phase 1 — parse error logging, hook extraction, JSON encode safety, compact support, timestamp contrast ([#126](https://github.com/Zxela/claude-monitor/issues/126)) ([0cd2b1f](https://github.com/Zxela/claude-monitor/commit/0cd2b1fd481f08c1554f2ca575cb76dba8bd65e8))
+
 ## [2.1.1](https://github.com/Zxela/claude-monitor/compare/v2.1.0...v2.1.1) (2026-04-03)
 
 
