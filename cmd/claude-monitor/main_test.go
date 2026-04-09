@@ -113,6 +113,10 @@ func TestHealth(t *testing.T) {
 	if ok != true {
 		t.Errorf("expected ok=true, got %v", ok)
 	}
+
+	if _, exists := body["droppedEvents"]; !exists {
+		t.Error("response missing key \"droppedEvents\"")
+	}
 }
 
 // TestVersion verifies GET /api/version returns 200 with a "version" key equal
@@ -269,6 +273,7 @@ func TestStats(t *testing.T) {
 		"cacheReadTokens", "cacheCreationTokens",
 		"sessionCount", "activeSessions", "cacheHitPct",
 		"costRate", "costByModel", "costByRepo",
+		"droppedEvents",
 	} {
 		if _, ok := body[key]; !ok {
 			t.Errorf("response missing expected key %q", key)
