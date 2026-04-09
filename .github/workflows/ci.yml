@@ -64,6 +64,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: [build-and-test, lint]
     runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -71,11 +74,94 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Enable auto-merge so it merges once CI passes on the PR itself
-      - name: Enable auto-merge on release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+  # Build and upload binaries when release-please creates a release
+  build-binaries:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build frontend
+        run: cd web && npm ci && npm run build
+
+      - name: Build binaries
+        run: |
+          VERSION="${TAG_NAME}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-linux-amd64 ./cmd/claude-monitor
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-linux-arm64 ./cmd/claude-monitor
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-darwin-amd64 ./cmd/claude-monitor
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/claude-monitor-darwin-arm64 ./cmd/claude-monitor
+
+          cd dist
+          for bin in claude-monitor-*; do
+            chmod +x "$bin"
+            tar czf "${bin}.tar.gz" "$bin"
+          done
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Upload binaries to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr merge --repo ${{ github.repository }} --auto --merge \
-            ${{ fromJSON(steps.release.outputs.prs)[0].number }}
+          gh release upload ${{ env.TAG_NAME }} \
+            dist/*.tar.gz \
+            dist/checksums.txt \
+            --repo ${{ github.repository }}
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${TAG_NAME}"
+          VERSION_NUM="${VERSION#v}"
+
+          # Read checksums
+          DARWIN_AMD64=$(grep darwin-amd64 dist/checksums.txt | awk '{print $1}')
+          DARWIN_ARM64=$(grep darwin-arm64 dist/checksums.txt | awk '{print $1}')
+          LINUX_AMD64=$(grep linux-amd64 dist/checksums.txt | awk '{print $1}')
+          LINUX_ARM64=$(grep linux-arm64 dist/checksums.txt | awk '{print $1}')
+
+          # Update formula in-place
+          sed -i "s/version \".*\"/version \"${VERSION_NUM}\"/" Formula/claude-monitor.rb
+          sed -i "/darwin-amd64/{n;s/sha256 \".*\"/sha256 \"${DARWIN_AMD64}\"/}" Formula/claude-monitor.rb
+          sed -i "/darwin-arm64/{n;s/sha256 \".*\"/sha256 \"${DARWIN_ARM64}\"/}" Formula/claude-monitor.rb
+          sed -i "/linux-amd64/{n;s/sha256 \".*\"/sha256 \"${LINUX_AMD64}\"/}" Formula/claude-monitor.rb
+          sed -i "/linux-arm64/{n;s/sha256 \".*\"/sha256 \"${LINUX_ARM64}\"/}" Formula/claude-monitor.rb
+
+          # Update formula in this repo via PR (not direct push to main)
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="chore/update-formula-${VERSION}"
+          git checkout -b "${BRANCH}"
+          git add Formula/claude-monitor.rb
+          git commit -m "chore: update Homebrew formula for ${VERSION}" || echo "::warning::No formula changes to commit"
+          git push origin "${BRANCH}" || echo "::warning::Failed to push formula branch"
+          gh pr create --title "chore: update Homebrew formula for ${VERSION}" \
+            --body "Auto-generated formula update for ${VERSION}" \
+            --base main --head "${BRANCH}" || echo "::warning::Failed to create formula PR"
+
+          # Also update the Homebrew tap repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/Zxela/homebrew-tap.git /tmp/tap
+          cp Formula/claude-monitor.rb /tmp/tap/Formula/claude-monitor.rb
+          cd /tmp/tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/claude-monitor.rb
+          git commit -m "Update claude-monitor to ${VERSION}" || echo "::warning::No tap changes to commit"
+          git push origin main || echo "::warning::Failed to push to homebrew-tap"

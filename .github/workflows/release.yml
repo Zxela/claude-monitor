@@ -1,11 +1,6 @@
 name: Release
 
 on:
-  pull_request:
-    branches: [main]
-    types: [closed]
-  release:
-    types: [created]
   workflow_dispatch:
     inputs:
       tag_name:
@@ -17,73 +12,10 @@ permissions:
   pull-requests: write
 
 jobs:
-  create-release:
-    if: >-
-      github.event.pull_request.merged == true &&
-      contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - name: Create tag and GitHub release
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-        run: |
-          VERSION=$(echo "${PR_TITLE}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-          TAG_NAME="v${VERSION}"
-
-          # Skip if release already exists (idempotent)
-          if gh release view "${TAG_NAME}" --repo ${{ github.repository }} &>/dev/null; then
-            echo "Release ${TAG_NAME} already exists, skipping"
-            echo "release_created=true" >> $GITHUB_OUTPUT
-            echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Create the tag
-          gh api repos/${{ github.repository }}/git/refs \
-            -f ref="refs/tags/${TAG_NAME}" \
-            -f sha="${MERGE_SHA}" || true
-
-          # Extract release notes from the PR body
-          gh pr view ${PR_NUMBER} --repo ${{ github.repository }} --json body --jq '.body' > /tmp/release-notes.md
-
-          # Create the GitHub release
-          gh release create "${TAG_NAME}" \
-            --repo ${{ github.repository }} \
-            --title "${TAG_NAME}" \
-            --notes-file /tmp/release-notes.md \
-            --target "${MERGE_SHA}"
-
-          # Mark release PR as tagged so release-please doesn't block
-          gh pr edit ${PR_NUMBER} --repo ${{ github.repository }} \
-            --remove-label "autorelease: pending" \
-            --add-label "autorelease: tagged" || true
-
-          echo "release_created=true" >> $GITHUB_OUTPUT
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-
   build-binaries:
-    needs: create-release
-    if: |
-      always() && (
-        needs.create-release.outputs.release_created == 'true' ||
-        github.event_name == 'release' ||
-        github.event_name == 'workflow_dispatch'
-      )
     runs-on: ubuntu-latest
     env:
-      TAG_NAME: >-
-        ${{
-          needs.create-release.outputs.tag_name ||
-          github.event.release.tag_name ||
-          inputs.tag_name
-        }}
+      TAG_NAME: ${{ inputs.tag_name }}
     steps:
       - uses: actions/checkout@v4
         with:
