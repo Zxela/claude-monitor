@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -284,14 +285,20 @@ func (d *DB) UpsertRepo(r *repo.Repo) error {
 	_, err := d.db.Exec(`INSERT INTO repos (id, name, url, first_seen) VALUES (?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url`,
 		r.ID, r.Name, r.URL, time.Now().Format(time.RFC3339))
-	return err
+	if err != nil {
+		return fmt.Errorf("UpsertRepo: %w", err)
+	}
+	return nil
 }
 
 // UpsertCwdRepo persists a cwd → repo_id mapping.
 func (d *DB) UpsertCwdRepo(cwd, repoID string) error {
 	_, err := d.db.Exec(`INSERT INTO cwd_repos (cwd, repo_id) VALUES (?, ?)
 		ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id`, cwd, repoID)
-	return err
+	if err != nil {
+		return fmt.Errorf("UpsertCwdRepo: %w", err)
+	}
+	return nil
 }
 
 // LoadCwdRepos returns all persisted cwd → repo_id mappings.
@@ -315,7 +322,10 @@ func (d *DB) LoadCwdRepos() (map[string]string, error) {
 // ClearCwdRepos deletes all cwd → repo_id mappings.
 func (d *DB) ClearCwdRepos() error {
 	_, err := d.db.Exec(`DELETE FROM cwd_repos`)
-	return err
+	if err != nil {
+		return fmt.Errorf("ClearCwdRepos: %w", err)
+	}
+	return nil
 }
 
 // --- Sessions ---
@@ -364,7 +374,10 @@ func (d *DB) SaveSession(s *session.Session) error {
 		s.MessageCount, s.EventCount, s.ErrorCount,
 		s.Version, s.Entrypoint,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("SaveSession: %w", err)
+	}
+	return nil
 }
 
 // LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
@@ -594,6 +607,15 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	return r, nil
 }
 
+// trendParams holds the parsed query parameters shared across TrendData helpers.
+type trendParams struct {
+	dateFmt  string
+	interval string
+	where    string
+	args     []interface{}
+	repoID   string
+}
+
 // TrendData returns time-bucketed analytics for the given window and optional repo filter.
 // window must be "24h", "7d", or "30d". repoID may be empty for all repos.
 func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
@@ -620,138 +642,25 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 		args = append(args, repoID)
 	}
 
-	// Query 1: Bucket aggregation
-	bucketQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket,
-		COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
-		COUNT(*), COALESCE(AVG(total_cost),0)
-		FROM sessions WHERE %s
-		GROUP BY bucket ORDER BY bucket`, dateFmt, where)
+	p := &trendParams{dateFmt: dateFmt, interval: interval, where: where, args: args, repoID: repoID}
 
-	rows, err := d.db.Query(bucketQuery, args...)
+	buckets, err := d.trendBuckets(p)
 	if err != nil {
-		return nil, fmt.Errorf("trend buckets: %w", err)
-	}
-	defer rows.Close()
-
-	var buckets []TrendBucket
-	for rows.Next() {
-		var b TrendBucket
-		if err := rows.Scan(&b.Date, &b.Cost, &b.InputTokens, &b.OutputTokens,
-			&b.CacheReadTokens, &b.CacheCreationTokens, &b.SessionCount, &b.AvgSessionCost); err != nil {
-			return nil, fmt.Errorf("scan bucket: %w", err)
-		}
-		effInput := b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
-		if effInput > 0 {
-			b.CacheHitPct = float64(b.CacheReadTokens) / float64(effInput) * 100
-			b.OutputInputRatio = float64(b.OutputTokens) / float64(effInput)
-		}
-		if b.SessionCount > 0 {
-			b.AvgSessionTokens = float64(effInput+b.OutputTokens) / float64(b.SessionCount)
-		}
-		buckets = append(buckets, b)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if buckets == nil {
-		buckets = []TrendBucket{}
-	}
-
-	// Query 2: Percentiles — fetch all session costs per bucket
-	percQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket, total_cost
-		FROM sessions WHERE %s
-		ORDER BY bucket, total_cost`, dateFmt, where)
-
-	percRows, err := d.db.Query(percQuery, args...)
-	if err != nil {
-		return nil, fmt.Errorf("trend percentiles: %w", err)
-	}
-	defer percRows.Close()
-
-	// Collect costs grouped by bucket
-	bucketCosts := make(map[string][]float64)
-	for percRows.Next() {
-		var bucket string
-		var cost float64
-		if err := percRows.Scan(&bucket, &cost); err != nil {
-			return nil, fmt.Errorf("scan percentile: %w", err)
-		}
-		bucketCosts[bucket] = append(bucketCosts[bucket], cost)
-	}
-	if err := percRows.Err(); err != nil {
 		return nil, err
 	}
 
-	// Apply percentiles to buckets
-	for i := range buckets {
-		costs := bucketCosts[buckets[i].Date]
-		if len(costs) > 0 {
-			sort.Float64s(costs)
-			buckets[i].MedianSessionCost = percentile(costs, 0.5)
-			buckets[i].P95SessionCost = percentile(costs, 0.95)
-		}
-	}
-
-	// Query 3: By repo — build WHERE with table-prefixed columns for JOIN
-	repoWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s') AND (s.parent_id IS NULL OR s.parent_id = '')", interval)
-	if repoID != "" {
-		repoWhere += " AND s.repo_id = ?"
-	}
-	repoQuery := fmt.Sprintf(`SELECT s.repo_id, COALESCE(r.name,''), COALESCE(SUM(s.total_cost),0),
-		COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens),0),
-		COUNT(*)
-		FROM sessions s JOIN repos r ON r.id = s.repo_id
-		WHERE %s AND s.repo_id != ''
-		GROUP BY r.id ORDER BY SUM(s.total_cost) DESC`, repoWhere)
-
-	repoRows, err := d.db.Query(repoQuery, args...)
-	if err != nil {
-		return nil, fmt.Errorf("trend by repo: %w", err)
-	}
-	defer repoRows.Close()
-
-	var byRepo []RepoTrend
-	for repoRows.Next() {
-		var rt RepoTrend
-		if err := repoRows.Scan(&rt.RepoID, &rt.RepoName, &rt.Cost, &rt.Tokens, &rt.Sessions); err != nil {
-			return nil, fmt.Errorf("scan repo trend: %w", err)
-		}
-		byRepo = append(byRepo, rt)
-	}
-	if err := repoRows.Err(); err != nil {
+	if err := d.trendPercentiles(p, buckets); err != nil {
 		return nil, err
 	}
-	if byRepo == nil {
-		byRepo = []RepoTrend{}
-	}
 
-	// Query 4: By model
-	modelQuery := fmt.Sprintf(`SELECT COALESCE(model,'unknown'), COALESCE(SUM(total_cost),0),
-		COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens),0),
-		COUNT(*)
-		FROM sessions WHERE %s AND model != ''
-		GROUP BY model ORDER BY SUM(total_cost) DESC`, where)
-
-	modelRows, err := d.db.Query(modelQuery, args...)
+	byRepo, err := d.trendByRepo(p)
 	if err != nil {
-		return nil, fmt.Errorf("trend by model: %w", err)
-	}
-	defer modelRows.Close()
-
-	var byModel []ModelTrend
-	for modelRows.Next() {
-		var mt ModelTrend
-		if err := modelRows.Scan(&mt.Model, &mt.Cost, &mt.Tokens, &mt.Sessions); err != nil {
-			return nil, fmt.Errorf("scan model trend: %w", err)
-		}
-		byModel = append(byModel, mt)
-	}
-	if err := modelRows.Err(); err != nil {
 		return nil, err
 	}
-	if byModel == nil {
-		byModel = []ModelTrend{}
+
+	byModel, err := d.trendByModel(p)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build summary from buckets
@@ -775,6 +684,150 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 		ByModel: byModel,
 		Summary: summary,
 	}, nil
+}
+
+// trendBuckets queries time-bucketed session aggregates.
+func (d *DB) trendBuckets(p *trendParams) ([]TrendBucket, error) {
+	bucketQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket,
+		COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
+		COUNT(*), COALESCE(AVG(total_cost),0)
+		FROM sessions WHERE %s
+		GROUP BY bucket ORDER BY bucket`, p.dateFmt, p.where)
+
+	rows, err := d.db.Query(bucketQuery, p.args...)
+	if err != nil {
+		return nil, fmt.Errorf("trendBuckets: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []TrendBucket
+	for rows.Next() {
+		var b TrendBucket
+		if err := rows.Scan(&b.Date, &b.Cost, &b.InputTokens, &b.OutputTokens,
+			&b.CacheReadTokens, &b.CacheCreationTokens, &b.SessionCount, &b.AvgSessionCost); err != nil {
+			return nil, fmt.Errorf("trendBuckets: scan: %w", err)
+		}
+		effInput := b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
+		if effInput > 0 {
+			b.CacheHitPct = float64(b.CacheReadTokens) / float64(effInput) * 100
+			b.OutputInputRatio = float64(b.OutputTokens) / float64(effInput)
+		}
+		if b.SessionCount > 0 {
+			b.AvgSessionTokens = float64(effInput+b.OutputTokens) / float64(b.SessionCount)
+		}
+		buckets = append(buckets, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("trendBuckets: rows: %w", err)
+	}
+	if buckets == nil {
+		buckets = []TrendBucket{}
+	}
+	return buckets, nil
+}
+
+// trendPercentiles computes median and p95 session costs per bucket and applies them in-place.
+func (d *DB) trendPercentiles(p *trendParams, buckets []TrendBucket) error {
+	percQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket, total_cost
+		FROM sessions WHERE %s
+		ORDER BY bucket, total_cost`, p.dateFmt, p.where)
+
+	percRows, err := d.db.Query(percQuery, p.args...)
+	if err != nil {
+		return fmt.Errorf("trendPercentiles: %w", err)
+	}
+	defer percRows.Close()
+
+	bucketCosts := make(map[string][]float64)
+	for percRows.Next() {
+		var bucket string
+		var cost float64
+		if err := percRows.Scan(&bucket, &cost); err != nil {
+			return fmt.Errorf("trendPercentiles: scan: %w", err)
+		}
+		bucketCosts[bucket] = append(bucketCosts[bucket], cost)
+	}
+	if err := percRows.Err(); err != nil {
+		return fmt.Errorf("trendPercentiles: rows: %w", err)
+	}
+
+	for i := range buckets {
+		costs := bucketCosts[buckets[i].Date]
+		if len(costs) > 0 {
+			sort.Float64s(costs)
+			buckets[i].MedianSessionCost = percentile(costs, 0.5)
+			buckets[i].P95SessionCost = percentile(costs, 0.95)
+		}
+	}
+	return nil
+}
+
+// trendByRepo queries cost/token breakdown grouped by repository.
+func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
+	repoWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s') AND (s.parent_id IS NULL OR s.parent_id = '')", p.interval)
+	if p.repoID != "" {
+		repoWhere += " AND s.repo_id = ?"
+	}
+	repoQuery := fmt.Sprintf(`SELECT s.repo_id, COALESCE(r.name,''), COALESCE(SUM(s.total_cost),0),
+		COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens),0),
+		COUNT(*)
+		FROM sessions s JOIN repos r ON r.id = s.repo_id
+		WHERE %s AND s.repo_id != ''
+		GROUP BY r.id ORDER BY SUM(s.total_cost) DESC`, repoWhere)
+
+	repoRows, err := d.db.Query(repoQuery, p.args...)
+	if err != nil {
+		return nil, fmt.Errorf("trendByRepo: %w", err)
+	}
+	defer repoRows.Close()
+
+	var byRepo []RepoTrend
+	for repoRows.Next() {
+		var rt RepoTrend
+		if err := repoRows.Scan(&rt.RepoID, &rt.RepoName, &rt.Cost, &rt.Tokens, &rt.Sessions); err != nil {
+			return nil, fmt.Errorf("trendByRepo: scan: %w", err)
+		}
+		byRepo = append(byRepo, rt)
+	}
+	if err := repoRows.Err(); err != nil {
+		return nil, fmt.Errorf("trendByRepo: rows: %w", err)
+	}
+	if byRepo == nil {
+		byRepo = []RepoTrend{}
+	}
+	return byRepo, nil
+}
+
+// trendByModel queries cost/token breakdown grouped by model.
+func (d *DB) trendByModel(p *trendParams) ([]ModelTrend, error) {
+	modelQuery := fmt.Sprintf(`SELECT COALESCE(model,'unknown'), COALESCE(SUM(total_cost),0),
+		COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens),0),
+		COUNT(*)
+		FROM sessions WHERE %s AND model != ''
+		GROUP BY model ORDER BY SUM(total_cost) DESC`, p.where)
+
+	modelRows, err := d.db.Query(modelQuery, p.args...)
+	if err != nil {
+		return nil, fmt.Errorf("trendByModel: %w", err)
+	}
+	defer modelRows.Close()
+
+	var byModel []ModelTrend
+	for modelRows.Next() {
+		var mt ModelTrend
+		if err := modelRows.Scan(&mt.Model, &mt.Cost, &mt.Tokens, &mt.Sessions); err != nil {
+			return nil, fmt.Errorf("trendByModel: scan: %w", err)
+		}
+		byModel = append(byModel, mt)
+	}
+	if err := modelRows.Err(); err != nil {
+		return nil, fmt.Errorf("trendByModel: rows: %w", err)
+	}
+	if byModel == nil {
+		byModel = []ModelTrend{}
+	}
+	return byModel, nil
 }
 
 // percentile returns the value at the given percentile (0-1) from a sorted slice.
@@ -813,7 +866,11 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 	if err != nil {
 		return fmt.Errorf("begin batch: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			log.Printf("PersistBatch: rollback error: %v", rbErr)
+		}
+	}()
 
 	eventStmt, err := tx.Prepare(`INSERT INTO events
 		(session_id, uuid, message_id, type, role, content_preview, tool_name, tool_detail,
@@ -1121,14 +1178,20 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 func (d *DB) GetSetting(key string) (string, error) {
 	var value string
 	err := d.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
-	return value, err
+	if err != nil {
+		return value, fmt.Errorf("GetSetting(%s): %w", key, err)
+	}
+	return value, nil
 }
 
 // SetSetting upserts a setting.
 func (d *DB) SetSetting(key, value string) error {
 	_, err := d.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
-	return err
+	if err != nil {
+		return fmt.Errorf("SetSetting: %w", err)
+	}
+	return nil
 }
 
 // AllSettings returns all settings as a map.
@@ -1196,7 +1259,11 @@ func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			log.Printf("CompactHotToWarm: rollback error: %v", rbErr)
+		}
+	}()
 
 	stmt, err := tx.Prepare(`UPDATE event_content SET tier='warm', content=NULL, compressed=? WHERE event_id=?`)
 	if err != nil {
