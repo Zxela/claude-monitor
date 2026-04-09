@@ -168,7 +168,9 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +
     `<span class="fe-type ${type}">[${type}]</span>` +
-    `<span class="fe-content ${contentClass}">${escapeHtml(content)}${hasMore ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>' : ''}${isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : ''}</span>` +
+    `<span class="fe-content ${contentClass}">${escapeHtml(content)}</span>` +
+    (hasMore ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>' : '') +
+    (isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : '') +
     badges +
     (opts.showSessionId ? `<span class="fe-sid" title="${escapeHtml(opts.showSessionId)}">${escapeHtml(opts.showSessionId.slice(0, 12))}</span>` : '');
 
@@ -179,17 +181,12 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
     expandBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       expanded = !expanded;
-      const navBtn = contentEl.querySelector('.fe-navigate');
       if (expanded) {
         contentEl.textContent = fullContent;
-        contentEl.appendChild(expandBtn);
-        if (navBtn) contentEl.appendChild(navBtn);
         expandBtn.textContent = '−';
         el.classList.add('expanded');
       } else {
         contentEl.textContent = content;
-        contentEl.appendChild(expandBtn);
-        if (navBtn) contentEl.appendChild(navBtn);
         expandBtn.textContent = '+';
         el.classList.remove('expanded');
       }

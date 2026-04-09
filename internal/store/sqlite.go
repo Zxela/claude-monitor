@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -646,6 +647,7 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	for i := range buckets {
 		costs := bucketCosts[buckets[i].Date]
 		if len(costs) > 0 {
+			sort.Float64s(costs)
 			buckets[i].MedianSessionCost = percentile(costs, 0.5)
 			buckets[i].P95SessionCost = percentile(costs, 0.95)
 		}

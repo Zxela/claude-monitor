@@ -12,6 +12,17 @@
   --purple: #bc8cff;
   --orange: #f0883e;
   --font-mono: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+  --color-user: #5588ff;
+  --color-assistant: #33dd99;
+  --color-tool-use: #ddcc44;
+  --color-agent: #dd8844;
+  --color-tool-result: #44cccc;
+  --color-command: #9999bb;
+  --color-hook: #aa77dd;
+  --color-error: #dd4455;
+  --color-result: #667788;
+  --color-command-content: #aabbdd;
+  --color-hook-content: #bb99dd;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
