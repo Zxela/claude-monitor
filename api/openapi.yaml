@@ -4,7 +4,7 @@ info:
   description: >
     REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
     JSONL session files and broadcasts activity over WebSocket.
-  version: "2.0.0"
+  version: "3.1.1"
 
 servers:
   - url: http://localhost:7700
@@ -46,7 +46,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, db]
+                required: [ok, db, droppedEvents]
                 properties:
                   ok:
                     type: boolean
@@ -54,13 +54,18 @@ paths:
                   db:
                     type: string
                     example: "ok"
+                  droppedEvents:
+                    type: integer
+                    format: int64
+                    description: Total number of file-watcher events dropped due to a full channel.
+                    example: 0
         "503":
           description: Database unhealthy
           content:
             application/json:
               schema:
                 type: object
-                required: [ok, db]
+                required: [ok, db, droppedEvents]
                 properties:
                   ok:
                     type: boolean
@@ -68,6 +73,11 @@ paths:
                   db:
                     type: string
                     example: "database is locked"
+                  droppedEvents:
+                    type: integer
+                    format: int64
+                    description: Total number of file-watcher events dropped due to a full channel.
+                    example: 0
 
   /api/version:
     get:
@@ -83,7 +93,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "v2.0.0"
+                version: "v3.1.1"
 
   /api/sessions:
     get:
@@ -664,7 +674,7 @@ components:
         version:
           type: string
           description: Build version string (set via ldflags at compile time).
-          example: "v2.0.0"
+          example: "v3.1.1"
 
     Session:
       type: object
@@ -1038,6 +1048,31 @@ components:
         entrypoint:
           type: string
           description: Session entrypoint (cli, vscode, etc.). Omitted when empty.
+        toolUseIds:
+          type: string
+          description: >
+            JSON-encoded array of all tool_use block IDs in this event (for
+            batched tool calls). Omitted when empty.
+          example: "[\"toolu_01AbcDef\",\"toolu_02GhiJkl\"]"
+        cwd:
+          type: string
+          description: Working directory extracted from the event. Omitted when empty.
+          example: "/root/my-project"
+        gitBranch:
+          type: string
+          description: Git branch name extracted from the event. Omitted when empty.
+          example: "feature/auth-refactor"
+        isSidechain:
+          type: boolean
+          description: True when this event is from a sidechain (background) conversation.
+        agentName:
+          type: string
+          description: Agent name within a team. Omitted when empty.
+          example: "code-reviewer"
+        teamName:
+          type: string
+          description: Team name for team agents. Omitted when empty.
+          example: "engineering"
 
     ReplayManifest:
       type: object
@@ -1155,6 +1190,7 @@ components:
         - costRate
         - costByModel
         - costByRepo
+        - droppedEvents
       properties:
         totalCost:
           type: number
@@ -1219,6 +1255,11 @@ components:
           example:
             a1b2c3d4: 80.00
             e5f6g7h8: 62.37
+        droppedEvents:
+          type: integer
+          format: int64
+          description: Total number of file-watcher events dropped due to a full channel.
+          example: 0
 
     TrendResult:
       type: object

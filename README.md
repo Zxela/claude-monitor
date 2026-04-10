@@ -268,17 +268,24 @@ Full OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml). Enable Swagger UI w
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | Health check |
+| `GET /health` | Health check (includes `droppedEvents` counter) |
 | `GET /api/version` | Server version |
-| `GET /api/sessions` | All sessions with aggregated stats |
-| `GET /api/sessions/grouped` | Sessions grouped by time bucket |
-| `GET /api/projects` | Distinct project names with counts |
-| `GET /api/search?q=&limit=` | Cross-session full-text search |
-| `GET /api/history?limit=&offset=` | Historical sessions from SQLite |
-| `GET /api/sessions/{id}/recent` | Last 50 messages for a session |
-| `GET /api/sessions/{id}/replay` | Replay manifest (all events) |
-| `GET /api/sessions/{id}/replay/stream` | SSE replay stream |
-| `POST /api/sessions/{id}/stop` | Stop Docker container |
+| `GET /api/sessions` | List sessions (supports `?active=true`, `?group=activity`, pagination) |
+| `GET /api/sessions/{id}` | Single session lookup (live store, then DB fallback) |
+| `GET /api/sessions/{id}/events` | Session events (supports `?pinned`, `?errors`, `?last=N`, pagination) |
+| `GET /api/sessions/{id}/replay` | Replay manifest (all events, up to 10k) |
+| `POST /api/sessions/{id}/stop` | Stop Docker container for a session |
+| `GET /api/stats` | Aggregated stats with `?window=` (all, today, week, month) |
+| `GET /api/stats/trends` | Trend data with `?window=` (24h, 7d, 30d) and optional `?repo=` |
+| `GET /api/repos` | Repository list with total costs |
+| `GET /api/repos/{id}/stats` | Per-repo aggregate statistics |
+| `GET /api/repos/{id}/sessions` | Paginated sessions for a repo |
+| `GET /api/search?q=&limit=` | FTS5 full-text search across sessions |
+| `GET /api/search/full?q=&limit=` | Full-content substring search (slower, searches complete text) |
+| `GET /api/settings` | Get all user-configurable settings |
+| `PUT /api/settings/{key}` | Update a single setting by key |
+| `GET /api/storage` | Database storage info (size, event counts) |
+| `DELETE /api/cache/repos` | Clear repo resolver cache |
 | `GET /ws` | WebSocket (live events) |
 | `GET /swagger` | Swagger UI (requires `--swagger`) |
 
