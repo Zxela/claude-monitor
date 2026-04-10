@@ -1252,13 +1252,15 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// Escape LIKE wildcards to prevent injection of % and _ characters.
+	escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(query)
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,''), ec.compressed
 		FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
-		WHERE ec.content LIKE ?
+		WHERE ec.content LIKE ? ESCAPE '\'
 		ORDER BY e.timestamp DESC
-		LIMIT ?`, "%"+query+"%", limit)
+		LIMIT ?`, "%"+escaped+"%", limit)
 	if err != nil {
 		return nil, err
 	}
