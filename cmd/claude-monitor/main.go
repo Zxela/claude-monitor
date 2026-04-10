@@ -229,30 +229,6 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-// corsMiddleware adds CORS headers to API responses, restricting cross-origin
-// access to same-origin by default. Since the frontend is served from the same
-// origin this is primarily a defense-in-depth measure.
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			origin := r.Header.Get("Origin")
-			if origin != "" {
-				// Only allow the request's own origin (same-origin policy).
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-				w.Header().Set("Access-Control-Max-Age", "86400")
-			}
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // loggingMiddleware logs method, path, status code, and duration for each request.
 // Long-lived connections (WebSocket and SSE) are passed through without logging.
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -576,7 +552,7 @@ Examples:
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{
 		Addr:        addr,
-		Handler:     loggingMiddleware(corsMiddleware(mux)),
+		Handler:     loggingMiddleware(mux),
 		ReadTimeout: 15 * time.Second,
 		IdleTimeout: 60 * time.Second,
 		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE
