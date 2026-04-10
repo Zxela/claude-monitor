@@ -301,6 +301,9 @@ export function renderCards(
 
     const header = document.createElement('div');
     header.className = 'analytics-card-header';
+    header.setAttribute('role', 'button');
+    header.setAttribute('tabindex', '0');
+    header.setAttribute('aria-expanded', String(expanded));
     header.innerHTML = `
       <span class="analytics-card-toggle">${expanded ? '▼' : '▶'}</span>
       <span class="analytics-card-title">${def.title}</span>
@@ -331,6 +334,7 @@ export function renderCards(
         // Collapse
         body.style.display = 'none';
         header.querySelector('.analytics-card-toggle')!.textContent = '▶';
+        header.setAttribute('aria-expanded', 'false');
         const existing = charts.get(def.id);
         if (existing) {
           existing.destroy();
@@ -341,9 +345,16 @@ export function renderCards(
         // Expand
         body.style.display = '';
         header.querySelector('.analytics-card-toggle')!.textContent = '▼';
+        header.setAttribute('aria-expanded', 'true');
         const chart = def.render(canvas, data);
         charts.set(def.id, chart);
         onToggle(def.id, true);
+      }
+    });
+    header.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        header.click();
       }
     });
   }

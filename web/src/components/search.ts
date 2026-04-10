@@ -11,6 +11,8 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 export function render(searchBoxEl: HTMLElement): void {
   dropdown = document.createElement('div');
   dropdown.className = 'search-dropdown search-dropdown-hidden';
+  dropdown.setAttribute('role', 'listbox');
+  dropdown.setAttribute('aria-label', 'Search results');
   searchBoxEl.appendChild(dropdown);
 
   subscribe(onStateChange);
@@ -93,6 +95,7 @@ function renderResults(): void {
     for (const result of visibleResults) {
       const el = document.createElement('div');
       el.className = 'search-result';
+      el.setAttribute('role', 'option');
       el.innerHTML = `
         <div class="search-result-header">
           <span class="search-result-session">${escapeHtml(group.name)}</span>

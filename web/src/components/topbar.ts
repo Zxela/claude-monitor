@@ -76,6 +76,11 @@ export function render(container: HTMLElement): void {
   hamburger.addEventListener('click', () => {
     const isOpen = collapsible.classList.toggle('open');
     hamburger.setAttribute('aria-expanded', String(isOpen));
+    // Toggle mobile sessions panel
+    const sessionsPanel = document.querySelector('.sessions-panel');
+    if (sessionsPanel) {
+      sessionsPanel.classList.toggle('open', isOpen);
+    }
   });
 
   // Escape key closes collapsible
@@ -85,6 +90,8 @@ export function render(container: HTMLElement): void {
       if (e.key === 'Escape' && collapsible.classList.contains('open')) {
         collapsible.classList.remove('open');
         hamburger.setAttribute('aria-expanded', 'false');
+        const sessionsPanel = document.querySelector('.sessions-panel');
+        if (sessionsPanel) sessionsPanel.classList.remove('open');
       }
     },
     { signal },

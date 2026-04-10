@@ -80,6 +80,9 @@ function show(): void {
   wrapper.className = 'timeline-container';
 
   canvas = document.createElement('canvas');
+  canvas.setAttribute('role', 'img');
+  canvas.setAttribute('aria-label', 'Session timeline — horizontal lanes show user, assistant, and tool activity over time');
+  canvas.textContent = 'Session timeline visualization';
   wrapper.appendChild(canvas);
 
   tooltip = document.createElement('div');
