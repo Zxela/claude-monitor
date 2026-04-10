@@ -387,8 +387,8 @@ func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]ses
 		SELECT message_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
 		FROM events
 		WHERE session_id = ? AND message_id IS NOT NULL AND message_id != ''
-		GROUP BY message_id
-		HAVING MAX(id)`, sessionID)
+		AND id IN (SELECT MAX(id) FROM events WHERE session_id = ? AND message_id IS NOT NULL AND message_id != '' GROUP BY message_id)`,
+		sessionID, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1019,7 +1019,7 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 		limit = 100
 	}
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,'')
+		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
 		ORDER BY e.timestamp ASC
@@ -1035,7 +1035,7 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 // These are "pinned" because they should always be visible regardless of the recent-events window.
 func (d *DB) ListPinnedEvents(sessionID string) ([]EventRow, error) {
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,'')
+		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ? AND (e.is_error = 1 OR e.is_agent = 1 OR e.content_preview LIKE '[agent%')
 		ORDER BY e.timestamp ASC`, sessionID)
@@ -1052,7 +1052,7 @@ func (d *DB) ListRecentEvents(sessionID string, n int) ([]EventRow, error) {
 		n = 50
 	}
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,'')
+		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
 		ORDER BY e.timestamp DESC
@@ -1077,6 +1077,7 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 	for rows.Next() {
 		var r EventRow
 		var fullContent string
+		var compressed []byte
 		var durationMs, agentDurationMs, agentTokens sql.NullInt64
 		var agentToolUseCount, turnMessageCount, hookCount sql.NullInt64
 		var success sql.NullBool
@@ -1095,12 +1096,16 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 			&r.Subtype, &turnMessageCount, &hookCount, &r.HookInfos, &r.Level,
 			&r.IsMeta, &r.Version, &r.Entrypoint,
 			&r.ToolUseIDs, &r.CWD, &r.GitBranch, &r.IsSidechain, &r.AgentName, &r.TeamName,
-			&fullContent,
+			&fullContent, &compressed,
 		); err != nil {
 			return result, err
 		}
 		if fullContent != "" {
 			r.FullContent = fullContent
+		} else if len(compressed) > 0 {
+			if s, err := decompressContent(compressed); err == nil {
+				r.FullContent = s
+			}
 		}
 		if durationMs.Valid {
 			v := durationMs.Int64; r.DurationMs = &v
@@ -1140,7 +1145,7 @@ func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 	// user-supplied queries (e.g. unbalanced quotes, bare operators).
 	safe := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
-		''
+		'', NULL
 		FROM events_fts fts
 		JOIN events e ON e.id = fts.rowid
 		WHERE events_fts MATCH ?
@@ -1159,7 +1164,7 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 		limit = 50
 	}
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,'')
+		COALESCE(ec.content,''), ec.compressed
 		FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE ec.content LIKE ?
@@ -1213,6 +1218,20 @@ func (d *DB) AllSettings() (map[string]string, error) {
 }
 
 // --- Retention ---
+
+// decompressContent inflates gzip-compressed event content from a warm-tier BLOB.
+func decompressContent(data []byte) (string, error) {
+	r, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("decompressContent: %w", err)
+	}
+	defer r.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("decompressContent: %w", err)
+	}
+	return string(out), nil
+}
 
 // CompactHotToWarm compresses event_content older than hotDays into gzip BLOBs.
 func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {

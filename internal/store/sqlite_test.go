@@ -994,8 +994,8 @@ func TestCompactHotToWarm(t *testing.T) {
 		t.Errorf("compacted count: got %d, want 1", count)
 	}
 
-	// After compaction, ListEvents should no longer return full content
-	// (it reads from event_content.content which is now NULL for warm tier)
+	// After compaction, ListEvents should transparently decompress the warm-tier
+	// gzip BLOB and return the original full content.
 	events, _ = db.ListEvents("s1", 100, 0)
 	if events[0].FullContent != "This is the full content of the old event that should be compressed." {
 		t.Errorf("expected decompressed full content after compaction, got %q", events[0].FullContent)
