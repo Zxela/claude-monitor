@@ -1,4 +1,4 @@
-module github.com/zxela-claude/claude-monitor
+module github.com/zxela/claude-monitor
 
 go 1.25.0
 

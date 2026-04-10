@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zxela-claude/claude-monitor/api"
-	"github.com/zxela-claude/claude-monitor/internal/docker"
-	"github.com/zxela-claude/claude-monitor/internal/hub"
-	"github.com/zxela-claude/claude-monitor/internal/repo"
-	"github.com/zxela-claude/claude-monitor/internal/session"
-	"github.com/zxela-claude/claude-monitor/internal/store"
-	"github.com/zxela-claude/claude-monitor/internal/watcher"
+	"github.com/zxela/claude-monitor/api"
+	"github.com/zxela/claude-monitor/internal/docker"
+	"github.com/zxela/claude-monitor/internal/hub"
+	"github.com/zxela/claude-monitor/internal/repo"
+	"github.com/zxela/claude-monitor/internal/session"
+	"github.com/zxela/claude-monitor/internal/store"
+	"github.com/zxela/claude-monitor/internal/watcher"
 )
 
 // Named constants replacing magic numbers (Issue 36).

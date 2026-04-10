@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zxela-claude/claude-monitor/internal/parser"
-	"github.com/zxela-claude/claude-monitor/internal/repo"
-	"github.com/zxela-claude/claude-monitor/internal/session"
+	"github.com/zxela/claude-monitor/internal/parser"
+	"github.com/zxela/claude-monitor/internal/repo"
+	"github.com/zxela/claude-monitor/internal/session"
 )
 
 func tempDBPath(t *testing.T) string {
@@ -997,8 +997,8 @@ func TestCompactHotToWarm(t *testing.T) {
 	// After compaction, ListEvents should no longer return full content
 	// (it reads from event_content.content which is now NULL for warm tier)
 	events, _ = db.ListEvents("s1", 100, 0)
-	if events[0].FullContent != "" {
-		t.Errorf("expected empty full content after compaction, got %q", events[0].FullContent)
+	if events[0].FullContent != "This is the full content of the old event that should be compressed." {
+		t.Errorf("expected decompressed full content after compaction, got %q", events[0].FullContent)
 	}
 }
 

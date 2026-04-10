@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zxela-claude/claude-monitor/internal/parser"
-	"github.com/zxela-claude/claude-monitor/internal/repo"
-	"github.com/zxela-claude/claude-monitor/internal/session"
-	"github.com/zxela-claude/claude-monitor/internal/store"
-	"github.com/zxela-claude/claude-monitor/internal/watcher"
+	"github.com/zxela/claude-monitor/internal/parser"
+	"github.com/zxela/claude-monitor/internal/repo"
+	"github.com/zxela/claude-monitor/internal/session"
+	"github.com/zxela/claude-monitor/internal/store"
+	"github.com/zxela/claude-monitor/internal/watcher"
 )
 
 func openTestDB(t *testing.T) *store.DB {
