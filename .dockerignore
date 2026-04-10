@@ -1,0 +1,10 @@
+.git
+node_modules
+dist
+nohup.out
+*.exe
+.env
+.claude
+.playwright-mcp
+audit
+docs

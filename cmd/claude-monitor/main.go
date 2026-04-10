@@ -534,10 +534,18 @@ Examples:
 	mux.HandleFunc("GET /health", handleHealth(historyDB, fw))
 	mux.HandleFunc("GET /api/version", handleVersion())
 
+	// Favicon — return 204 No Content to suppress browser console errors.
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// Swagger UI (opt-in via --swagger flag).
 	if *swaggerEnabled {
 		mux.HandleFunc("GET /swagger/openapi.yaml", handleSwaggerYAML())
 		mux.HandleFunc("GET /swagger", handleSwaggerUI())
+		mux.HandleFunc("GET /swagger/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/swagger", http.StatusMovedPermanently)
+		})
 		log.Println("swagger UI enabled at /swagger")
 	}
 
