@@ -36,6 +36,8 @@ func TestCheckLatest_NewerAvailable(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	origURL := apiURL
+	t.Cleanup(func() { apiURL = origURL })
 	apiURL = srv.URL
 	rel, err := CheckLatest("v1.0.0")
 	if err != nil {
@@ -61,6 +63,8 @@ func TestCheckLatest_AlreadyCurrent(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	origURL := apiURL
+	t.Cleanup(func() { apiURL = origURL })
 	apiURL = srv.URL
 	rel, err := CheckLatest("v1.0.0")
 	if err != nil {
@@ -87,6 +91,8 @@ func TestCheckLatest_ServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	origURL := apiURL
+	t.Cleanup(func() { apiURL = origURL })
 	apiURL = srv.URL
 	_, err := CheckLatest("v1.0.0")
 	if err == nil {

@@ -369,3 +369,110 @@ func TestSwaggerEndpoint(t *testing.T) {
 		t.Errorf("expected status 404 for /swagger, got %d", resp.StatusCode)
 	}
 }
+
+// TestStorage verifies GET /api/storage returns 200 and storage info fields.
+func TestStorage(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]interface{}
+	getJSON(t, "/api/storage", &body)
+
+	for _, key := range []string{"totalSizeBytes", "hotContentBytes", "warmContentBytes", "eventCount"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response missing expected key %q", key)
+		}
+	}
+
+	// All values should be non-negative numbers.
+	for _, key := range []string{"totalSizeBytes", "eventCount"} {
+		val, ok := body[key].(float64)
+		if !ok {
+			continue
+		}
+		if val < 0 {
+			t.Errorf("%s is negative: %f", key, val)
+		}
+	}
+}
+
+// TestSessionByID_NotFound verifies GET /api/sessions/{id} returns 404 for
+// an unknown session ID.
+func TestSessionByID_NotFound(t *testing.T) {
+	t.Parallel()
+
+	resp, err := http.Get(baseURL + "/api/sessions/nonexistent-session-id-12345")
+	if err != nil {
+		t.Fatalf("GET /api/sessions/{id} failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", resp.StatusCode)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if body["error"] != "session not found" {
+		t.Errorf("expected error message %q, got %q", "session not found", body["error"])
+	}
+}
+
+// TestSettingsUpdate verifies PUT /api/settings/{key} accepts a valid update.
+func TestSettingsUpdate(t *testing.T) {
+	t.Parallel()
+
+	body := strings.NewReader(`{"value":"7"}`)
+	req, err := http.NewRequest(http.MethodPut, baseURL+"/api/settings/retention_hot_days", body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /api/settings/retention_hot_days failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]bool
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !result["ok"] {
+		t.Error("expected ok=true in response")
+	}
+}
+
+// TestCacheClear verifies DELETE /api/cache/repos returns 200 with ok=true.
+func TestCacheClear(t *testing.T) {
+	t.Parallel()
+
+	req, err := http.NewRequest(http.MethodDelete, baseURL+"/api/cache/repos", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /api/cache/repos failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]bool
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !result["ok"] {
+		t.Error("expected ok=true in response")
+	}
+}

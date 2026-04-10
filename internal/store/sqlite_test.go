@@ -2266,3 +2266,143 @@ func TestClosedDB_UpsertCwdRepo(t *testing.T) {
 		t.Error("expected error from closed DB, got nil")
 	}
 }
+
+// =============================================================================
+// Additional coverage: GetSession field verification
+// =============================================================================
+
+func TestGetSession_AllFields(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	sess := &session.Session{
+		ID:              "get-all-1",
+		SessionName:     "full field test",
+		TotalCost:       3.14,
+		InputTokens:     500,
+		OutputTokens:    250,
+		CacheReadTokens: 100,
+		MessageCount:    5,
+		ErrorCount:      1,
+		StartedAt:       now.Add(-10 * time.Minute),
+		LastActive:      now,
+		Model:           "claude-sonnet-4-6",
+		CWD:             "/home/user/project",
+		GitBranch:       "feature/test",
+		TaskDescription: "Implement feature X",
+	}
+	if err := db.SaveSession(sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	row, err := db.GetSession("get-all-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if row == nil {
+		t.Fatal("expected session row, got nil")
+	}
+	if row.Model != "claude-sonnet-4-6" {
+		t.Errorf("Model: got %q, want %q", row.Model, "claude-sonnet-4-6")
+	}
+	if row.CWD != "/home/user/project" {
+		t.Errorf("CWD: got %q, want %q", row.CWD, "/home/user/project")
+	}
+	if row.Branch != "feature/test" {
+		t.Errorf("Branch: got %q, want %q", row.Branch, "feature/test")
+	}
+	if row.TaskDescription != "Implement feature X" {
+		t.Errorf("TaskDescription: got %q, want %q", row.TaskDescription, "Implement feature X")
+	}
+	if row.InputTokens != 500 {
+		t.Errorf("InputTokens: got %d, want 500", row.InputTokens)
+	}
+	if row.ErrorCount != 1 {
+		t.Errorf("ErrorCount: got %d, want 1", row.ErrorCount)
+	}
+}
+
+// =============================================================================
+// Additional coverage: SearchFullContent special characters
+// =============================================================================
+
+func TestSearchFullContent_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	db.SaveSession(&session.Session{
+		ID: "sfc-special", StartedAt: time.Now(), LastActive: time.Now(),
+	})
+
+	batch := &EventBatch{Events: []EventInsert{{
+		SessionID: "sfc-special",
+		Event: &parser.Event{
+			Type:        "assistant",
+			ContentText: "special chars",
+			Timestamp:   time.Now(),
+			UUID:        "sfc-special-uuid",
+		},
+		FullContent: "line with 100% match and $pecial ch@racters",
+	}}}
+	db.PersistBatch(batch)
+
+	results, err := db.SearchFullContent("$pecial ch@racters", 10)
+	if err != nil {
+		t.Fatalf("SearchFullContent: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result for special characters, got %d", len(results))
+	}
+}
+
+// =============================================================================
+// Additional coverage: ListSessionsByRepo empty and pagination
+// =============================================================================
+
+func TestListSessionsByRepo_Empty(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	rows, err := db.ListSessionsByRepo("nonexistent-repo", 10, 0)
+	if err != nil {
+		t.Fatalf("ListSessionsByRepo: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected 0 sessions for nonexistent repo, got %d", len(rows))
+	}
+}
+
+func TestListSessionsByRepo_Pagination(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		insertTestSessionWithRepo(t, db, fmt.Sprintf("lsr-pg-%d", i), "repo-paged",
+			now.Add(-time.Duration(i)*time.Hour), float64(i+1), 100, 50, 30, 10)
+	}
+
+	// First page
+	page1, err := db.ListSessionsByRepo("repo-paged", 2, 0)
+	if err != nil {
+		t.Fatalf("ListSessionsByRepo page 1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page 1: expected 2, got %d", len(page1))
+	}
+
+	// Second page
+	page2, err := db.ListSessionsByRepo("repo-paged", 2, 2)
+	if err != nil {
+		t.Fatalf("ListSessionsByRepo page 2: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Fatalf("page 2: expected 2, got %d", len(page2))
+	}
+
+	// Pages should have different sessions
+	if page1[0].ID == page2[0].ID {
+		t.Error("page 1 and page 2 returned the same first session")
+	}
+}
