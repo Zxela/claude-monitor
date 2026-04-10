@@ -218,18 +218,6 @@ echo "claude-monitor started in background"
 	}
 }
 
-// requireSession looks up a session by path parameter "id" and writes an HTTP
-// error if not found.
-func requireSession(store *session.Store, w http.ResponseWriter, r *http.Request) (*session.Session, bool) {
-	id := r.PathValue("id")
-	sess, ok := store.Get(id)
-	if !ok {
-		writeJSONError(w, "session not found", http.StatusNotFound)
-		return nil, false
-	}
-	return sess, true
-}
-
 // statusRecorder wraps http.ResponseWriter to capture the status code.
 type statusRecorder struct {
 	http.ResponseWriter
@@ -245,7 +233,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 // Long-lived connections (WebSocket and SSE) are passed through without logging.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/ws") || (strings.HasPrefix(r.URL.Path, "/api/sessions/") && strings.HasSuffix(r.URL.Path, "/replay/stream")) {
+		if strings.HasPrefix(r.URL.Path, "/ws") {
 			next.ServeHTTP(w, r)
 			return
 		}

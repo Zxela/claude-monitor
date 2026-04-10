@@ -1,4 +1,4 @@
-import type { ParsedMessage } from '../types';
+import type { Event } from '../types';
 import { state, update } from '../state';
 import { escapeHtml } from '../utils';
 
@@ -33,7 +33,7 @@ const COMMAND_RE = /<command-name>\s*\/?([^<]+)<\/command-name>/;
 const COMMAND_MSG_RE = /<command-message>([^<]*)<\/command-message>/;
 const COMMAND_CAVEAT_RE = /<local-command-caveat>[\s\S]*?<\/local-command-caveat>\s*/;
 
-export function detectType(msg: ParsedMessage): MessageType {
+export function detectType(msg: Event): MessageType {
   if (msg.isError) return 'error';
   if (msg.hookEvent) return 'hook';
   if (msg.role === 'user' && msg.contentPreview && COMMAND_RE.test(msg.contentPreview))
@@ -75,7 +75,7 @@ function formatCommand(raw: string): string {
   return name ? `/${name}` : text;
 }
 
-export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): HTMLElement {
+export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLElement {
   const type = detectType(msg);
   const el = document.createElement('div');
   el.className = `feed-entry type-${type}${msg.isError ? ' is-error' : ''}${msg.isMeta ? ' is-meta' : ''}`;
@@ -240,7 +240,7 @@ export function renderFeedEntry(msg: ParsedMessage, opts: RenderOptions = {}): H
 }
 
 /** Find the child session spawned by this agent call and navigate to it. */
-function navigateToSubagent(msg: ParsedMessage): void {
+function navigateToSubagent(msg: Event): void {
   const parentId = state.selectedSessionId;
   if (!parentId) return;
 

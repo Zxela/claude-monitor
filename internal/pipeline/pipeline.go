@@ -165,15 +165,6 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	}
 }
 
-// ProcessBootstrap handles a batch of events from a single JSONL file.
-// Events are processed through the pipeline and flushed as a single batch.
-func (p *Pipeline) ProcessBootstrap(events []watcher.Event) {
-	for _, ev := range events {
-		p.Process(ev)
-	}
-	p.flush()
-}
-
 // flush persists buffered events and updates session aggregates.
 func (p *Pipeline) flush() {
 	p.bufMu.Lock()

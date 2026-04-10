@@ -1,5 +1,5 @@
 // web/src/components/replay.ts
-import type { ParsedMessage } from '../types';
+import type { Event } from '../types';
 import { state, update } from '../state';
 import { renderFeedEntry } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
@@ -14,7 +14,7 @@ let progressEl: HTMLElement | null = null;
 let playTimer: ReturnType<typeof setInterval> | null = null;
 let totalEvents = 0;
 let currentIndex = 0;
-let manifestEvents: ParsedMessage[] = [];
+let manifestEvents: Event[] = [];
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -83,7 +83,7 @@ async function loadManifest(sessionId: string): Promise<void> {
   try {
     const res = await fetch(`/api/sessions/${sessionId}/replay`);
     const data = await res.json();
-    manifestEvents = (data.events ?? []).map((e: unknown) => e as ParsedMessage);
+    manifestEvents = (data.events ?? []).map((e: unknown) => e as Event);
     totalEvents = manifestEvents.length;
     if (scrubber) scrubber.max = String(totalEvents);
     updateProgress();

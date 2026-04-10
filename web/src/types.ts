@@ -150,10 +150,6 @@ export interface WsEvent {
   url?: string;
 }
 
-// Legacy alias — frontend components still reference ParsedMessage
-// TODO: migrate components to use Event directly
-export type ParsedMessage = Event;
-
 export interface SearchResult {
   sessionId: string;
   sessionName: string;

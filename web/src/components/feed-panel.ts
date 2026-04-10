@@ -1,5 +1,5 @@
 // web/src/components/feed-panel.ts
-import type { ParsedMessage, WsEvent } from '../types';
+import type { Event, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessionEvents, fetchPinnedEvents } from '../api';
@@ -106,7 +106,7 @@ function onWsMessage(event: WsEvent): void {
 
   const sessionName = sessionDisplayName(event.session);
   const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
-  appendMessage(msg as ParsedMessage, opts);
+  appendMessage(msg as Event, opts);
 }
 
 function renderFeedPanel(): void {
@@ -320,7 +320,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     }
 
     for (const msg of merged) {
-      appendMessage(msg as ParsedMessage);
+      appendMessage(msg as Event);
     }
 
     // Restore saved scroll position for this session
@@ -380,7 +380,7 @@ async function loadMultiSessionEvents(): Promise<void> {
       const key = `${evt.timestamp}|${evt.contentPreview ?? ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      appendMessage(evt as ParsedMessage, { showSessionId: (evt as any)._sessionName });
+      appendMessage(evt as Event, { showSessionId: (evt as any)._sessionName });
     }
   } catch {
     // Silently fail — live events will still flow in via WebSocket
@@ -395,7 +395,7 @@ function clearGroupHighlight(): void {
   currentHighlightGroup = null;
 }
 
-function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}): void {
+function appendMessage(msg: Event, opts: { showSessionId?: string } = {}): void {
   if (!feedContent) return;
 
   // Suppress thinking-only assistant messages — they're streaming intermediates
