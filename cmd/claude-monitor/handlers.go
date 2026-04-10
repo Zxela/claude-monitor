@@ -321,7 +321,7 @@ func handleRepoSessions(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		repoID := r.PathValue("id")
 		limit := defaultPageLimit
-		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
 			limit = n
 		}
 		offset := 0
@@ -432,7 +432,7 @@ func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 		}
 
 		limit := 100
-		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
 			limit = n
 		}
 		offset := 0
@@ -455,7 +455,16 @@ func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 func handleSessionReplay(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		events, err := historyDB.ListEvents(id, 10000, 0)
+		q := r.URL.Query()
+		limit := 1000
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 10000 {
+			limit = n
+		}
+		offset := 0
+		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
+			offset = n
+		}
+		events, err := historyDB.ListEvents(id, limit, offset)
 		if err != nil {
 			writeJSONError(w, "failed to list events", http.StatusInternalServerError)
 			return
@@ -466,6 +475,8 @@ func handleSessionReplay(historyDB *store.DB) http.HandlerFunc {
 		writeJSON(w, map[string]any{
 			"sessionId": id,
 			"events":    events,
+			"limit":     limit,
+			"offset":    offset,
 		})
 	}
 }
@@ -482,10 +493,21 @@ func handleSettings(historyDB *store.DB) http.HandlerFunc {
 	}
 }
 
+// validSettingKeys is the allowlist of setting keys that can be updated via the API.
+var validSettingKeys = map[string]bool{
+	"retention_hot_days":  true,
+	"retention_warm_days": true,
+}
+
 // handleSettingsUpdate serves PUT /api/settings/{key}.
 func handleSettingsUpdate(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.PathValue("key")
+		if !validSettingKeys[key] {
+			writeJSONError(w, "unknown setting key", http.StatusBadRequest)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 		var body struct {
 			Value string `json:"value"`
 		}
