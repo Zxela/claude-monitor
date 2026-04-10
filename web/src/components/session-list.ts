@@ -31,6 +31,7 @@ export function render(container: HTMLElement): void {
   filterBar.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeFilter = btn.dataset.filter as typeof activeFilter;
+      showAllGroups.clear(); // Reset "show all" expansion when switching filters
       filterBar.querySelectorAll('button').forEach((b) => {
         b.classList.remove('active');
         b.setAttribute('aria-pressed', 'false');
@@ -62,16 +63,19 @@ export function render(container: HTMLElement): void {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.key === '1') {
       activeFilter = 'active';
+      showAllGroups.clear();
       renderList();
       updateFilterBar();
     }
     if (e.key === '2') {
       activeFilter = 'recent';
+      showAllGroups.clear();
       renderList();
       updateFilterBar();
     }
     if (e.key === '3') {
       activeFilter = 'all';
+      showAllGroups.clear();
       renderList();
       updateFilterBar();
     }

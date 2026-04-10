@@ -11,6 +11,7 @@ import (
 )
 
 const gitTimeout = 2 * time.Second
+const maxCacheSize = 1000
 
 // Resolver resolves git repository identity from a working directory path.
 type Resolver struct {
@@ -43,6 +44,10 @@ func (r *Resolver) Resolve(cwd, label string) (*Repo, error) {
 	if cached, ok := r.cache[cwd]; ok {
 		r.mu.Unlock()
 		return cached, nil
+	}
+	// Simple size limit: clear entire cache if it exceeds maxCacheSize
+	if len(r.cache) >= maxCacheSize {
+		r.cache = make(map[string]*Repo)
 	}
 	r.cache[cwd] = resolved
 	r.mu.Unlock()
