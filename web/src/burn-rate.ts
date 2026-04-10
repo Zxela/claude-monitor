@@ -58,13 +58,6 @@ export function startSampling(): void {
   timer = setInterval(sample, INTERVAL_MS);
 }
 
-export function stopSampling(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-}
-
 export function getSamples(): BurnRateSample[] {
   return samples;
 }

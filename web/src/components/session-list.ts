@@ -192,13 +192,13 @@ function renderList(): void {
 
   const filter = state.repoFilter;
 
-  // Update filter counts — only count top-level, non-trivial sessions (no subagents) to match group display
-  const isTrivialCount = (s: Session) =>
+  // Skip trivial sessions: no cost, no tokens, few messages
+  const isTrivial = (s: Session) =>
     s.totalCost === 0 &&
     s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
     s.messageCount < 4;
   const topLevelFilter = (s: Session) =>
-    !s.parentId && !isTrivialCount(s) && (!filter || s.cwd === filter || s.sessionName === filter);
+    !s.parentId && !isTrivial(s) && (!filter || s.cwd === filter || s.sessionName === filter);
   const recentCount =
     active.length +
     [...lastHour, ...today].filter(
@@ -211,11 +211,6 @@ function renderList(): void {
   if (fcActive) fcActive.textContent = String(active.filter((s) => !s.parentId).length);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
-  // Filter: top-level only, repo filter, and skip trivial sessions (no cost, no tokens, few messages)
-  const isTrivial = (s: Session) =>
-    s.totalCost === 0 &&
-    s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
-    s.messageCount < 4;
   const topLevel = (sessions: Session[], includeTrivial = false) =>
     (filter ? sessions.filter((s) => s.cwd === filter || s.sessionName === filter) : sessions)
       .filter((s) => !s.parentId)
