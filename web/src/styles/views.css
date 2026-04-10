@@ -210,6 +210,37 @@
   max-width: 400px;
 }
 
+.help-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.help-header h3 {
+  margin: 0;
+}
+
+.help-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.help-close-btn:hover {
+  color: var(--text);
+}
+
+.help-close-btn:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
 .help-content h3 {
   color: var(--cyan);
   font-size: 13px;
