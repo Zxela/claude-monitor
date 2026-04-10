@@ -61,6 +61,8 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	done       chan struct{}
+	graceful   chan struct{} // signals Run to perform graceful shutdown
+	stopped    chan struct{} // closed when Run returns
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -71,15 +73,31 @@ func NewHub() *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		done:       make(chan struct{}),
+		graceful:   make(chan struct{}),
+		stopped:    make(chan struct{}),
 	}
 }
 
 // Run processes register/unregister/broadcast events. Call in a goroutine.
-// It returns when Stop is called.
+// It returns when Stop or GracefulStop is called.
 func (h *Hub) Run() {
+	defer close(h.stopped)
 	for {
 		select {
 		case <-h.done:
+			return
+
+		case <-h.graceful:
+			// Perform graceful shutdown inside the Run goroutine where
+			// h.clients access is safe (no concurrent modification).
+			// Closing each client's send channel causes writePump to send a
+			// WebSocket close frame and exit, which is also safe from the
+			// gorilla/websocket concurrency perspective since only writePump
+			// writes to the connection.
+			for client := range h.clients {
+				close(client.send)
+				delete(h.clients, client)
+			}
 			return
 
 		case client := <-h.register:
@@ -121,17 +139,16 @@ func (h *Hub) Broadcast(msg []byte) {
 	}
 }
 
-// GracefulStop sends a WebSocket close frame to every connected client, then
-// stops the hub. This gives browsers the opportunity to handle the closure
-// cleanly instead of seeing an abnormal TCP disconnect.
+// GracefulStop closes every connected client's send channel, which triggers
+// each writePump to send a WebSocket close frame (CloseGoingAway) and exit.
+// This gives browsers the opportunity to handle the closure cleanly instead
+// of seeing an abnormal TCP disconnect.
+//
+// The client iteration happens inside the Run goroutine to avoid a race
+// condition on h.clients. GracefulStop blocks until Run has finished.
 func (h *Hub) GracefulStop() {
-	for client := range h.clients {
-		client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		client.conn.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"))
-		client.conn.Close()
-	}
-	h.Stop()
+	close(h.graceful)
+	<-h.stopped
 }
 
 // ServeWs upgrades an HTTP connection to WebSocket and registers it with hub.
@@ -191,8 +208,9 @@ func (c *Client) writePump() {
 		case msg, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// Hub closed the channel.
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				// Hub closed the channel — send close frame and exit.
+				c.conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
 				return
 			}
 			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {

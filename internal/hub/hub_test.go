@@ -2,9 +2,14 @@ package hub
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestNewHub_CreatesHubWithNoClients(t *testing.T) {
@@ -252,5 +257,97 @@ func TestHub_MultipleSequentialBroadcastsReceivedInOrder(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("timeout waiting for message %d", i)
 		}
+	}
+}
+
+func TestHub_GracefulStop_NoRace(t *testing.T) {
+	t.Parallel()
+	h := NewHub()
+	go h.Run()
+
+	// Start an HTTP test server that upgrades connections to WebSocket.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWs(h, w, r)
+	}))
+	defer srv.Close()
+
+	// Connect several WebSocket clients.
+	const numClients = 5
+	conns := make([]*websocket.Conn, numClients)
+	for i := 0; i < numClients; i++ {
+		wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+		c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("dial %d: %v", i, err)
+		}
+		conns[i] = c
+		defer conns[i].Close()
+	}
+
+	// Give the hub a moment to process all registrations.
+	time.Sleep(50 * time.Millisecond)
+
+	// GracefulStop should complete without racing on h.clients.
+	done := make(chan struct{})
+	go func() {
+		h.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// GracefulStop returned — success.
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout: GracefulStop did not return")
+	}
+}
+
+func TestHub_GracefulStopWithConcurrentActivity(t *testing.T) {
+	t.Parallel()
+	h := NewHub()
+	go h.Run()
+
+	// Start an HTTP test server.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWs(h, w, r)
+	}))
+	defer srv.Close()
+
+	// Connect a WebSocket client.
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+
+	// Concurrently broadcast while calling GracefulStop.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			h.Broadcast([]byte(fmt.Sprintf("msg-%d", i)))
+		}
+	}()
+
+	// Give broadcasts a head start, then graceful stop.
+	time.Sleep(5 * time.Millisecond)
+	h.GracefulStop()
+	wg.Wait()
+}
+
+func TestHub_StopClosesStoppedChannel(t *testing.T) {
+	t.Parallel()
+	h := NewHub()
+	go h.Run()
+
+	h.Stop()
+
+	select {
+	case <-h.stopped:
+		// stopped channel was closed — correct.
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout: stopped channel not closed after Stop()")
 	}
 }
