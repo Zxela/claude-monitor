@@ -1,4 +1,6 @@
 // web/src/components/timeline-view.ts
+import type { AppState } from '../state';
+import { state, subscribe, update } from '../state';
 import { escapeHtml, formatDurationSecs } from '../utils';
 import '../styles/views.css';
 
@@ -39,9 +41,26 @@ let dragStartOffset = 0;
 
 export function render(mount: HTMLElement): void {
   container = mount;
+  subscribe(onStateChange);
 }
 
-export async function open(sid: string): Promise<void> {
+function onStateChange(_state: AppState, changed: Set<string>): void {
+  if (changed.has('view')) {
+    if (state.view === 'timeline') {
+      const sid = state.selectedSessionId;
+      if (sid) {
+        open(sid);
+      } else {
+        // No session selected — go back to list
+        update({ view: 'list' });
+      }
+    } else {
+      close();
+    }
+  }
+}
+
+async function open(sid: string): Promise<void> {
   await loadEvents(sid);
   show();
 }
@@ -55,11 +74,12 @@ export function close(): void {
     canvas.removeEventListener('mouseleave', onMouseUp);
     canvas.removeEventListener('wheel', onWheel);
   }
+  window.removeEventListener('resize', resizeCanvas);
+  document.removeEventListener('keydown', onKeyDown);
   canvas = null;
   ctx = null;
   tooltip = null;
   events = [];
-  window.removeEventListener('resize', resizeCanvas);
 }
 
 async function loadEvents(sid: string): Promise<void> {
@@ -79,6 +99,16 @@ function show(): void {
   const wrapper = document.createElement('div');
   wrapper.className = 'timeline-container';
 
+  // Close / back button
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'timeline-close-btn';
+  closeBtn.textContent = '\u2190 BACK';
+  closeBtn.title = 'Close timeline (Escape)';
+  closeBtn.addEventListener('click', () => {
+    update({ view: 'list' });
+  });
+  wrapper.appendChild(closeBtn);
+
   canvas = document.createElement('canvas');
   wrapper.appendChild(canvas);
 
@@ -97,6 +127,10 @@ function show(): void {
   canvas.addEventListener('mouseleave', onMouseUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
 
+  // Escape key to close
+  document.removeEventListener('keydown', onKeyDown);
+  document.addEventListener('keydown', onKeyDown);
+
   // Reset view
   offsetX = 0;
   if (events.length > 1) {
@@ -109,6 +143,14 @@ function show(): void {
   }
 
   draw();
+}
+
+function onKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && state.view === 'timeline') {
+    e.preventDefault();
+    e.stopPropagation();
+    update({ view: 'list' });
+  }
 }
 
 function resizeCanvas(): void {
@@ -270,8 +312,12 @@ function draw(): void {
 }
 
 function getEventAt(mx: number, my: number): TimelineEvent | null {
-  if (events.length < 2 || !canvas) return null;
-  const h = canvas.height;
+  if (events.length < 2 || !container) return null;
+  // Use logical (CSS) pixel dimensions to match mouse coordinates from
+  // getBoundingClientRect(). canvas.height is DPR-scaled and must NOT be
+  // used here — it would cause hit-testing to target the wrong lane on
+  // HiDPI displays.
+  const h = container.clientHeight;
   const laneH = (h - 30) / 3;
   const topY = 30;
   const t0 = new Date(events[0].timestamp).getTime();

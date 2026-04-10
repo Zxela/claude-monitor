@@ -8,7 +8,6 @@ import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
-import { open as openTimeline } from './timeline-view';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -208,12 +207,12 @@ function updateHeader(): void {
     });
     const timelineBtn = headerEl.querySelector('.timeline-btn');
     timelineBtn?.addEventListener('click', () => {
-      if (state.selectedSessionId) openTimeline(state.selectedSessionId);
+      if (state.selectedSessionId) update({ view: 'timeline' });
     });
     timelineBtn?.addEventListener('keydown', (e) => {
       if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
         e.preventDefault();
-        if (state.selectedSessionId) openTimeline(state.selectedSessionId);
+        if (state.selectedSessionId) update({ view: 'timeline' });
       }
     });
   } else {
