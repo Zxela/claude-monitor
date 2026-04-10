@@ -109,20 +109,22 @@ function renderList(): void {
 
   const now = Date.now();
 
-  // Locally transition stale sessions to idle so subagents don't linger as "waiting".
-  // Exception: parents with active children stay as "waiting" — work is still happening.
-  for (const sess of state.sessions.values()) {
+  // Build a local snapshot of sessions with stale-to-idle transitions applied.
+  // We must NOT mutate the canonical state.sessions objects — create shallow copies instead.
+  const localSessions = new Map<string, Session>();
+  for (const [id, sess] of state.sessions) {
     if (sess.isActive && !isSessionActive(sess.lastActive)) {
-      const hasActiveChild = (sess.children ?? []).some((id) => {
-        const child = state.sessions.get(id);
+      const hasActiveChild = (sess.children ?? []).some((childId) => {
+        const child = state.sessions.get(childId);
         return child && isSessionActive(child.lastActive);
       });
       if (hasActiveChild) {
-        sess.status = 'waiting';
+        localSessions.set(id, { ...sess, status: 'waiting' });
       } else {
-        sess.isActive = false;
-        sess.status = 'idle';
+        localSessions.set(id, { ...sess, isActive: false, status: 'idle' });
       }
+    } else {
+      localSessions.set(id, sess);
     }
   }
 
@@ -142,7 +144,7 @@ function renderList(): void {
   const thisWeek: Session[] = [];
   const older: Session[] = [];
 
-  for (const sess of state.sessions.values()) {
+  for (const sess of localSessions.values()) {
     if (isSessionActive(sess.lastActive)) {
       active.push(sess);
       continue;
@@ -157,9 +159,9 @@ function renderList(): void {
 
   // Auto-reveal: if a session is selected, ensure its group is visible
   if (state.selectedSessionId) {
-    const sel = state.sessions.get(state.selectedSessionId);
+    const sel = localSessions.get(state.selectedSessionId);
     // Find the parent if this is a subagent
-    const target = sel?.parentId ? (state.sessions.get(sel.parentId) ?? sel) : sel;
+    const target = sel?.parentId ? (localSessions.get(sel.parentId) ?? sel) : sel;
     if (target && !isSessionActive(target.lastActive)) {
       const ms = new Date(target.lastActive).getTime();
       const groupKey =
@@ -204,7 +206,7 @@ function renderList(): void {
     [...lastHour, ...today].filter(
       (s) => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
     ).length;
-  const totalCount = Array.from(state.sessions.values()).filter(topLevelFilter).length;
+  const totalCount = Array.from(localSessions.values()).filter(topLevelFilter).length;
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
