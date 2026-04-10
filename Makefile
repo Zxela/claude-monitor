@@ -1,13 +1,17 @@
 .PHONY: build dev clean test lint web migrate migrate-status migrate-rollback migrate-create
 
+# Version from release-please manifest (fallback to "dev")
+VERSION ?= $(shell cat .release-please-manifest.json 2>/dev/null | grep -o '"[^"]*"$$' | tr -d '"' || echo "dev")
+LDFLAGS := -s -w -X main.version=$(VERSION)
+
 # Build frontend then Go binary
 build: web
-	go build -o claude-monitor ./cmd/claude-monitor
+	go build -ldflags="$(LDFLAGS)" -o claude-monitor ./cmd/claude-monitor
 
 # Build and run with live reload (frontend dev server proxies to Go backend)
 dev:
 	@echo "Starting Go backend on :7700..."
-	@go build -o /tmp/claude-monitor-dev ./cmd/claude-monitor && \
+	@go build -ldflags="$(LDFLAGS)" -o /tmp/claude-monitor-dev ./cmd/claude-monitor && \
 		/tmp/claude-monitor-dev -port 7700 & \
 		GO_PID=$$!; \
 		trap "kill $$GO_PID 2>/dev/null; exit" INT TERM EXIT; \

@@ -118,7 +118,10 @@ jobs:
           cd dist
           for bin in claude-monitor-*; do
             chmod +x "$bin"
-            tar czf "${bin}.tar.gz" "$bin"
+            # Rename to plain "claude-monitor" so Homebrew's bin.install works
+            cp "$bin" claude-monitor
+            tar czf "${bin}.tar.gz" claude-monitor
+            rm claude-monitor
           done
           sha256sum *.tar.gz > checksums.txt
 
