@@ -111,8 +111,27 @@ func (h *Hub) Stop() {
 }
 
 // Broadcast enqueues msg for delivery to all connected clients.
+// If the broadcast channel is full the message is dropped to avoid blocking
+// the caller (typically the event pipeline goroutine).
 func (h *Hub) Broadcast(msg []byte) {
-	h.broadcast <- msg
+	select {
+	case h.broadcast <- msg:
+	default:
+		log.Printf("hub: broadcast channel full, dropping message (%d bytes)", len(msg))
+	}
+}
+
+// GracefulStop sends a WebSocket close frame to every connected client, then
+// stops the hub. This gives browsers the opportunity to handle the closure
+// cleanly instead of seeing an abnormal TCP disconnect.
+func (h *Hub) GracefulStop() {
+	for client := range h.clients {
+		client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		client.conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"))
+		client.conn.Close()
+	}
+	h.Stop()
 }
 
 // ServeWs upgrades an HTTP connection to WebSocket and registers it with hub.
