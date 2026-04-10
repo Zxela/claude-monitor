@@ -190,8 +190,9 @@ func (p *Pipeline) flush() {
 		log.Printf("batch persist error: %v", err)
 	}
 
-	// Persist affected sessions + repo mappings
+	// Persist affected sessions + repo mappings in a single transaction
 	seen := make(map[string]bool)
+	var sessionsToFlush []*session.Session
 	for _, ei := range batch {
 		if seen[ei.SessionID] {
 			continue
@@ -202,14 +203,10 @@ func (p *Pipeline) flush() {
 		if !ok {
 			continue
 		}
-		if err := p.db.SaveSession(sess); err != nil {
-			log.Printf("session save error for %s: %v", ei.SessionID, err)
-		}
-
-		// Persist repo mapping if we have a CWD and RepoID
-		if sess.CWD != "" && sess.RepoID != "" {
-			p.db.UpsertCwdRepo(sess.CWD, sess.RepoID)
-		}
+		sessionsToFlush = append(sessionsToFlush, sess)
+	}
+	if err := p.db.FlushSessions(sessionsToFlush); err != nil {
+		log.Printf("session flush error: %v", err)
 	}
 }
 

@@ -27,6 +27,7 @@ const MAX_ENTRIES = 500;
 // Maps toolUseId -> displayType so tool_result messages can inherit their
 // originating tool_use call's display type for consistent grouping/styling.
 const toolUseMap = new Map<string, string>(); // toolUseId -> displayType
+const MAX_TOOL_USE_MAP = 200;
 
 const FILTER_TYPES = [
   'all',
@@ -41,6 +42,7 @@ const FILTER_TYPES = [
 ] as const;
 
 let multiSessionLoaded = false;
+let scrollRafPending = false;
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -69,6 +71,16 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     if (sessionChanged && feedContent) {
       const prevId = currentLoadSessionId || '__multi__';
       scrollPositions.set(prevId, feedContent.scrollTop);
+    }
+
+    // Clean up toolUseMap on session switch (tool_results from the old session won't arrive)
+    toolUseMap.clear();
+
+    // Prune scrollPositions for sessions no longer in state
+    for (const key of scrollPositions.keys()) {
+      if (key !== '__multi__' && !state.sessions.has(key)) {
+        scrollPositions.delete(key);
+      }
     }
 
     if (state.selectedSessionId) {
@@ -148,11 +160,16 @@ function renderFeedPanel(): void {
     ? '<div class="feed-empty">Waiting for events in this session\u2026</div>'
     : '<div class="feed-empty">Select a session to view its event feed</div>';
   feedContent.addEventListener('scroll', () => {
-    if (!feedContent) return;
-    const atBottom =
-      feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
-    autoScroll = atBottom;
-    scrollLockBtn?.classList.toggle('visible', !atBottom);
+    if (scrollRafPending) return;
+    scrollRafPending = true;
+    requestAnimationFrame(() => {
+      scrollRafPending = false;
+      if (!feedContent) return;
+      const atBottom =
+        feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
+      autoScroll = atBottom;
+      scrollLockBtn?.classList.toggle('visible', !atBottom);
+    });
   });
   // Hover-based group highlighting: hovering any entry with a data-group-id
   // highlights all entries in the same group (tool_use + hooks + tool_result).
@@ -367,13 +384,20 @@ async function loadMultiSessionEvents(): Promise<void> {
   if (activeSessions.length === 0) return;
 
   try {
-    // Fetch last 20 events from each active session
-    const perSession = await Promise.all(
-      activeSessions.map(async (sess) => {
-        const events = await fetchSessionEvents(sess.id, 20);
-        return events.map((e) => ({ ...e, _sessionName: sessionDisplayName(sess) }));
-      }),
-    );
+    // Fetch last 20 events from each active session (max 5 concurrent)
+    const MAX_CONCURRENT = 5;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const perSession: any[][] = [];
+    for (let i = 0; i < activeSessions.length; i += MAX_CONCURRENT) {
+      const chunk = activeSessions.slice(i, i + MAX_CONCURRENT);
+      const results = await Promise.all(
+        chunk.map(async (sess) => {
+          const events = await fetchSessionEvents(sess.id, 20);
+          return events.map((e) => ({ ...e, _sessionName: sessionDisplayName(sess) }));
+        }),
+      );
+      perSession.push(...results);
+    }
 
     const allEvents = perSession
       .flat()
@@ -428,6 +452,16 @@ function appendMessage(msg: ParsedMessage, opts: { showSessionId?: string } = {}
   // inherit their display type from the originating tool_use call.
   if (msg.toolName && msg.role === 'assistant' && msg.toolUseId) {
     toolUseMap.set(msg.toolUseId, detectType(msg));
+    // Evict oldest entries if map grows too large (orphaned tool_use without results)
+    if (toolUseMap.size > MAX_TOOL_USE_MAP) {
+      const half = MAX_TOOL_USE_MAP / 2;
+      const toDelete: string[] = [];
+      for (const k of toolUseMap.keys()) {
+        if (toDelete.length >= half) break;
+        toDelete.push(k);
+      }
+      for (const k of toDelete) toolUseMap.delete(k);
+    }
   }
 
   const entry = renderFeedEntry(msg, opts);

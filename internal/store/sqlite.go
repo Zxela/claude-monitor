@@ -380,6 +380,95 @@ func (d *DB) SaveSession(s *session.Session) error {
 	return nil
 }
 
+// FlushSessions upserts multiple sessions and their cwd->repo mappings in a single transaction.
+func (d *DB) FlushSessions(sessions []*session.Session) error {
+	if len(sessions) == 0 {
+		return nil
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("FlushSessions begin: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			log.Printf("FlushSessions: rollback error: %v", rbErr)
+		}
+	}()
+
+	sessStmt, err := tx.Prepare(`INSERT INTO sessions
+		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
+		 started_at, ended_at, total_cost, input_tokens, output_tokens,
+		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
+		 version, entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+		 repo_id=excluded.repo_id,
+		 parent_id=excluded.parent_id,
+		 session_name=excluded.session_name,
+		 task_description=excluded.task_description,
+		 cwd=excluded.cwd,
+		 branch=excluded.branch,
+		 model=excluded.model,
+		 started_at=excluded.started_at,
+		 ended_at=excluded.ended_at,
+		 total_cost=excluded.total_cost,
+		 input_tokens=excluded.input_tokens,
+		 output_tokens=excluded.output_tokens,
+		 cache_read_tokens=excluded.cache_read_tokens,
+		 cache_creation_tokens=excluded.cache_creation_tokens,
+		 message_count=excluded.message_count,
+		 event_count=excluded.event_count,
+		 error_count=excluded.error_count,
+		 version=excluded.version,
+		 entrypoint=excluded.entrypoint`)
+	if err != nil {
+		return fmt.Errorf("FlushSessions prepare session: %w", err)
+	}
+	defer sessStmt.Close()
+
+	cwdStmt, err := tx.Prepare(`INSERT INTO cwd_repos (cwd, repo_id) VALUES (?, ?)
+		ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id`)
+	if err != nil {
+		return fmt.Errorf("FlushSessions prepare cwd: %w", err)
+	}
+	defer cwdStmt.Close()
+
+	for _, s := range sessions {
+		var endedAt string
+		var startedAt string
+		if !s.LastActive.IsZero() {
+			endedAt = s.LastActive.Format(time.RFC3339)
+		}
+		if !s.StartedAt.IsZero() {
+			startedAt = s.StartedAt.Format(time.RFC3339)
+		}
+
+		if _, err := sessStmt.Exec(
+			s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
+			s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
+			s.TotalCost, s.InputTokens, s.OutputTokens,
+			s.CacheReadTokens, s.CacheCreationTokens,
+			s.MessageCount, s.EventCount, s.ErrorCount,
+			s.Version, s.Entrypoint,
+		); err != nil {
+			return fmt.Errorf("FlushSessions save %s: %w", s.ID, err)
+		}
+
+		if s.CWD != "" && s.RepoID != "" {
+			if _, err := cwdStmt.Exec(s.CWD, s.RepoID); err != nil {
+				return fmt.Errorf("FlushSessions cwdRepo %s: %w", s.ID, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("FlushSessions commit: %w", err)
+	}
+	return nil
+}
+
+
 // LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
 // This is used to rebuild in-memory dedup state after a restart, preventing double-counting.
 func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]session.MessageCosts, error) {
