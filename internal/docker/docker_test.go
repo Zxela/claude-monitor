@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -481,7 +481,7 @@ func TestWatch_EmptyInitialPoll(t *testing.T) {
 func TestWatch_DetectsAddedAndRemovedPaths(t *testing.T) {
 	t.Parallel()
 
-	pollCount := 0
+	var pollCount atomic.Int64
 	responses := []string{
 		// Initial poll: one container
 		`[{
@@ -498,12 +498,12 @@ func TestWatch_DetectsAddedAndRemovedPaths(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/containers/json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		idx := pollCount
+		idx := int(pollCount.Load())
 		if idx >= len(responses) {
 			idx = len(responses) - 1
 		}
 		fmt.Fprint(w, responses[idx])
-		pollCount++
+		pollCount.Add(1)
 	})
 
 	client, cleanup := newTestClient(t, mux)
