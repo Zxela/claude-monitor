@@ -28,6 +28,7 @@ export function getSettings(): NotifSettings {
 export async function notify(type: 'budget' | 'error', title: string, body: string): Promise<void> {
   if (type === 'budget' && !settings.budget) return;
   if (type === 'error' && !settings.error) return;
+  if (typeof Notification === 'undefined') return;
   if (Notification.permission === 'default') {
     const result = await Notification.requestPermission();
     if (result !== 'granted') return;

@@ -20,6 +20,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let banner: HTMLElement | null = null;
 let costStatEl: HTMLElement | null = null;
 let rateStatEl: HTMLElement | null = null;
+let budgetNotificationSent = false;
 
 export function dismiss(): void {
   closePanel();
@@ -238,12 +239,14 @@ function renderPanelContent(): void {
     const val = parseFloat(input.value);
     if (!isNaN(val) && val > 0) {
       localStorage.setItem('budget', String(val));
+      budgetNotificationSent = false;
       update({ budgetThreshold: val, budgetDismissed: false });
       renderPanelContent();
     }
   });
   settingsEl.querySelector('.clear-btn')!.addEventListener('click', () => {
     localStorage.removeItem('budget');
+    budgetNotificationSent = false;
     update({ budgetThreshold: null, budgetDismissed: false });
     renderPanelContent();
   });
@@ -397,17 +400,22 @@ function checkBudget(): void {
         <button style="background:none;border:none;color:var(--red);cursor:pointer;font-family:var(--font-mono)" aria-label="Dismiss budget warning">✕</button>`;
       banner.querySelector('button')!.addEventListener('click', () => {
         update({ budgetDismissed: true });
+        budgetNotificationSent = false;
       });
-      notify(
-        'budget',
-        'Budget Exceeded',
-        `Total spend $${total.toFixed(0)} exceeds $${state.budgetThreshold}`,
-      );
+      if (!budgetNotificationSent) {
+        budgetNotificationSent = true;
+        notify(
+          'budget',
+          'Budget Exceeded',
+          `Total spend $${total.toFixed(0)} exceeds $${state.budgetThreshold}`,
+        );
+      }
     } else {
       banner.className = 'budget-banner hidden';
     }
   } else {
     costStatEl.classList.remove('over-budget');
     banner.className = 'budget-banner hidden';
+    budgetNotificationSent = false;
   }
 }
