@@ -15,6 +15,16 @@ export function render(searchBoxEl: HTMLElement): void {
   dropdown.setAttribute('aria-label', 'Search results');
   searchBoxEl.appendChild(dropdown);
 
+  // Close dropdown on outside click
+  document.addEventListener('click', (e) => {
+    if (!dropdown || dropdown.classList.contains('search-dropdown-hidden')) return;
+    if (!searchBoxEl.contains(e.target as Node)) {
+      const searchInput = document.querySelector<HTMLInputElement>('[data-search]');
+      if (searchInput) searchInput.value = '';
+      update({ searchQuery: '', searchOpen: false, searchResults: [] });
+    }
+  });
+
   subscribe(onStateChange);
 }
 

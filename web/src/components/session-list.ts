@@ -1,7 +1,7 @@
 // web/src/components/session-list.ts
 import type { Session } from '../types';
 import type { AppState } from '../state';
-import { state, subscribe } from '../state';
+import { state, subscribe, update } from '../state';
 import { renderCompact } from './session-card';
 import { isSessionActive } from '../utils';
 import '../styles/sessions.css';
@@ -47,6 +47,20 @@ export function render(container: HTMLElement): void {
   listEl = document.createElement('div');
   listEl.style.cssText = 'flex:1; overflow-y:auto;';
   el.appendChild(listEl);
+
+  // Sidebar collapse toggle
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'sidebar-toggle';
+  toggleBtn.textContent = '◀';
+  toggleBtn.setAttribute('aria-label', 'Collapse sidebar');
+  toggleBtn.addEventListener('click', () => {
+    const collapsed = !state.sidebarCollapsed;
+    update({ sidebarCollapsed: collapsed });
+    el!.classList.toggle('collapsed', collapsed);
+    toggleBtn.textContent = collapsed ? '▶' : '◀';
+    toggleBtn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  });
+  el.appendChild(toggleBtn);
 
   container.appendChild(el);
 

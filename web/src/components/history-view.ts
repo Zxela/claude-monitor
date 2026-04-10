@@ -76,9 +76,19 @@ export function render(mount: HTMLElement): void {
 
 let historyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+function showLoading(): void {
+  if (!container) return;
+  container.innerHTML = '';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'view-overlay';
+  wrapper.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text-dim);font-family:var(--font-mono);font-size:12px;letter-spacing:1px">LOADING HISTORY...</div>';
+  container.appendChild(wrapper);
+}
+
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('view')) {
     if (state.view === 'history') {
+      showLoading();
       loadData();
     } else {
       // Clear any pending refresh timer when leaving history view
