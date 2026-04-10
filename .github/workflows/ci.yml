@@ -7,8 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   build-and-test:
@@ -29,6 +28,9 @@ jobs:
 
       - name: Frontend type check
         run: cd web && npx tsc --noEmit
+
+      - name: Frontend lint
+        run: cd web && npm run lint
 
       - name: Build
         run: go build ./...
@@ -64,10 +66,18 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-        continue-on-error: true
+        continue-on-error: false
+
+      - name: Security scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
   # Create or update the release PR on pushes to main
   release-please:
+    permissions:
+      contents: write
+      pull-requests: write
     if: github.ref == 'refs/heads/main'
     needs: [build-and-test, lint]
     runs-on: ubuntu-latest
@@ -83,6 +93,8 @@ jobs:
 
   # Build and upload binaries when release-please creates a release
   build-binaries:
+    permissions:
+      contents: write
     needs: release-please
     if: needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-latest
