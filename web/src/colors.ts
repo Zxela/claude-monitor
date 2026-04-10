@@ -5,7 +5,7 @@ export const COLORS = {
   bgCard: '#161b22',
   bgDeep: '#0f0f1a',
   text: '#c9d1d9',
-  textDim: '#8b949e',
+  textDim: '#9da5ad',
   green: '#3fb950',
   yellow: '#d29922',
   red: '#f85149',

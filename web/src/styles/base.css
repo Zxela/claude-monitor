@@ -4,7 +4,7 @@
   --bg-hover: #1c2333;
   --border: #30363d;
   --text: #c9d1d9;
-  --text-dim: #8b949e;
+  --text-dim: #9da5ad;
   --green: #3fb950;
   --yellow: #d29922;
   --red: #f85149;
@@ -337,7 +337,7 @@ body {
 .update-banner-dismiss {
   background: none;
   border: none;
-  color: var(--fg-muted, #8b949e);
+  color: var(--fg-muted, #9da5ad);
   font-size: 18px;
   cursor: pointer;
   padding: 0 4px;
@@ -357,7 +357,7 @@ body {
 
 .history-subagent-toggle {
   font-size: 11px;
-  color: var(--fg-muted, #8b949e);
+  color: var(--fg-muted, #9da5ad);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -380,7 +380,7 @@ body {
   cursor: pointer;
   font-size: 10px;
   margin-right: 6px;
-  color: var(--fg-muted, #8b949e);
+  color: var(--fg-muted, #9da5ad);
   user-select: none;
 }
 
@@ -390,7 +390,7 @@ body {
 
 .history-subagent-badge {
   font-size: 10px;
-  color: var(--fg-muted, #8b949e);
+  color: var(--fg-muted, #9da5ad);
   margin-left: 8px;
   font-style: italic;
 }

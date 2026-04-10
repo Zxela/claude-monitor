@@ -24,15 +24,19 @@ export function render(container: HTMLElement): void {
   const filterBar = document.createElement('div');
   filterBar.className = 'session-filter-bar';
   filterBar.innerHTML = `
-    <button data-filter="active">ACTIVE (<span id="fc-active"></span>)</button>
-    <button data-filter="recent" class="active">RECENT (<span id="fc-recent"></span>)</button>
-    <button data-filter="all">ALL (<span id="fc-all"></span>)</button>
+    <button data-filter="active" aria-pressed="false">ACTIVE (<span id="fc-active"></span>)</button>
+    <button data-filter="recent" class="active" aria-pressed="true">RECENT (<span id="fc-recent"></span>)</button>
+    <button data-filter="all" aria-pressed="false">ALL (<span id="fc-all"></span>)</button>
   `;
   filterBar.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeFilter = btn.dataset.filter as typeof activeFilter;
-      filterBar.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+      filterBar.querySelectorAll('button').forEach((b) => {
+        b.classList.remove('active');
+        b.setAttribute('aria-pressed', 'false');
+      });
       btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
       renderList();
     });
   });
@@ -77,10 +81,9 @@ export function render(container: HTMLElement): void {
 
 function updateFilterBar(): void {
   el?.querySelectorAll('.session-filter-bar button').forEach((btn) => {
-    (btn as HTMLElement).classList.toggle(
-      'active',
-      (btn as HTMLElement).dataset.filter === activeFilter,
-    );
+    const isActive = (btn as HTMLElement).dataset.filter === activeFilter;
+    (btn as HTMLElement).classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
   });
 }
 
@@ -288,11 +291,21 @@ function renderList(): void {
 
     const header = document.createElement('div');
     header.className = 'time-group-header';
+    header.setAttribute('role', 'button');
+    header.setAttribute('tabindex', '0');
+    header.setAttribute('aria-expanded', String(!collapsedGroups.has(key)));
     header.innerHTML = `<span>${label}</span><span class="time-group-count">${filtered.length}</span>`;
     header.addEventListener('click', () => {
       group.classList.toggle('time-group-collapsed');
       if (group.classList.contains('time-group-collapsed')) collapsedGroups.add(key);
       else collapsedGroups.delete(key);
+      header.setAttribute('aria-expanded', String(!group.classList.contains('time-group-collapsed')));
+    });
+    header.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        header.click();
+      }
     });
     group.appendChild(header);
 

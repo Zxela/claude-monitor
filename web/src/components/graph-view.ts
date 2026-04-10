@@ -89,6 +89,9 @@ function show(): void {
 
   if (graphMode === 'graph') {
     canvas = document.createElement('canvas');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Session dependency graph — nodes represent active sessions, edges show parent-child relationships');
+    canvas.textContent = 'Session dependency graph visualization';
     wrapper.appendChild(canvas);
 
     tooltip = document.createElement('div');

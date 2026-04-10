@@ -123,9 +123,12 @@ function renderFeedPanel(): void {
   filterBar.className = 'feed-type-filters';
   for (const type of FILTER_TYPES) {
     const btn = document.createElement('button');
-    btn.className = `feed-filter-btn ${type === 'all' ? 'all-btn' : ''} ${type === 'all' || state.feedTypeFilters[type] ? 'active' : ''}`;
+    const isActive = type === 'all' || state.feedTypeFilters[type];
+    btn.className = `feed-filter-btn ${type === 'all' ? 'all-btn' : ''} ${isActive ? 'active' : ''}`;
     btn.textContent = type.toUpperCase();
     btn.dataset.type = type;
+    btn.setAttribute('aria-pressed', String(!!isActive));
+    btn.setAttribute('aria-label', `Filter by ${type.replace('_', ' ')} messages`);
     btn.addEventListener('click', (e) => handleFilterClick(type, e as MouseEvent));
     filterBar!.appendChild(btn);
   }
@@ -254,7 +257,9 @@ function updateFilterButtons(): void {
   filterBar.querySelectorAll<HTMLButtonElement>('.feed-filter-btn').forEach((btn) => {
     const t = btn.dataset.type!;
     if (t === 'all') return;
-    btn.classList.toggle('active', state.feedTypeFilters[t] ?? true);
+    const isActive = state.feedTypeFilters[t] ?? true;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
   });
 }
 
