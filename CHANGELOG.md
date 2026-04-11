@@ -1,5 +1,39 @@
 # Changelog
 
+## [3.1.2](https://github.com/Zxela/claude-monitor/compare/v3.1.1...v3.1.2) (2026-04-11)
+
+
+### Bug Fixes
+
+* add ARIA attributes, canvas accessibility, color contrast, mobile panel ([87f790f](https://github.com/Zxela/claude-monitor/commit/87f790f6d5b54166951ecf68da905bc765f674f5))
+* add ARIA attributes, canvas accessibility, color contrast, mobile panel ([e4a9cc5](https://github.com/Zxela/claude-monitor/commit/e4a9cc51e83d18659bfd7342b920708e5514fccf)), closes [#174](https://github.com/Zxela/claude-monitor/issues/174)
+* budget notification debounce, notification feature detection, sidebar toggle, search close-on-click ([2ce97c0](https://github.com/Zxela/claude-monitor/commit/2ce97c0eaa50e873e237df4a85151bd03ddfab02)), closes [#181](https://github.com/Zxela/claude-monitor/issues/181)
+* decompress compressed event content on read, fix LoadMessageDedup SQL ([f057ef7](https://github.com/Zxela/claude-monitor/commit/f057ef75f5bedd08a97dfa8728af3d029568f549))
+* decompress compressed event content on read, fix LoadMessageDedup SQL ([fa2abeb](https://github.com/Zxela/claude-monitor/commit/fa2abebac0b4c418d7ee06dc7eb676d044b3d30b)), closes [#169](https://github.com/Zxela/claude-monitor/issues/169)
+* docker non-root user, .dockerignore, swagger redirect, favicon ([5c3114a](https://github.com/Zxela/claude-monitor/commit/5c3114accca26e1df997635314b0863a10d054b6))
+* docker non-root user, .dockerignore, swagger redirect, favicon ([ce7c624](https://github.com/Zxela/claude-monitor/commit/ce7c62424a8ecf28e74bcdc5ccf7ecac59b90cb1)), closes [#172](https://github.com/Zxela/claude-monitor/issues/172)
+* eliminate race condition in GracefulStop by routing shutdown through Run goroutine ([cbd46f3](https://github.com/Zxela/claude-monitor/commit/cbd46f3b327e2137213796170cc16b877ef1600f))
+* help overlay escape key, focus trap, and close button ([c9b38a1](https://github.com/Zxela/claude-monitor/commit/c9b38a1c391032ec58653e94c9976b34f799e65c))
+* help overlay escape key, focus trap, and close button ([a8e9c46](https://github.com/Zxela/claude-monitor/commit/a8e9c462032fd5d6fede890e1650107bb2367caf)), closes [#167](https://github.com/Zxela/claude-monitor/issues/167)
+* homebrew formula binary name and makefile ldflags ([d67dbb1](https://github.com/Zxela/claude-monitor/commit/d67dbb1466d380c12cf441d52d057cc8e4109663))
+* homebrew formula binary name, version sync, and makefile ldflags ([add46d5](https://github.com/Zxela/claude-monitor/commit/add46d501b1fc4b2fffa47c0cd2a48758c0a0e1c)), closes [#179](https://github.com/Zxela/claude-monitor/issues/179)
+* prevent hub broadcast from blocking pipeline, add graceful shutdown ([882bff3](https://github.com/Zxela/claude-monitor/commit/882bff31805d6bf24ae2a62707879c77cdce2f05))
+* prevent hub broadcast from blocking pipeline, add graceful shutdown ([9309a98](https://github.com/Zxela/claude-monitor/commit/9309a98dace9c9e395687a3757f7fb8b64236ad4)), closes [#171](https://github.com/Zxela/claude-monitor/issues/171)
+* remove CORS middleware that reflected any Origin header ([8f33443](https://github.com/Zxela/claude-monitor/commit/8f334437766451e7357bcf4b7c46007505326f43))
+* resolve all golangci-lint errors (errcheck, gocritic, gosimple) ([d640a10](https://github.com/Zxela/claude-monitor/commit/d640a10c66b24ed58fc67d7f07a5ea829af58206))
+* stop session list from directly mutating shared state ([fdc0dbc](https://github.com/Zxela/claude-monitor/commit/fdc0dbc3fa5707ee76a396e21cd83471df55364a))
+* stop session list from directly mutating shared state ([5926564](https://github.com/Zxela/claude-monitor/commit/5926564605febf75ba8377587b82fb15a2e7da9b)), closes [#170](https://github.com/Zxela/claude-monitor/issues/170)
+* timeline view HiDPI hit-testing, close button, and listener cleanup ([671f8d2](https://github.com/Zxela/claude-monitor/commit/671f8d209798542dbd9d96e978e6eec63e40ee0f))
+* timeline view HiDPI hit-testing, close button, and listener cleanup ([ffe7564](https://github.com/Zxela/claude-monitor/commit/ffe7564cddb7ab9ab3bca63579bcfe6cc0f5e594)), closes [#180](https://github.com/Zxela/claude-monitor/issues/180)
+* trend data tests timezone sensitivity ([09b9335](https://github.com/Zxela/claude-monitor/commit/09b9335c4bf1bdcf6f6a7c888d7086432574025e))
+* UX improvements — notification debounce, sidebar toggle, search close ([a8cce33](https://github.com/Zxela/claude-monitor/commit/a8cce334cfc03fcc376dfb46fde297a7435c1c13))
+
+
+### Performance Improvements
+
+* fix memory leaks, add debouncing, batch SQL flush ([81da544](https://github.com/Zxela/claude-monitor/commit/81da5441c4bc763543e909ed3d1ba0b3abaef561))
+* fix memory leaks, add debouncing, batch SQL flush ([583c968](https://github.com/Zxela/claude-monitor/commit/583c968e1454eff501387c6661893bbf4974b604)), closes [#175](https://github.com/Zxela/claude-monitor/issues/175)
+
 ## [3.1.1](https://github.com/Zxela/claude-monitor/compare/v3.1.0...v3.1.1) (2026-04-09)
 
 
