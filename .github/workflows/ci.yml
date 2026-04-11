@@ -62,6 +62,9 @@ jobs:
             exit 1
           fi
 
+      - name: Create embed placeholder
+        run: mkdir -p cmd/claude-monitor/static && touch cmd/claude-monitor/static/.keep
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
