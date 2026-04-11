@@ -576,7 +576,10 @@ Examples:
 		// 3. Flush pipeline — saves batched events and session data.
 		pipe.Stop()
 
-		// 4. Shutdown HTTP server (closes WebSocket connections).
+		// 4. Send WebSocket close frames and stop the hub goroutine.
+		h.GracefulStop()
+
+		// 5. Shutdown HTTP server.
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer shutCancel()
 		if err := srv.Shutdown(shutCtx); err != nil {
