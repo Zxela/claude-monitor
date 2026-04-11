@@ -51,7 +51,9 @@ func TestCwdRepos(t *testing.T) {
 	db := openTestDB(t)
 
 	// Insert repo first (FK constraint)
-	db.UpsertRepo(&repo.Repo{ID: "test-repo", Name: "test"})
+	if err := db.UpsertRepo(&repo.Repo{ID: "test-repo", Name: "test"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
 
 	if err := db.UpsertCwdRepo("/home/user/project", "test-repo"); err != nil {
 		t.Fatalf("UpsertCwdRepo failed: %v", err)
@@ -138,8 +140,12 @@ func TestAggregateStats_IncludesChildren(t *testing.T) {
 		Model: "claude-sonnet-4-6",
 	}
 
-	db.SaveSession(parent)
-	db.SaveSession(child)
+	if err := db.SaveSession(parent); err != nil {
+		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}
+	if err := db.SaveSession(child); err != nil {
+		t.Fatalf("SaveSession(child) failed: %v", err)
+	}
 
 	agg, err := db.AggregateStats(time.Time{})
 	if err != nil {
@@ -163,9 +169,11 @@ func TestPersistBatch(t *testing.T) {
 	db := openTestDB(t)
 
 	// Create a session first
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{
 		Events: []EventInsert{
@@ -225,9 +233,11 @@ func TestPersistBatch_Dedup(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	ts := time.Now()
 	// First insert
@@ -278,9 +288,11 @@ func TestSearchFTS(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -300,7 +312,9 @@ func TestSearchFTS(t *testing.T) {
 			},
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFTS("parser", 10)
 	if err != nil {
@@ -350,9 +364,11 @@ func TestListRecentEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	ts := time.Now()
 	batch := &EventBatch{}
@@ -367,7 +383,9 @@ func TestListRecentEvents(t *testing.T) {
 			},
 		})
 	}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	events, err := db.ListRecentEvents("s1", 3)
 	if err != nil {
@@ -389,9 +407,11 @@ func TestPersistBatch_EventMetadataRoundTrip(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "s1",
@@ -464,7 +484,9 @@ func insertTestSession(t *testing.T, db *DB, id string, startedAt time.Time, cos
 
 func insertTestSessionWithRepo(t *testing.T, db *DB, id, repoID string, startedAt time.Time, cost float64, input, output, cacheRead, cacheCreate int64) {
 	t.Helper()
-	db.UpsertRepo(&repo.Repo{ID: repoID, Name: repoID})
+	if err := db.UpsertRepo(&repo.Repo{ID: repoID, Name: repoID}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
 	s := &session.Session{
 		ID:                  id,
 		RepoID:              repoID,
@@ -798,17 +820,21 @@ func TestTrendData_ExcludesChildSessions(t *testing.T) {
 
 	now := time.Now()
 	// Parent session
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "parent-1", TotalCost: 5.00, InputTokens: 500,
 		StartedAt: now.Add(-1 * time.Hour), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 	// Child session — should be excluded by the parent_id filter in TrendData
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "child-1", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-30 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	result, err := db.TrendData("7d", "")
 	if err != nil {
@@ -957,9 +983,11 @@ func TestCompactHotToWarm(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	// Insert events with timestamps old enough to be compacted (hotDays=0 means everything)
 	oldTime := time.Now().Add(-48 * time.Hour)
@@ -1007,9 +1035,11 @@ func TestCompactHotToWarm_NoOldEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	// Insert a recent event
 	batch := &EventBatch{Events: []EventInsert{{
@@ -1020,7 +1050,9 @@ func TestCompactHotToWarm_NoOldEvents(t *testing.T) {
 		},
 		FullContent: "Recent full content.",
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	// Compact with hotDays=30 — recent event should NOT be compacted
 	count, err := db.CompactHotToWarm(30)
@@ -1042,9 +1074,11 @@ func TestCompactWarmToCold(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	oldTime := time.Now().Add(-48 * time.Hour)
 	batch := &EventBatch{Events: []EventInsert{{
@@ -1055,7 +1089,9 @@ func TestCompactWarmToCold(t *testing.T) {
 		},
 		FullContent: "Content to be fully deleted.",
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	// First compact hot to warm
 	_, err := db.CompactHotToWarm(0)
@@ -1086,9 +1122,11 @@ func TestCompactWarmToCold_NoOldEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "s1",
@@ -1098,7 +1136,9 @@ func TestCompactWarmToCold_NoOldEvents(t *testing.T) {
 		},
 		FullContent: "Recent content.",
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	deleted, err := db.CompactWarmToCold(30)
 	if err != nil {
@@ -1113,9 +1153,11 @@ func TestCompactFullLifecycle(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	oldTime := time.Now().Add(-72 * time.Hour)
 	batch := &EventBatch{Events: []EventInsert{{
@@ -1126,7 +1168,9 @@ func TestCompactFullLifecycle(t *testing.T) {
 		},
 		FullContent: "Full lifecycle content: this text should survive hot->warm compression then be deleted in warm->cold.",
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	// Phase 1: hot — content is plaintext
 	info1, _ := db.StorageInfo()
@@ -1206,9 +1250,11 @@ func TestStorageInfo_WithData(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -1228,7 +1274,9 @@ func TestStorageInfo_WithData(t *testing.T) {
 			FullContent: "Full content for event 2 to measure size.",
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	info, err := db.StorageInfo()
 	if err != nil {
@@ -1253,9 +1301,11 @@ func TestSearchFTS_MultipleResults(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -1283,7 +1333,9 @@ func TestSearchFTS_MultipleResults(t *testing.T) {
 			},
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFTS("parser", 10)
 	if err != nil {
@@ -1298,9 +1350,11 @@ func TestSearchFTS_NoResults(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "s1",
@@ -1309,7 +1363,9 @@ func TestSearchFTS_NoResults(t *testing.T) {
 			Timestamp: time.Now(), UUID: "uuid-fts-noresult",
 		},
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFTS("nonexistent", 10)
 	if err != nil {
@@ -1324,9 +1380,11 @@ func TestSearchFTS_SpecialCharacters(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "s1",
@@ -1335,7 +1393,9 @@ func TestSearchFTS_SpecialCharacters(t *testing.T) {
 			Timestamp: time.Now(), UUID: "uuid-fts-special",
 		},
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	// Should not error even with special FTS characters
 	results, err := db.SearchFTS(`"quotes"`, 10)
@@ -1351,9 +1411,11 @@ func TestSearchFTS_ByToolName(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -1373,7 +1435,9 @@ func TestSearchFTS_ByToolName(t *testing.T) {
 			},
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	// Search by tool detail
 	results, err := db.SearchFTS("file.go", 10)
@@ -1392,9 +1456,11 @@ func TestSearchFTS_LimitRespected(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{}
 	for i := 0; i < 10; i++ {
@@ -1407,7 +1473,9 @@ func TestSearchFTS_LimitRespected(t *testing.T) {
 			},
 		})
 	}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFTS("keyword", 3)
 	if err != nil {
@@ -1439,9 +1507,11 @@ func TestSearchFullContent(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -1461,7 +1531,9 @@ func TestSearchFullContent(t *testing.T) {
 			FullContent: "Normal full content without sensitive data.",
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFullContent("SECRET_API_KEY", 10)
 	if err != nil {
@@ -1483,9 +1555,11 @@ func TestSearchFullContent_NoResults(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "s1",
@@ -1495,7 +1569,9 @@ func TestSearchFullContent_NoResults(t *testing.T) {
 		},
 		FullContent: "Normal content only.",
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFullContent("DOES_NOT_EXIST", 10)
 	if err != nil {
@@ -1765,11 +1841,13 @@ func TestGetSession(t *testing.T) {
 
 	// Insert and retrieve
 	now := time.Now()
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "sess-get-1", SessionName: "my session", TotalCost: 3.50,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
 		Model: "claude-opus-4-6", CWD: "/tmp", GitBranch: "main",
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	row, err = db.GetSession("sess-get-1")
 	if err != nil {
@@ -1791,21 +1869,31 @@ func TestListSessionsByRepo(t *testing.T) {
 	db := openTestDB(t)
 
 	now := time.Now()
-	db.UpsertRepo(&repo.Repo{ID: "repo-x", Name: "repo-x"})
-	db.UpsertRepo(&repo.Repo{ID: "repo-y", Name: "repo-y"})
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-x", Name: "repo-x"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-y", Name: "repo-y"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", RepoID: "repo-x", TotalCost: 1.00,
 		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
-	})
-	db.SaveSession(&session.Session{
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+	if err := db.SaveSession(&session.Session{
 		ID: "s2", RepoID: "repo-x", TotalCost: 2.00,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
-	})
-	db.SaveSession(&session.Session{
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+	if err := db.SaveSession(&session.Session{
 		ID: "s3", RepoID: "repo-y", TotalCost: 5.00,
 		StartedAt: now.Add(-2 * time.Minute), LastActive: now,
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	rows, err := db.ListSessionsByRepo("repo-x", 10, 0)
 	if err != nil {
@@ -1821,18 +1909,24 @@ func TestAggregateStatsByRepo(t *testing.T) {
 	db := openTestDB(t)
 
 	now := time.Now()
-	db.UpsertRepo(&repo.Repo{ID: "repo-agg", Name: "repo-agg"})
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-agg", Name: "repo-agg"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", RepoID: "repo-agg", TotalCost: 1.00, InputTokens: 100, OutputTokens: 50,
 		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	})
-	db.SaveSession(&session.Session{
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+	if err := db.SaveSession(&session.Session{
 		ID: "s2", RepoID: "repo-agg", TotalCost: 2.00, InputTokens: 200, OutputTokens: 100,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
 		Model: "claude-opus-4-6",
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	agg, err := db.AggregateStatsByRepo("repo-agg")
 	if err != nil {
@@ -1861,17 +1955,21 @@ func TestAggregateStats_WithSinceFilter(t *testing.T) {
 
 	now := time.Now()
 	// Session from 2 hours ago
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s-old", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-2 * time.Hour), LastActive: now.Add(-2 * time.Hour),
 		Model: "claude-sonnet-4-6",
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 	// Session from 30 minutes ago
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s-new", TotalCost: 3.00, InputTokens: 300,
 		StartedAt: now.Add(-30 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	// Filter to last hour
 	agg, err := db.AggregateStats(now.Add(-1 * time.Hour))
@@ -1891,17 +1989,25 @@ func TestListRepos(t *testing.T) {
 	db := openTestDB(t)
 
 	now := time.Now()
-	db.UpsertRepo(&repo.Repo{ID: "repo-list-a", Name: "Alpha", URL: "https://example.com/alpha"})
-	db.UpsertRepo(&repo.Repo{ID: "repo-list-b", Name: "Beta"})
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-list-a", Name: "Alpha", URL: "https://example.com/alpha"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-list-b", Name: "Beta"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", RepoID: "repo-list-a", TotalCost: 5.00,
 		StartedAt: now, LastActive: now,
-	})
-	db.SaveSession(&session.Session{
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+	if err := db.SaveSession(&session.Session{
 		ID: "s2", RepoID: "repo-list-b", TotalCost: 2.00,
 		StartedAt: now, LastActive: now,
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	repos, err := db.ListRepos()
 	if err != nil {
@@ -1926,9 +2032,11 @@ func TestLoadMessageDedup(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -1956,7 +2064,9 @@ func TestLoadMessageDedup(t *testing.T) {
 			},
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	ids, costs, err := db.LoadMessageDedup("s1")
 	if err != nil {
@@ -1999,9 +2109,11 @@ func TestListPinnedEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{
 		{
@@ -2026,7 +2138,9 @@ func TestListPinnedEvents(t *testing.T) {
 			},
 		},
 	}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	pinned, err := db.ListPinnedEvents("s1")
 	if err != nil {
@@ -2332,9 +2446,11 @@ func TestSearchFullContent_SpecialCharacters(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	db.SaveSession(&session.Session{
+	if err := db.SaveSession(&session.Session{
 		ID: "sfc-special", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
 
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "sfc-special",
@@ -2346,7 +2462,9 @@ func TestSearchFullContent_SpecialCharacters(t *testing.T) {
 		},
 		FullContent: "line with 100% match and $pecial ch@racters",
 	}}}
-	db.PersistBatch(batch)
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
 
 	results, err := db.SearchFullContent("$pecial ch@racters", 10)
 	if err != nil {

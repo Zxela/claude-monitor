@@ -29,7 +29,7 @@ func TestCompareVersions(t *testing.T) {
 
 func TestCheckLatest_NewerAvailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ghRelease{
+		_ = json.NewEncoder(w).Encode(ghRelease{
 			TagName: "v2.0.0",
 			HTMLURL: "https://github.com/Zxela/claude-monitor/releases/tag/v2.0.0",
 		})
@@ -56,7 +56,7 @@ func TestCheckLatest_NewerAvailable(t *testing.T) {
 
 func TestCheckLatest_AlreadyCurrent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ghRelease{
+		_ = json.NewEncoder(w).Encode(ghRelease{
 			TagName: "v1.0.0",
 			HTMLURL: "https://github.com/Zxela/claude-monitor/releases/tag/v1.0.0",
 		})

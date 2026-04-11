@@ -58,7 +58,7 @@ func TestMain(m *testing.M) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !ready {
-		srv.Process.Kill()
+		_ = srv.Process.Kill()
 		fmt.Fprintln(os.Stderr, "server did not become ready in time")
 		os.Exit(1)
 	}
@@ -67,7 +67,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// Kill the server and clean up.
-	srv.Process.Kill()
+	_ = srv.Process.Kill()
 	os.Remove(testBinary)
 
 	os.Exit(code)

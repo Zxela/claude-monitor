@@ -27,7 +27,7 @@ func newTestClient(t *testing.T, mux *http.ServeMux) (*Client, func()) {
 	}
 
 	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 
 	client := NewClient(sockPath)
 

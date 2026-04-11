@@ -481,13 +481,14 @@ func extractContent(raw json.RawMessage) contentInfo {
 						// Build agent identity (type or name) separate from task description
 						agentName := name
 						if agentName == "" { agentName = st }
-						if agentName != "" && desc != "" {
+						switch {
+						case agentName != "" && desc != "":
 							info.toolDetail = agentName
 							info.text = fmt.Sprintf("[agent: %s] %s", agentName, desc)
-						} else if agentName != "" {
+						case agentName != "":
 							info.toolDetail = agentName
 							info.text = fmt.Sprintf("[agent: %s]", agentName)
-						} else if desc != "" {
+						case desc != "":
 							info.toolDetail = desc
 							info.text = fmt.Sprintf("[agent] %s", desc)
 						}

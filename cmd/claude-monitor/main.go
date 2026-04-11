@@ -92,9 +92,9 @@ func handleMigrate(args []string) {
 	if err != nil {
 		log.Fatalf("cannot open database: %v", err)
 	}
-	defer db.Close()
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
 		log.Fatalf("cannot set WAL mode: %v", err)
 	}
 
@@ -107,6 +107,7 @@ func handleMigrate(args []string) {
 	case "", "up":
 		applied, err := migrations.RunUp(db)
 		if err != nil {
+			db.Close()
 			log.Fatalf("migration failed: %v", err)
 		}
 		if applied == 0 {
@@ -120,6 +121,7 @@ func handleMigrate(args []string) {
 	case "status":
 		current, latest, pending, err := migrations.Status(db)
 		if err != nil {
+			db.Close()
 			log.Fatalf("cannot read status: %v", err)
 		}
 		fmt.Printf("Database: %s\n", dbPath)
@@ -136,15 +138,18 @@ func handleMigrate(args []string) {
 	case "rollback":
 		name, err := migrations.RunDown(db)
 		if err != nil {
+			db.Close()
 			log.Fatalf("rollback failed: %v", err)
 		}
 		current, _, _, _ := migrations.Status(db)
 		fmt.Printf("Rolled back: %s\nSchema version: %d\n", name, current)
 
 	default:
+		db.Close()
 		fmt.Fprintf(os.Stderr, "Unknown migrate command: %s\nUsage: claude-monitor migrate [status|rollback]\n", sub)
 		os.Exit(1)
 	}
+	db.Close()
 }
 
 
@@ -347,7 +352,6 @@ Examples:
 	if err != nil {
 		log.Fatalf("cannot open database: %v", err)
 	}
-	defer historyDB.Close()
 
 	// Repo resolver with persisted cwd→repo cache.
 	resolver := repo.NewResolver()
@@ -357,8 +361,10 @@ Examples:
 
 	fw, err := watcher.New([]string(extraPaths))
 	if err != nil {
+		historyDB.Close()
 		log.Fatalf("failed to create watcher: %v", err)
 	}
+	defer historyDB.Close()
 
 	// Create pipeline with broadcast callback.
 	pipe := pipeline.New(sessionStore, historyDB, resolver, func(event *parser.Event, sess *session.Session, isNew, sendDetail bool) {
@@ -510,7 +516,8 @@ Examples:
 	// Static files — strip the "static/" prefix from embedded FS.
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		log.Fatalf("static embed error: %v", err)
+		// fs.Sub on an embedded FS should never fail.
+		panic(fmt.Sprintf("static embed error: %v", err))
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
@@ -589,7 +596,7 @@ Examples:
 
 	log.Printf("claude-monitor listening on http://%s", addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("http server error: %v", err)
+		log.Printf("http server error: %v", err)
 	}
 	log.Println("claude-monitor stopped")
 }

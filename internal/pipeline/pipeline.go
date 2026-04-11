@@ -279,9 +279,7 @@ func (p *Pipeline) applySessionMeta(s *session.Session, msg *parser.Event, ev wa
 		// Fallback name for subagents without meta.json
 		if s.ParentID != "" && s.SessionName == "" {
 			aid := s.ID
-			if strings.HasPrefix(aid, "agent-") {
-				aid = aid[6:]
-			}
+			aid = strings.TrimPrefix(aid, "agent-")
 			if len(aid) > 8 {
 				aid = aid[:8]
 			}
@@ -389,17 +387,18 @@ func (p *Pipeline) applyStatusUpdate(s *session.Session, msg *parser.Event, ev w
 	}
 
 	// Status
-	if msg.Type == "summary" {
+	switch {
+	case msg.Type == "summary":
 		s.Status = "thinking" // session stays active through compact
-	} else if msg.StopReason == "end_turn" {
+	case msg.StopReason == "end_turn":
 		s.Status = "waiting"
-	} else if msg.StopReason == "tool_use" {
+	case msg.StopReason == "tool_use":
 		s.Status = "tool_use"
-	} else if msg.ToolName != "" {
+	case msg.ToolName != "":
 		s.Status = "tool_use"
-	} else if msg.Role == "assistant" {
+	case msg.Role == "assistant":
 		s.Status = "thinking"
-	} else if msg.Role == "user" {
+	case msg.Role == "user":
 		s.Status = "thinking"
 	}
 }

@@ -438,7 +438,8 @@ func (w *Watcher) readNewLines(path string) {
 	for {
 		n, err := f.Read(buf)
 		if n > 0 {
-			chunk := append(partial, buf[:n]...)
+			partial = append(partial, buf[:n]...)
+			chunk := partial
 			partial = nil
 
 			lines := bytes.Split(chunk, []byte("\n"))

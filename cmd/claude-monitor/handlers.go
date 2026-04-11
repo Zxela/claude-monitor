@@ -347,7 +347,7 @@ func handleSearch(historyDB *store.DB) http.HandlerFunc {
 		query := r.URL.Query().Get("q")
 		if query == "" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("[]"))
+			_, _ = w.Write([]byte("[]"))
 			return
 		}
 		limit := defaultPageLimit
@@ -373,7 +373,7 @@ func handleSearchFull(historyDB *store.DB) http.HandlerFunc {
 		query := r.URL.Query().Get("q")
 		if query == "" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("[]"))
+			_, _ = w.Write([]byte("[]"))
 			return
 		}
 		limit := defaultPageLimit
@@ -579,7 +579,7 @@ func handleSessionStop(sessionStore *session.Store, dc **docker.Client) http.Han
 		}
 		log.Printf("stopped container %s for session %s", containerName, id)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}
 }
 
@@ -607,7 +607,7 @@ func handleVersion() http.HandlerFunc {
 func handleSwaggerYAML() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/yaml")
-		w.Write(api.OpenAPIYAML)
+		_, _ = w.Write(api.OpenAPIYAML)
 	}
 }
 
@@ -615,6 +615,6 @@ func handleSwaggerYAML() http.HandlerFunc {
 func handleSwaggerUI() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(swaggerHTML))
+		_, _ = w.Write([]byte(swaggerHTML))
 	}
 }

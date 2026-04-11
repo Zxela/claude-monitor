@@ -1416,9 +1416,15 @@ func (d *DB) StorageInfo() (*StorageInfo, error) {
 		info.TotalSizeBytes = 0
 	}
 
-	d.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&info.EventCount)
-	d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes)
-	d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes)
+	if err := d.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&info.EventCount); err != nil {
+		return nil, fmt.Errorf("count events: %w", err)
+	}
+	if err := d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes); err != nil {
+		return nil, fmt.Errorf("hot content size: %w", err)
+	}
+	if err := d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes); err != nil {
+		return nil, fmt.Errorf("warm content size: %w", err)
+	}
 
 	return info, nil
 }

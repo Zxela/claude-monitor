@@ -66,12 +66,12 @@ func RunUp(db *sql.DB) (int, error) {
 		}
 
 		if err := rm.Migration.Up(tx); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return applied, fmt.Errorf("migration %d (%s) failed: %w", rm.Version, rm.Migration.Name, err)
 		}
 
 		if err := setVersionTx(tx, rm.Version); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return applied, fmt.Errorf("set version in migration %d: %w", rm.Version, err)
 		}
 
@@ -104,12 +104,12 @@ func RunDown(db *sql.DB) (string, error) {
 			}
 
 			if err := rm.Migration.Down(tx); err != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 				return "", fmt.Errorf("rollback migration %d (%s) failed: %w", rm.Version, rm.Migration.Name, err)
 			}
 
 			if err := setVersionTx(tx, rm.Version-1); err != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 				return "", fmt.Errorf("set version in rollback: %w", err)
 			}
 

@@ -513,7 +513,7 @@ func TestWatcher_PermissionError(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		// Restore so TempDir cleanup can remove it.
-		os.Chmod(unreadable, 0755)
+		_ = os.Chmod(unreadable, 0755)
 	})
 
 	// The watcher should not panic or return an error when scanning an
