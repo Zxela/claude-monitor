@@ -727,7 +727,7 @@ func TestTrendData_24hWindow(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	now := time.Now()
+	now := time.Now().UTC()
 	// Sessions within the last 24h
 	insertTestSession(t, db, "s1", now.Add(-20*time.Hour), 1.00, 100, 50, 30, 10)
 	insertTestSession(t, db, "s2", now.Add(-10*time.Hour), 2.00, 200, 100, 60, 20)
@@ -877,13 +877,14 @@ func TestTrendData_AvgSessionTokens(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	now := time.Now()
+	now := time.Now().UTC()
 	// 2 sessions on same day: total tokens per session = input+output+cacheRead+cacheCreate
 	// s1: 100+50+30+10 = 190
 	// s2: 200+100+60+20 = 380
 	// total = 570, avg = 285
-	insertTestSession(t, db, "s1", now.Add(-2*time.Hour), 1.00, 100, 50, 30, 10)
-	insertTestSession(t, db, "s2", now.Add(-1*time.Hour), 2.00, 200, 100, 60, 20)
+	// Use small offsets to ensure both sessions fall within the same UTC day bucket
+	insertTestSession(t, db, "s1", now.Add(-30*time.Minute), 1.00, 100, 50, 30, 10)
+	insertTestSession(t, db, "s2", now.Add(-15*time.Minute), 2.00, 200, 100, 60, 20)
 
 	result, err := db.TrendData("7d", "")
 	if err != nil {
