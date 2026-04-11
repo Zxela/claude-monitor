@@ -1,3 +1,4 @@
+version: "2"
 run:
   timeout: 5m
 linters:
@@ -5,7 +6,28 @@ linters:
     - errcheck
     - govet
     - staticcheck
-    - gosimple
     - ineffassign
     - unused
     - gocritic
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*net/http.Response).Body.Close
+        - (*net/http.Server).Close
+        - (*compress/gzip.Reader).Close
+        - (*compress/gzip.Writer).Close
+        - (*github.com/gorilla/websocket.Conn).Close
+        - (*github.com/fsnotify/fsnotify.Watcher).Close
+        - (*github.com/zxela/claude-monitor/internal/store.DB).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.Remove
