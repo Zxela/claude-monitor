@@ -10,6 +10,8 @@ import { render as renderGraphView } from './components/graph-view';
 import { render as renderHistoryView } from './components/history-view';
 import { render as renderTimeline } from './components/timeline-view';
 import { render as renderAnalyticsView } from './components/analytics-view';
+import { render as renderTableView } from './components/table-view';
+import { render as renderReplay, togglePlay as replayTogglePlay, restart as replayRestart } from './components/replay';
 import { render as renderBudget } from './components/budget-popover';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { dismiss as dismissCostBreakdown } from './components/cost-breakdown';
@@ -34,6 +36,8 @@ renderGraphView(feedMount);
 renderHistoryView(feedMount);
 renderTimeline(feedMount);
 renderAnalyticsView(feedMount);
+renderTableView(feedMount);
+renderReplay(feedMount);
 
 // Search dropdown
 const searchBox = topbarMount.querySelector<HTMLElement>('.search-box');
@@ -93,6 +97,23 @@ document.addEventListener('keydown', (e) => {
     case 'a':
       update({ view: state.view === 'analytics' ? 'list' : 'analytics' });
       break;
+    case 't':
+      update({ view: state.view === 'table' ? 'list' : 'table' });
+      break;
+    case ' ': {
+      if (state.replaySessionId) {
+        e.preventDefault();
+        replayTogglePlay();
+      }
+      break;
+    }
+    case 'r':
+    case 'R': {
+      if (state.replaySessionId) {
+        replayRestart();
+      }
+      break;
+    }
     case '?':
       toggleHelp();
       break;
@@ -132,16 +153,32 @@ document.addEventListener('keydown', (e) => {
     }
     case 'ArrowRight': {
       if (state.focusedSessionId) {
-        update({ selectedSessionId: state.focusedSessionId });
+        const focused = state.sessions.get(state.focusedSessionId);
+        if (focused && (focused.children ?? []).length > 0) {
+          // Expand subagents: remove from collapsed set
+          const next = new Set(state.collapsedSubagents);
+          next.delete(state.focusedSessionId);
+          update({ collapsedSubagents: next });
+        } else {
+          update({ selectedSessionId: state.focusedSessionId });
+        }
       }
       break;
     }
     case 'ArrowLeft': {
       if (state.focusedSessionId) {
-        update({
-          selectedSessionId:
-            state.selectedSessionId === state.focusedSessionId ? null : state.focusedSessionId,
-        });
+        const focused = state.sessions.get(state.focusedSessionId);
+        if (focused && (focused.children ?? []).length > 0) {
+          // Collapse subagents: add to collapsed set
+          const next = new Set(state.collapsedSubagents);
+          next.add(state.focusedSessionId);
+          update({ collapsedSubagents: next });
+        } else {
+          update({
+            selectedSessionId:
+              state.selectedSessionId === state.focusedSessionId ? null : state.focusedSessionId,
+          });
+        }
       }
       break;
     }

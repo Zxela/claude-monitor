@@ -41,6 +41,11 @@ export function toggle(): void {
       <div class="help-row"><span>Graph view</span><kbd>g</kbd></div>
       <div class="help-row"><span>History view</span><kbd>h</kbd></div>
       <div class="help-row"><span>Analytics view</span><kbd>a</kbd></div>
+      <div class="help-row"><span>Table view</span><kbd>t</kbd></div>
+      <div class="help-row"><span>Expand subagents</span><kbd>→</kbd></div>
+      <div class="help-row"><span>Collapse subagents</span><kbd>←</kbd></div>
+      <div class="help-row"><span>Replay: play / pause</span><kbd>Space</kbd></div>
+      <div class="help-row"><span>Replay: restart</span><kbd>R</kbd></div>
       <div class="help-row"><span>Help</span><kbd>?</kbd></div>
     </div>
   `;

@@ -8,6 +8,7 @@ import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
+import { open as openReplay } from './replay';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -214,6 +215,7 @@ function updateHeader(): void {
     headerEl.innerHTML = `<span style="color:var(--cyan);letter-spacing:1px">${label}</span>
       <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">${escapeHtml(name)}</span>
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
+      <span class="replay-btn" role="button" tabindex="0" aria-label="Open session replay" style="margin-left:6px;color:var(--green);font-size:9px;cursor:pointer;border:1px solid rgba(63,185,80,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">REPLAY</span>
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => {
@@ -233,6 +235,16 @@ function updateHeader(): void {
       if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
         e.preventDefault();
         if (state.selectedSessionId) update({ view: 'timeline' });
+      }
+    });
+    const replayBtn = headerEl.querySelector('.replay-btn');
+    replayBtn?.addEventListener('click', () => {
+      if (state.selectedSessionId) openReplay(state.selectedSessionId);
+    });
+    replayBtn?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        if (state.selectedSessionId) openReplay(state.selectedSessionId);
       }
     });
   } else {

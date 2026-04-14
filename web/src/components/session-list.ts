@@ -263,7 +263,7 @@ function renderList(): void {
     for (const sess of activeSorted) {
       renderCompact(sess, section);
       const children = activeChildrenOf.get(sess.id);
-      if (children && children.length > 0) {
+      if (children && children.length > 0 && !state.collapsedSubagents.has(sess.id)) {
         const familyIds = new Set([sess.id, ...children.map((c) => c.id)]);
         if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
           // Active parents: only show active children
@@ -343,7 +343,7 @@ function renderList(): void {
       renderCompact(sess, items);
       // For inactive parents: show children inline when this family is selected
       const children = childrenOf.get(sess.id);
-      if (children && children.length > 0) {
+      if (children && children.length > 0 && !state.collapsedSubagents.has(sess.id)) {
         const familyIds = new Set([sess.id, ...children.map((c) => c.id)]);
         if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
           for (const child of sort([...children])) renderCompact(child, items);
