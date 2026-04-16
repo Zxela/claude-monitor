@@ -59,10 +59,6 @@ function showDroppedEventsBanner(delta: number, total: number): void {
       'padding:0 2px',
       'flex-shrink:0',
     ].join(';');
-    dismissBtn.addEventListener('click', () => {
-      droppedBannerDismissedAt = total;
-      if (droppedBanner) droppedBanner.style.display = 'none';
-    });
     droppedBanner.appendChild(dismissBtn);
 
     // Insert at the top of #app, before the update banner if present.
