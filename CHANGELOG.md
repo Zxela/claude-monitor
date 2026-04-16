@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.1.3](https://github.com/Zxela/claude-monitor/compare/v3.1.2...v3.1.3) (2026-04-16)
+
+
+### Bug Fixes
+
+* install script binary lookup, table view, replay UI, keyboard shortcuts ([1f76482](https://github.com/Zxela/claude-monitor/commit/1f7648274c210f12edf35a3cd0a0e3e45a478a01))
+* resolve open bugs — install script, table view, replay UI, keyboard shortcuts ([f5fae5c](https://github.com/Zxela/claude-monitor/commit/f5fae5cb4d4445333049db0ae4647509370f5d03))
+
 ## [3.1.2](https://github.com/Zxela/claude-monitor/compare/v3.1.1...v3.1.2) (2026-04-11)
 
 
