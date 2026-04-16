@@ -360,6 +360,14 @@ Examples:
 		log.Printf("loaded model pricing entries from DB")
 	}
 
+	// Load preview_max_length setting and apply to parser.
+	if v, err := historyDB.GetSetting("preview_max_length"); err == nil {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			parser.SetPreviewMaxLength(n)
+			log.Printf("preview_max_length set to %d", n)
+		}
+	}
+
 	// Repo resolver with persisted cwd→repo cache.
 	resolver := repo.NewResolver()
 	if cached, err := historyDB.LoadCwdRepos(); err == nil {

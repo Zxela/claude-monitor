@@ -563,6 +563,7 @@ paths:
                 example:
                   retention_hot_days: "30"
                   retention_warm_days: "90"
+                  preview_max_length: "200"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -570,7 +571,10 @@ paths:
     put:
       tags: [settings]
       summary: Update a setting
-      description: Sets a single setting by key. Creates the key if it does not exist.
+      description: >
+        Sets a single setting by key. Creates the key if it does not exist.
+        Valid keys: `retention_hot_days`, `retention_warm_days`,
+        `preview_max_length` (integer 50–2000; controls content preview truncation length).
       operationId: updateSetting
       parameters:
         - name: key

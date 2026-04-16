@@ -557,6 +557,7 @@ func handleSettings(historyDB *store.DB) http.HandlerFunc {
 var validSettingKeys = map[string]bool{
 	"retention_hot_days":  true,
 	"retention_warm_days": true,
+	"preview_max_length":  true,
 }
 
 // handleSettingsUpdate serves PUT /api/settings/{key}.
@@ -575,9 +576,23 @@ func handleSettingsUpdate(historyDB *store.DB) http.HandlerFunc {
 			writeJSONError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
+		// Key-specific validation.
+		if key == "preview_max_length" {
+			n, err := strconv.Atoi(body.Value)
+			if err != nil || n < 50 || n > 2000 {
+				writeJSONError(w, "preview_max_length must be an integer between 50 and 2000", http.StatusBadRequest)
+				return
+			}
+		}
 		if err := historyDB.SetSetting(key, body.Value); err != nil {
 			writeJSONError(w, "failed to update setting", http.StatusInternalServerError)
 			return
+		}
+		// Apply preview_max_length live so new parses use the updated value immediately.
+		if key == "preview_max_length" {
+			if n, err := strconv.Atoi(body.Value); err == nil {
+				parser.SetPreviewMaxLength(n)
+			}
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	}
