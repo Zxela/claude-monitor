@@ -5,7 +5,7 @@ export interface AppState {
   sessions: Map<string, Session>;
   grouped: GroupedSessions | null;
   selectedSessionId: string | null;
-  view: 'list' | 'graph' | 'history' | 'analytics' | 'timeline';
+  view: 'list' | 'graph' | 'history' | 'analytics' | 'timeline' | 'table';
   repoFilter: string | null;
   searchQuery: string;
   searchResults: Event[];
@@ -47,6 +47,9 @@ export interface AppState {
 
   // Sidebar
   sidebarCollapsed: boolean;
+
+  // Per-session subagent collapse (set of parent session IDs whose children are hidden)
+  collapsedSubagents: Set<string>;
 }
 
 type Listener = (state: AppState, changedKeys: Set<string>) => void;
@@ -91,6 +94,7 @@ export const state: AppState = {
   stats: null,
   statsWindow: (localStorage.getItem('claude-monitor-stats-window') as StatsWindow) || 'today',
   sidebarCollapsed: false,
+  collapsedSubagents: new Set<string>(),
 };
 
 export function subscribe(listener: Listener): () => void {

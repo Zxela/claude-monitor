@@ -40,9 +40,17 @@ trap 'rm -rf "$TMPDIR"' EXIT
 curl -fsSL "$URL" -o "${TMPDIR}/${BINARY}.tar.gz"
 tar xzf "${TMPDIR}/${BINARY}.tar.gz" -C "$TMPDIR"
 
-# Install
+# Install — tarball may contain the binary as 'claude-monitor' (Homebrew-style)
+# or as the full platform name 'claude-monitor-OS-ARCH' (release.yml-style)
 mkdir -p "$INSTALL_DIR"
-mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/claude-monitor"
+if [ -f "${TMPDIR}/claude-monitor" ]; then
+  mv "${TMPDIR}/claude-monitor" "${INSTALL_DIR}/claude-monitor"
+elif [ -f "${TMPDIR}/${BINARY}" ]; then
+  mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/claude-monitor"
+else
+  echo "Error: could not find binary in archive (looked for 'claude-monitor' and '${BINARY}')"
+  exit 1
+fi
 chmod +x "${INSTALL_DIR}/claude-monitor"
 
 # macOS: remove quarantine attribute
