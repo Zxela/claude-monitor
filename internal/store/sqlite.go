@@ -1268,6 +1268,52 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 	return scanEventRows(rows)
 }
 
+// --- Model Pricing ---
+
+// ModelPricing holds per-million-token pricing for a model prefix.
+type ModelPricing struct {
+	InputPerMTok       float64 `json:"input_per_mtok"`
+	OutputPerMTok      float64 `json:"output_per_mtok"`
+	CacheReadPerMTok   float64 `json:"cache_read_per_mtok"`
+	CacheCreatePerMTok float64 `json:"cache_create_per_mtok"`
+}
+
+// AllModelPricing returns all rows from the model_pricing table as a map keyed by model_prefix.
+func (d *DB) AllModelPricing() (map[string]ModelPricing, error) {
+	rows, err := d.db.Query(`SELECT model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]ModelPricing)
+	for rows.Next() {
+		var prefix string
+		var p ModelPricing
+		if err := rows.Scan(&prefix, &p.InputPerMTok, &p.OutputPerMTok, &p.CacheReadPerMTok, &p.CacheCreatePerMTok); err != nil {
+			return nil, err
+		}
+		result[prefix] = p
+	}
+	return result, rows.Err()
+}
+
+// UpsertModelPricing inserts or replaces a pricing row for the given model prefix.
+func (d *DB) UpsertModelPricing(prefix string, p ModelPricing) error {
+	_, err := d.db.Exec(
+		`INSERT INTO model_pricing (model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(model_prefix) DO UPDATE SET
+		 input_per_mtok=excluded.input_per_mtok,
+		 output_per_mtok=excluded.output_per_mtok,
+		 cache_read_per_mtok=excluded.cache_read_per_mtok,
+		 cache_create_per_mtok=excluded.cache_create_per_mtok`,
+		prefix, p.InputPerMTok, p.OutputPerMTok, p.CacheReadPerMTok, p.CacheCreatePerMTok,
+	)
+	if err != nil {
+		return fmt.Errorf("UpsertModelPricing: %w", err)
+	}
+	return nil
+}
+
 // --- Settings ---
 
 // GetSetting returns a setting value by key.

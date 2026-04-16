@@ -298,6 +298,197 @@ func TestProcess_RebuildDedupFromDB(t *testing.T) {
 	}
 }
 
+// TestParentLinking_DeferredUUID verifies that when a child session arrives
+// before its parent, the parentUuid is stored as a deferred link and resolved
+// once the parent session is processed.
+func TestParentLinking_DeferredUUID(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const parentID = "parent-session-uuid"
+	const childID = "child-session-uuid"
+	ts := time.Now()
+
+	// Step 1: Process a child event that references the parent via parentUuid.
+	// The parent session does NOT exist yet in the store.
+	childLine := makeJSONL(t, map[string]interface{}{
+		"type":       "assistant",
+		"timestamp":  ts.Format(time.RFC3339Nano),
+		"sessionId":  childID,
+		"parentUuid": parentID,
+		"isSidechain": true,
+		"message": map[string]interface{}{
+			"id":      "msg-child-1",
+			"role":    "assistant",
+			"content": "child response",
+			"usage": map[string]interface{}{
+				"input_tokens":  10,
+				"output_tokens": 5,
+			},
+			"model": "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: childID,
+		Line:      childLine,
+		Bootstrap: true,
+	})
+
+	// After processing child only, ParentID should not be set yet (parent unknown).
+	childSess, ok := sessions.Get(childID)
+	if !ok {
+		t.Fatal("child session not found")
+	}
+	if childSess.ParentID != "" {
+		t.Errorf("child ParentID should be empty before parent arrives; got %q", childSess.ParentID)
+	}
+
+	// Verify the deferred link was stored.
+	p.linkMu.Lock()
+	pending := p.pendingParentLinks[childID]
+	p.linkMu.Unlock()
+	if pending != parentID {
+		t.Errorf("pendingParentLinks[%q] = %q, want %q", childID, pending, parentID)
+	}
+
+	// Step 2: Process an event for the parent session.
+	parentLine := makeJSONL(t, map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": ts.Add(time.Second).Format(time.RFC3339Nano),
+		"sessionId": parentID,
+		"message": map[string]interface{}{
+			"id":      "msg-parent-1",
+			"role":    "assistant",
+			"content": "parent response",
+			"usage": map[string]interface{}{
+				"input_tokens":  20,
+				"output_tokens": 10,
+			},
+			"model": "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: parentID,
+		Line:      parentLine,
+		Bootstrap: true,
+	})
+
+	// After processing the parent, resolvePendingLinks should have fired and
+	// set the child's ParentID.
+	childSess, ok = sessions.Get(childID)
+	if !ok {
+		t.Fatal("child session not found after parent arrival")
+	}
+	if childSess.ParentID != parentID {
+		t.Errorf("child ParentID = %q, want %q", childSess.ParentID, parentID)
+	}
+
+	// The parent should have the child recorded in Children.
+	parentSess, ok := sessions.Get(parentID)
+	if !ok {
+		t.Fatal("parent session not found")
+	}
+	found := false
+	for _, c := range parentSess.Children {
+		if c == childID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("parent.Children does not contain childID %q; got %v", childID, parentSess.Children)
+	}
+
+	// Pending link should be cleared.
+	p.linkMu.Lock()
+	remaining := p.pendingParentLinks[childID]
+	p.linkMu.Unlock()
+	if remaining != "" {
+		t.Errorf("pendingParentLinks[%q] should be cleared after resolution; got %q", childID, remaining)
+	}
+}
+
+// TestParentLinking_DirectUUID verifies that when parentUuid directly matches
+// an already-present session, the link is set immediately without deferral.
+func TestParentLinking_DirectUUID(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const parentID = "parent-direct-uuid"
+	const childID = "child-direct-uuid"
+	ts := time.Now()
+
+	// Step 1: Process the parent session first.
+	parentLine := makeJSONL(t, map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": ts.Format(time.RFC3339Nano),
+		"sessionId": parentID,
+		"message": map[string]interface{}{
+			"id":      "msg-parent-direct",
+			"role":    "assistant",
+			"content": "parent response",
+			"usage": map[string]interface{}{
+				"input_tokens":  20,
+				"output_tokens": 10,
+			},
+			"model": "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: parentID,
+		Line:      parentLine,
+		Bootstrap: true,
+	})
+
+	// Step 2: Process child — parent is already in store, should link immediately.
+	childLine := makeJSONL(t, map[string]interface{}{
+		"type":        "assistant",
+		"timestamp":   ts.Add(time.Second).Format(time.RFC3339Nano),
+		"sessionId":   childID,
+		"parentUuid":  parentID,
+		"isSidechain": true,
+		"message": map[string]interface{}{
+			"id":      "msg-child-direct",
+			"role":    "assistant",
+			"content": "child response",
+			"usage": map[string]interface{}{
+				"input_tokens":  10,
+				"output_tokens": 5,
+			},
+			"model": "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: childID,
+		Line:      childLine,
+		Bootstrap: true,
+	})
+
+	childSess, ok := sessions.Get(childID)
+	if !ok {
+		t.Fatal("child session not found")
+	}
+	if childSess.ParentID != parentID {
+		t.Errorf("child ParentID = %q, want %q", childSess.ParentID, parentID)
+	}
+
+	// No deferred link should exist.
+	p.linkMu.Lock()
+	pending := p.pendingParentLinks[childID]
+	p.linkMu.Unlock()
+	if pending != "" {
+		t.Errorf("no pending link expected; got %q", pending)
+	}
+}
+
 // populateMetaCacheForTest fills the meta cache with n synthetic entries for testing.
 func (p *Pipeline) populateMetaCacheForTest(n int) {
 	p.metaMu.Lock()

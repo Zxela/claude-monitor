@@ -90,6 +90,15 @@
   font-size: 12px;
 }
 
+.cost-window-label {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: lowercase;
+  margin-left: 2px;
+}
+
 .budget-gear:hover {
   opacity: 1;
 }

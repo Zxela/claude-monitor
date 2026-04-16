@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -123,7 +126,8 @@ type Event struct {
 	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
 	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
 	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
-	TeamName     string    `json:"teamName,omitempty"`     // team name for team agents
+	TeamName        string    `json:"teamName,omitempty"`        // team name for team agents
+	ThinkingContent string    `json:"thinkingContent,omitempty"` // full text from thinking blocks
 	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
 	// Tool result metadata (from toolUseResult on user lines)
 	DurationMs      *int64  `json:"durationMs,omitempty"`
@@ -167,6 +171,7 @@ type modelPricing struct {
 	CacheCreatePerMTok float64
 }
 
+// pricingTable is the compile-time fallback used when the DB is empty or unavailable.
 var pricingTable = map[string]modelPricing{
 	"claude-opus-4-6":   {5.0, 25.0, 0.50, 6.25},
 	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
@@ -175,19 +180,78 @@ var pricingTable = map[string]modelPricing{
 
 var defaultPricing = pricingTable["claude-sonnet-4-6"]
 
-func computeCost(model string, usage rawUsage) float64 {
-	p, ok := pricingTable[model]
-	if !ok {
-		// Try prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001")
-		for key, pricing := range pricingTable {
-			if len(model) > len(key) && model[:len(key)] == key {
-				p = pricing
-				ok = true
-				break
-			}
+// activePricingTable holds the merged pricing map pointer (DB values preferred over compile-time
+// fallback). Stored as an atomic.Value so concurrent reads from computeCost and writes from
+// SetPricingTable (called from the HTTP pricing handler) are race-free.
+var activePricingTableAtomic atomic.Value // stores map[string]modelPricing
+
+// warnedModels tracks models for which an unknown-pricing warning has already been logged
+// (once per process run).
+var warnedModels sync.Map
+
+// ExternalPricing holds the four per-million-token rates for a model.
+// Used by SetPricingTable to accept DB-loaded pricing without a store import.
+type ExternalPricing struct {
+	InputPerMTok       float64
+	OutputPerMTok      float64
+	CacheReadPerMTok   float64
+	CacheCreatePerMTok float64
+}
+
+// SetPricingTable merges DB-sourced pricing (preferred) with the compile-time fallback.
+// Call this once at startup after loading from the database.
+// dbPricing keys are model_prefix strings.
+func SetPricingTable(dbPricing map[string]ExternalPricing) {
+	merged := make(map[string]modelPricing, len(pricingTable)+len(dbPricing))
+	// Start with compile-time fallback.
+	for k, v := range pricingTable {
+		merged[k] = v
+	}
+	// Overwrite / extend with DB values.
+	for prefix, p := range dbPricing {
+		merged[prefix] = modelPricing(p)
+	}
+	activePricingTableAtomic.Store(merged)
+}
+
+// lookupPricing resolves pricing for the given model string.
+// It prefers the atomically-stored pricing table (set from DB) and falls back to pricingTable.
+// Returns the pricing and whether it was found (false means default was used).
+func lookupPricing(model string) (modelPricing, bool) {
+	var table map[string]modelPricing
+	if v := activePricingTableAtomic.Load(); v != nil {
+		table = v.(map[string]modelPricing)
+	}
+	if table == nil {
+		table = pricingTable
+	}
+
+	// Exact match.
+	if p, ok := table[model]; ok {
+		return p, true
+	}
+	// Prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001").
+	// Sort keys by length descending so the most-specific prefix wins when
+	// multiple prefixes could match (e.g. "claude-haiku-4" vs "claude-haiku-4-5").
+	keys := make([]string, 0, len(table))
+	for k := range table {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	for _, key := range keys {
+		if len(model) > len(key) && model[:len(key)] == key {
+			return table[key], true
 		}
-		if !ok {
-			p = defaultPricing
+	}
+	return defaultPricing, false
+}
+
+func computeCost(model string, usage rawUsage) float64 {
+	p, found := lookupPricing(model)
+	if !found && model != "" {
+		// Warn once per unknown model per process run.
+		if _, alreadyWarned := warnedModels.LoadOrStore(model, true); !alreadyWarned {
+			log.Printf("[WARN] unknown model pricing for %q, using Sonnet default", model)
 		}
 	}
 	return float64(usage.InputTokens)*p.InputPerMTok/1e6 +
@@ -196,13 +260,16 @@ func computeCost(model string, usage rawUsage) float64 {
 		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
 }
 
-// isErrorContent returns true when text looks like an error message from a tool result.
+// isErrorContent is a last-resort heuristic to detect error messages in tool result content.
+// This function should only be applied when b.IsError is not set (the canonical source).
+// Prefer the explicit is_error field from tool_result blocks over this heuristic.
 func isErrorContent(text string) bool {
 	lower := strings.ToLower(text)
 	return strings.HasPrefix(lower, "error:") ||
-		strings.HasPrefix(lower, "error ") ||
+		strings.Contains(lower, "\nerror:") ||
 		strings.Contains(lower, "command failed") ||
-		strings.Contains(lower, "exited with error")
+		strings.Contains(lower, "exited with error") ||
+		strings.Contains(lower, "exit status 1")
 }
 
 // unmarshalLine decodes a JSONL line into the intermediate rawMessage struct.
@@ -293,6 +360,11 @@ func applyToolResultMetadata(msg *Event, raw *rawMessage) {
 	if len(raw.ToolUseResult) == 0 {
 		return
 	}
+	// toolUseResult is sometimes a plain string (e.g. tool output text) rather
+	// than a structured metadata object. Detect and skip gracefully.
+	if len(raw.ToolUseResult) > 0 && raw.ToolUseResult[0] == '"' {
+		return
+	}
 	var tr rawToolResult
 	if err := json.Unmarshal(raw.ToolUseResult, &tr); err != nil {
 		log.Printf("debug: unmarshal toolUseResult (uuid=%s): %v", raw.UUID, err)
@@ -356,6 +428,7 @@ func applyContentData(msg *Event, raw *rawMessage) {
 	msg.ToolDetail = ci.toolDetail
 	msg.ToolUseID = ci.toolUseID
 	msg.ForToolUseID = ci.forToolUseID
+	msg.ThinkingContent = ci.thinkingContent
 	msg.IsAgent = msg.ToolName == "Agent"
 	msg.IsError = msg.IsError || ci.isError
 
@@ -402,14 +475,15 @@ type toolUseEntry struct {
 
 // contentInfo bundles everything extracted from a content field.
 type contentInfo struct {
-	text         string // preview text (truncated)
-	toolName     string
-	fullText     string // untruncated content
-	toolDetail   string
-	toolUseID    string         // first tool_use block ID
-	toolUseAll   []toolUseEntry // all tool_use blocks (for batched calls)
-	forToolUseID string         // tool_use_id from tool_result block
-	isError      bool           // true if tool_result has is_error or error content
+	text            string // preview text (truncated)
+	toolName        string
+	fullText        string // untruncated content
+	toolDetail      string
+	toolUseID       string         // first tool_use block ID
+	toolUseAll      []toolUseEntry // all tool_use blocks (for batched calls)
+	forToolUseID    string         // tool_use_id from tool_result block
+	isError         bool           // true if tool_result has is_error or error content
+	thinkingContent string         // full text from thinking blocks
 }
 
 // extractContent attempts to decode content as a string first, then as a
@@ -446,6 +520,14 @@ func extractContent(raw json.RawMessage) contentInfo {
 				}
 			}
 		case "thinking":
+			if b.Text != "" {
+				if info.thinkingContent == "" {
+					info.thinkingContent = b.Text
+				}
+				if info.fullText == "" {
+					info.fullText = b.Text
+				}
+			}
 			if info.text == "" {
 				info.text = "[thinking...]"
 			}

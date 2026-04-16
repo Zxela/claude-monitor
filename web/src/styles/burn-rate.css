@@ -176,3 +176,30 @@
 .burn-rate-settings-actions button:hover {
   background: var(--bg-hover, #3a3a5a);
 }
+
+.burn-rate-budget-window {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: var(--text-dim, #666);
+}
+.burn-rate-budget-window label {
+  display: inline;
+  margin: 0;
+  color: var(--text-dim, #666);
+  font-size: 10px;
+  cursor: default;
+}
+.budget-window-select {
+  flex: 1;
+  background: var(--bg-tertiary, #2a2a4a);
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 4px;
+  color: var(--text-primary, #e0e0e0);
+  padding: 3px 6px;
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+}

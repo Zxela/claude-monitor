@@ -2,6 +2,7 @@
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { loadSettings, saveSettings, getSettings, notify } from '../notifications';
+import type { StatsWindow } from '../api';
 import { dismiss as dismissCostBreakdown } from './cost-breakdown';
 import {
   getSamples,
@@ -52,6 +53,11 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
   const saved = localStorage.getItem('budget');
   if (saved) {
     update({ budgetThreshold: parseFloat(saved) });
+  }
+
+  const savedWindow = localStorage.getItem('budget-window') as StatsWindow | null;
+  if (savedWindow) {
+    update({ statsWindow: savedWindow });
   }
 
   loadSettings();
@@ -217,7 +223,16 @@ function renderPanelContent(): void {
   settingsEl.className = 'burn-rate-settings';
   settingsEl.style.display = settingsOpen ? '' : 'none';
   settingsEl.innerHTML = `
-    <input type="number" step="1" placeholder="Daily budget (USD)" value="${state.budgetThreshold ?? ''}" />
+    <div class="burn-rate-budget-window">
+      <label for="budget-window-select">Budget window</label>
+      <select id="budget-window-select" class="budget-window-select">
+        <option value="today" ${state.statsWindow === 'today' ? 'selected' : ''}>Today</option>
+        <option value="week" ${state.statsWindow === 'week' ? 'selected' : ''}>This week</option>
+        <option value="month" ${state.statsWindow === 'month' ? 'selected' : ''}>This month</option>
+        <option value="all" ${state.statsWindow === 'all' ? 'selected' : ''}>All time</option>
+      </select>
+    </div>
+    <input type="number" step="1" placeholder="Budget (USD)" value="${state.budgetThreshold ?? ''}" />
     <div class="burn-rate-settings-actions">
       <button class="set-btn">Set</button>
       <button class="clear-btn">Clear</button>
@@ -259,6 +274,12 @@ function renderPanelContent(): void {
     const s = getSettings();
     s.error = (e.target as HTMLInputElement).checked;
     saveSettings(s);
+  });
+  settingsEl.querySelector('.budget-window-select')?.addEventListener('change', (e) => {
+    const win = (e.target as HTMLSelectElement).value as StatsWindow;
+    localStorage.setItem('budget-window', win);
+    update({ statsWindow: win, budgetDismissed: false });
+    budgetNotificationSent = false;
   });
 }
 

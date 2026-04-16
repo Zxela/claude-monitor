@@ -48,6 +48,9 @@ type Pipeline struct {
 	metaCache map[string]*agentMeta
 	metaOrder []string
 
+	linkMu             sync.Mutex
+	pendingParentLinks map[string]string // childSessionID → parentUUID (not yet in session store)
+
 	bufMu  sync.Mutex
 	buffer []store.EventInsert
 
@@ -59,12 +62,13 @@ type Pipeline struct {
 // New creates a Pipeline.
 func New(sessions *session.Store, db *store.DB, resolver *repo.Resolver, broadcast BroadcastFunc) *Pipeline {
 	p := &Pipeline{
-		sessions:  sessions,
-		db:        db,
-		resolver:  resolver,
-		broadcast: broadcast,
-		metaCache: make(map[string]*agentMeta),
-		stopCh:    make(chan struct{}),
+		sessions:           sessions,
+		db:                 db,
+		resolver:           resolver,
+		broadcast:          broadcast,
+		metaCache:          make(map[string]*agentMeta),
+		pendingParentLinks: make(map[string]string),
+		stopCh:             make(chan struct{}),
 	}
 	p.wg.Add(1)
 	go p.flushLoop()
@@ -79,6 +83,24 @@ func (p *Pipeline) Stop() {
 	})
 	p.wg.Wait()
 	p.flush() // final flush
+}
+
+// resolvePendingLinks checks all pending child→parent links and wires up any
+// whose parent session has now been created in the session store.
+func (p *Pipeline) resolvePendingLinks() {
+	p.linkMu.Lock()
+	defer p.linkMu.Unlock()
+	for childID, parentUUID := range p.pendingParentLinks {
+		if _, ok := p.sessions.Get(parentUUID); ok {
+			p.sessions.Upsert(childID, func(s *session.Session) {
+				if s.ParentID == "" {
+					s.ParentID = parentUUID
+				}
+			})
+			p.sessions.LinkChild(parentUUID, childID)
+			delete(p.pendingParentLinks, childID)
+		}
+	}
 }
 
 // Process handles a single watcher event through the full pipeline.
@@ -129,15 +151,24 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		}
 	}
 
+	// Pre-resolve parent UUID outside of Upsert to avoid re-entrant lock.
+	// If msg.ParentUUID names a session already in the store, use it directly;
+	// otherwise fall back to path inference. A "" result means defer to later.
+	resolvedParentID := p.resolveParentID(event, ev)
+
 	// Stage 3: Apply Session
 	sess := p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
-		p.applyEvent(s, event, ev, resolvedRepo)
+		p.applyEvent(s, event, ev, resolvedRepo, resolvedParentID)
 	})
 
 	// Link child to parent
 	if sess.ParentID != "" {
 		p.sessions.LinkChild(sess.ParentID, ev.SessionID)
 	}
+
+	// Resolve any deferred child→parent links now that this session exists in the store.
+	// Must run AFTER the Upsert above so the current session is visible to lookups.
+	p.resolvePendingLinks()
 
 	// Stage 4a: Broadcast (immediate)
 	if p.broadcast != nil && !ev.Bootstrap {
@@ -217,10 +248,11 @@ func (p *Pipeline) flushLoop() {
 
 // applyEvent updates session state from a parsed event.
 // It delegates to focused helpers for each concern.
-func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo) {
+// resolvedParentID is the pre-computed parent session ID (may be empty).
+func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo, resolvedParentID string) {
 	p.applyRepoResolution(s, msg, r)
 	p.applySessionMeta(s, msg, ev)
-	p.applyParentDetection(s, msg, ev)
+	p.applyParentDetection(s, msg, ev, resolvedParentID)
 	p.applyCostDedup(s, msg)
 	p.applyStatusUpdate(s, msg, ev)
 }
@@ -288,37 +320,74 @@ func (p *Pipeline) applySessionMeta(s *session.Session, msg *parser.Event, ev wa
 	}
 }
 
-// applyParentDetection sets ParentID for subagents and team agents.
-func (p *Pipeline) applyParentDetection(s *session.Session, msg *parser.Event, ev watcher.Event) {
-	// Subagent detection via sidechain/parentUUID
+// resolveParentID determines the parent session ID for a subagent event.
+// It is called OUTSIDE of any session store lock to avoid re-entrancy deadlocks.
+// When msg.ParentUUID names a known session, that UUID is returned directly.
+// Otherwise path-based inference is used as a fallback.
+// If neither source yields a result but msg.ParentUUID is set, a deferred link
+// is stored so it can be resolved once the parent session arrives.
+// Returns the resolved parent session ID, or "" if the link must be deferred.
+func (p *Pipeline) resolveParentID(msg *parser.Event, ev watcher.Event) string {
+	if !msg.IsSidechain && msg.ParentUUID == "" && msg.TeamName == "" {
+		return ""
+	}
+
+	// For subagent events: prefer direct UUID lookup.
 	if msg.IsSidechain || msg.ParentUUID != "" {
-		if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
-			if s.ParentID == "" {
-				s.ParentID = parentSID
-				p.metaMu.Lock()
-				meta := p.metaCache[ev.SessionID]
-				p.metaMu.Unlock()
-				if meta != nil {
-					name := meta.Name
-					if name == "" {
-						name = meta.AgentType
-					}
-					if name != "" && s.SessionName == "" {
-						s.SessionName = name
-					}
-				}
+		if msg.ParentUUID != "" {
+			if _, ok := p.sessions.Get(msg.ParentUUID); ok {
+				return msg.ParentUUID
+			}
+		}
+		// Fall back to path-based inference.
+		if sid := parentSessionIDFromPath(ev.FilePath); sid != "" {
+			return sid
+		}
+		// Neither source found a parent — record a deferred link.
+		if msg.ParentUUID != "" {
+			p.linkMu.Lock()
+			p.pendingParentLinks[ev.SessionID] = msg.ParentUUID
+			p.linkMu.Unlock()
+		}
+		return ""
+	}
+
+	// Team agent detection via parent path.
+	if msg.TeamName != "" {
+		return parentSessionIDFromPath(ev.FilePath)
+	}
+
+	return ""
+}
+
+// applyParentDetection sets ParentID for subagents and team agents.
+// resolvedParentID is pre-computed by resolveParentID before the Upsert lock is held.
+func (p *Pipeline) applyParentDetection(s *session.Session, msg *parser.Event, ev watcher.Event, resolvedParentID string) {
+	if resolvedParentID == "" || s.ParentID != "" {
+		return
+	}
+
+	s.ParentID = resolvedParentID
+
+	// Apply meta-derived name for subagents.
+	if msg.IsSidechain || msg.ParentUUID != "" {
+		p.metaMu.Lock()
+		meta := p.metaCache[ev.SessionID]
+		p.metaMu.Unlock()
+		if meta != nil {
+			name := meta.Name
+			if name == "" {
+				name = meta.AgentType
+			}
+			if name != "" && s.SessionName == "" {
+				s.SessionName = name
 			}
 		}
 	}
 
-	// Team agent detection via parent path
-	if msg.TeamName != "" && s.ParentID == "" {
-		if parentSID := parentSessionIDFromPath(ev.FilePath); parentSID != "" {
-			s.ParentID = parentSID
-			if msg.AgentName != "" && s.SessionName == "" {
-				s.SessionName = msg.AgentName
-			}
-		}
+	// Apply agent name for team agents.
+	if msg.TeamName != "" && msg.AgentName != "" && s.SessionName == "" {
+		s.SessionName = msg.AgentName
 	}
 }
 

@@ -43,6 +43,7 @@ export interface Event {
   role: string;
   contentPreview: string;
   fullContent?: string;
+  thinkingContent?: string;
   toolName?: string;
   toolDetail?: string;
   costUSD: number;
@@ -144,10 +145,14 @@ export interface TrendResult {
 
 export interface WsEvent {
   event: 'session_new' | 'session_update' | 'event' | 'update_available';
+  // dropped_events uses 'type' instead of 'event' as the discriminator
+  type?: 'dropped_events';
   session?: Session;
   data?: Event;
   version?: string;
   url?: string;
+  count?: number;
+  delta?: number;
 }
 
 export interface SearchResult {

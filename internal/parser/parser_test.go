@@ -610,3 +610,145 @@ func TestParseLine_TopLevelContentFallback(t *testing.T) {
 		t.Errorf("ContentText: got %q, want %q", msg.ContentText, "tool output here")
 	}
 }
+
+func TestIsErrorContent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		text     string
+		expected bool
+	}{
+		// Should match: specific error patterns
+		{"error with colon prefix", "error: file not found", true},
+		{"Error with colon uppercase", "Error: command not found", true},
+		{"command failed", "command failed with exit code 1", true},
+		{"exited with error", "Process exited with error status", true},
+		{"exit status 1", "exit status 1", true},
+		{"newline error colon", "Some output\nerror: something failed", true},
+		{"multiple lines with error colon", "Line 1\nLine 2\nerror: failure occurred", true},
+
+		// Should NOT match: false positives (common in normal output)
+		{"ErrorMetrics with count", "ErrorMetrics: 0 errors found", false},
+		{"error count", "error count: 5", false},
+		{"error rate", "error rate is 0.1%", false},
+		{"No errors found", "No errors found in validation", false},
+		{"errors but not as prefix", "There are 3 errors reported", false},
+		{"normal output", "file contents here", false},
+		{"success message", "Operation completed successfully", false},
+		{"empty string", "", false},
+		{"whitespace only", "   ", false},
+
+		// Edge cases
+		{"error colon mid-sentence", "The code has error: bug", false},
+		{"ERROR in all caps", "ERROR: critical issue", true},
+		{"command failed lowercase", "command failed: permission denied", true},
+		{"Error with newline prefix", "\nerror: message", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isErrorContent(tc.text)
+			if got != tc.expected {
+				t.Errorf("isErrorContent(%q) = %v, want %v", tc.text, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestParseLine_ToolResultFalsePositivePrevention(t *testing.T) {
+	t.Parallel()
+	// "ErrorMetrics: 0 errors found" should NOT be flagged as an error
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"ErrorMetrics: 0 errors found","tool_use_id":"tu_metrics"}]},"sessionId":"sess-metrics","uuid":"uuid-metrics","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.IsError {
+		t.Error("IsError should be false for 'ErrorMetrics: 0 errors found' (false positive)")
+	}
+}
+
+func TestParseLine_ToolResultHeuristicError(t *testing.T) {
+	t.Parallel()
+	// "error: file not found" should be caught by heuristic
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"error: file not found","tool_use_id":"tu_heur1"}]},"sessionId":"sess-heur1","uuid":"uuid-heur1","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !msg.IsError {
+		t.Error("IsError should be true for 'error: file not found'")
+	}
+}
+
+func TestParseLine_ToolResultCommandFailed(t *testing.T) {
+	t.Parallel()
+	// "command failed" should be caught by heuristic
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"command failed: permission denied","tool_use_id":"tu_cmdfail"}]},"sessionId":"sess-cmdfail","uuid":"uuid-cmdfail","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !msg.IsError {
+		t.Error("IsError should be true for 'command failed'")
+	}
+}
+
+func TestParseLine_ToolResultExitStatus(t *testing.T) {
+	t.Parallel()
+	// "exit status 1" should be caught by heuristic
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"exit status 1","tool_use_id":"tu_exit"}]},"sessionId":"sess-exit","uuid":"uuid-exit","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !msg.IsError {
+		t.Error("IsError should be true for 'exit status 1'")
+	}
+}
+
+func TestParseLine_ToolResultNoErrorsFalsePositive(t *testing.T) {
+	t.Parallel()
+	// "No errors found" should NOT be flagged as an error
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"No errors found in the code","tool_use_id":"tu_noerr"}]},"sessionId":"sess-noerr","uuid":"uuid-noerr","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.IsError {
+		t.Error("IsError should be false for 'No errors found' (false positive)")
+	}
+}
+
+func TestParseLine_ToolUseResultAsString(t *testing.T) {
+	t.Parallel()
+	// toolUseResult is sometimes a plain string in newer Claude JSONL — should not crash
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"ok","tool_use_id":"tu_str"}]},"toolUseResult":"some plain string output","sessionId":"sess-str","uuid":"uuid-str","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error parsing string toolUseResult: %v", err)
+	}
+	// metadata fields should be zero — no duration/tokens extracted from a string
+	if msg.DurationMs != nil {
+		t.Error("DurationMs should be nil when toolUseResult is a string")
+	}
+	if msg.AgentType != "" {
+		t.Error("AgentType should be empty when toolUseResult is a string")
+	}
+}
+
+func TestParseLine_ToolUseResultAsObject(t *testing.T) {
+	t.Parallel()
+	// toolUseResult as a structured object should populate metadata fields
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"ok","tool_use_id":"tu_obj"}]},"toolUseResult":{"durationMs":123,"agentType":"general-purpose","success":true},"sessionId":"sess-obj","uuid":"uuid-obj","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error parsing object toolUseResult: %v", err)
+	}
+	if msg.DurationMs == nil || *msg.DurationMs != 123 {
+		t.Errorf("DurationMs should be 123, got %v", msg.DurationMs)
+	}
+	if msg.AgentType != "general-purpose" {
+		t.Errorf("AgentType should be 'general-purpose', got %q", msg.AgentType)
+	}
+}
