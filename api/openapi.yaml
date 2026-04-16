@@ -562,6 +562,59 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/pricing/{model_prefix}:
+    put:
+      tags: [settings]
+      summary: Upsert model pricing
+      description: >
+        Inserts or replaces the per-million-token pricing for the given model
+        prefix. Changes are persisted to SQLite and take effect immediately for
+        subsequent cost computations.
+      operationId: upsertModelPricing
+      parameters:
+        - name: model_prefix
+          in: path
+          required: true
+          description: Model prefix (e.g. "claude-opus-4-6").
+          schema:
+            type: string
+          example: claude-opus-4-6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok]
+              properties:
+                input_per_mtok:
+                  type: number
+                  description: Input token cost per million tokens (USD).
+                  example: 5.0
+                output_per_mtok:
+                  type: number
+                  description: Output token cost per million tokens (USD).
+                  example: 25.0
+                cache_read_per_mtok:
+                  type: number
+                  description: Cache read token cost per million tokens (USD).
+                  example: 0.5
+                cache_create_per_mtok:
+                  type: number
+                  description: Cache creation token cost per million tokens (USD).
+                  example: 6.25
+      responses:
+        "200":
+          description: Pricing updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/storage:
     get:
       tags: [storage]

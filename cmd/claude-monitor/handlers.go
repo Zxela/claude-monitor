@@ -12,6 +12,7 @@ import (
 	"github.com/zxela/claude-monitor/api"
 	"github.com/zxela/claude-monitor/internal/docker"
 	"github.com/zxela/claude-monitor/internal/hub"
+	"github.com/zxela/claude-monitor/internal/parser"
 	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
 	"github.com/zxela/claude-monitor/internal/store"
@@ -600,6 +601,55 @@ func handleHealth(historyDB *store.DB, fw *watcher.Watcher) http.HandlerFunc {
 func handleVersion() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"version": version})
+	}
+}
+
+// handlePricingUpdate serves PUT /api/pricing/{model_prefix}.
+// It persists new or updated pricing for a model prefix and immediately applies it
+// to the parser's active pricing table for subsequent cost computations.
+func handlePricingUpdate(historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		prefix := r.PathValue("model_prefix")
+		if prefix == "" {
+			writeJSONError(w, "model_prefix is required", http.StatusBadRequest)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
+		var body struct {
+			InputPerMTok       float64 `json:"input_per_mtok"`
+			OutputPerMTok      float64 `json:"output_per_mtok"`
+			CacheReadPerMTok   float64 `json:"cache_read_per_mtok"`
+			CacheCreatePerMTok float64 `json:"cache_create_per_mtok"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSONError(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		p := store.ModelPricing{
+			InputPerMTok:       body.InputPerMTok,
+			OutputPerMTok:      body.OutputPerMTok,
+			CacheReadPerMTok:   body.CacheReadPerMTok,
+			CacheCreatePerMTok: body.CacheCreatePerMTok,
+		}
+		if err := historyDB.UpsertModelPricing(prefix, p); err != nil {
+			log.Printf("UpsertModelPricing %s: %v", prefix, err)
+			writeJSONError(w, "failed to update pricing", http.StatusInternalServerError)
+			return
+		}
+		// Reload all pricing from DB and re-apply to parser.
+		if dbPricing, err := historyDB.AllModelPricing(); err == nil {
+			converted := make(map[string]parser.ExternalPricing, len(dbPricing))
+			for k, v := range dbPricing {
+				converted[k] = parser.ExternalPricing{
+					InputPerMTok:       v.InputPerMTok,
+					OutputPerMTok:      v.OutputPerMTok,
+					CacheReadPerMTok:   v.CacheReadPerMTok,
+					CacheCreatePerMTok: v.CacheCreatePerMTok,
+				}
+			}
+			parser.SetPricingTable(converted)
+		}
+		writeJSON(w, map[string]bool{"ok": true})
 	}
 }
 

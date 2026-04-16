@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -167,6 +169,7 @@ type modelPricing struct {
 	CacheCreatePerMTok float64
 }
 
+// pricingTable is the compile-time fallback used when the DB is empty or unavailable.
 var pricingTable = map[string]modelPricing{
 	"claude-opus-4-6":   {5.0, 25.0, 0.50, 6.25},
 	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
@@ -175,19 +178,76 @@ var pricingTable = map[string]modelPricing{
 
 var defaultPricing = pricingTable["claude-sonnet-4-6"]
 
-func computeCost(model string, usage rawUsage) float64 {
-	p, ok := pricingTable[model]
-	if !ok {
-		// Try prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001")
-		for key, pricing := range pricingTable {
-			if len(model) > len(key) && model[:len(key)] == key {
-				p = pricing
-				ok = true
-				break
-			}
+// activePricingTable holds the merged pricing map pointer (DB values preferred over compile-time
+// fallback). Stored as an atomic.Value so concurrent reads from computeCost and writes from
+// SetPricingTable (called from the HTTP pricing handler) are race-free.
+var activePricingTableAtomic atomic.Value // stores map[string]modelPricing
+
+// warnedModels tracks models for which an unknown-pricing warning has already been logged
+// (once per process run).
+var warnedModels sync.Map
+
+// ExternalPricing holds the four per-million-token rates for a model.
+// Used by SetPricingTable to accept DB-loaded pricing without a store import.
+type ExternalPricing struct {
+	InputPerMTok       float64
+	OutputPerMTok      float64
+	CacheReadPerMTok   float64
+	CacheCreatePerMTok float64
+}
+
+// SetPricingTable merges DB-sourced pricing (preferred) with the compile-time fallback.
+// Call this once at startup after loading from the database.
+// dbPricing keys are model_prefix strings.
+func SetPricingTable(dbPricing map[string]ExternalPricing) {
+	merged := make(map[string]modelPricing, len(pricingTable)+len(dbPricing))
+	// Start with compile-time fallback.
+	for k, v := range pricingTable {
+		merged[k] = v
+	}
+	// Overwrite / extend with DB values.
+	for prefix, p := range dbPricing {
+		merged[prefix] = modelPricing{
+			InputPerMTok:       p.InputPerMTok,
+			OutputPerMTok:      p.OutputPerMTok,
+			CacheReadPerMTok:   p.CacheReadPerMTok,
+			CacheCreatePerMTok: p.CacheCreatePerMTok,
 		}
-		if !ok {
-			p = defaultPricing
+	}
+	activePricingTableAtomic.Store(merged)
+}
+
+// lookupPricing resolves pricing for the given model string.
+// It prefers the atomically-stored pricing table (set from DB) and falls back to pricingTable.
+// Returns the pricing and whether it was found (false means default was used).
+func lookupPricing(model string) (modelPricing, bool) {
+	var table map[string]modelPricing
+	if v := activePricingTableAtomic.Load(); v != nil {
+		table = v.(map[string]modelPricing)
+	}
+	if table == nil {
+		table = pricingTable
+	}
+
+	// Exact match.
+	if p, ok := table[model]; ok {
+		return p, true
+	}
+	// Prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001").
+	for key, pricing := range table {
+		if len(model) > len(key) && model[:len(key)] == key {
+			return pricing, true
+		}
+	}
+	return defaultPricing, false
+}
+
+func computeCost(model string, usage rawUsage) float64 {
+	p, found := lookupPricing(model)
+	if !found && model != "" {
+		// Warn once per unknown model per process run.
+		if _, alreadyWarned := warnedModels.LoadOrStore(model, true); !alreadyWarned {
+			log.Printf("[WARN] unknown model pricing for %q, using Sonnet default", model)
 		}
 	}
 	return float64(usage.InputTokens)*p.InputPerMTok/1e6 +
