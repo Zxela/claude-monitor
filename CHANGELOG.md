@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.3.2](https://github.com/Zxela/claude-monitor/compare/v3.3.1...v3.3.2) (2026-04-16)
+
+
+### Bug Fixes
+
+* add missing model pricing for Opus 4.5/4.7 and suppress synthetic warning ([2640c01](https://github.com/Zxela/claude-monitor/commit/2640c015107e9c50e660734bbedc2adbb22b30c5))
+* add missing model pricing for Opus 4.5/4.7, suppress synthetic warning ([77de6ad](https://github.com/Zxela/claude-monitor/commit/77de6adefea5e21c6f5d6be87746070ed5fb683a))
+* Homebrew tap not updated on releases ([c16a529](https://github.com/Zxela/claude-monitor/commit/c16a52900ee530998e88e13df2af63c17dc7fcde))
+* Homebrew tap not updated on releases ([#206](https://github.com/Zxela/claude-monitor/issues/206)) ([cec947c](https://github.com/Zxela/claude-monitor/commit/cec947c0bb87bdc14cece08a230ae94be515c2e9))
+
 ## [3.3.1](https://github.com/Zxela/claude-monitor/compare/v3.3.0...v3.3.1) (2026-04-16)
 
 
