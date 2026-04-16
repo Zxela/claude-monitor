@@ -32,6 +32,20 @@ export async function fetchFullSearch(query: string, limit = 50): Promise<Event[
   return request<Event[]>(`/api/search/full?q=${encodeURIComponent(query)}&limit=${limit}`);
 }
 
+export interface CombinedSearchResult {
+  results: Event[];
+  meta: { searchedFull: boolean };
+}
+
+export async function fetchSearchCombined(
+  query: string,
+  limit = 50,
+): Promise<CombinedSearchResult> {
+  return request<CombinedSearchResult>(
+    `/api/search/combined?q=${encodeURIComponent(query)}&limit=${limit}`,
+  );
+}
+
 export async function fetchSessionEvents(sessionId: string, last?: number): Promise<Event[]> {
   const params = last ? `?last=${last}` : '';
   return request<Event[]>(`/api/sessions/${sessionId}/events${params}`);

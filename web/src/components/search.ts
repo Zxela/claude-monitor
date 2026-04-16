@@ -1,7 +1,7 @@
 import type { Event } from '../types';
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
-import { fetchSearch } from '../api';
+import { fetchSearchCombined } from '../api';
 import { escapeHtml } from '../utils';
 import '../styles/feed.css';
 
@@ -40,16 +40,21 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
       try {
-        const results = await fetchSearch(state.searchQuery);
-        update({ searchResults: results, searchLoading: false, searchError: false });
+        const { results, meta } = await fetchSearchCombined(state.searchQuery);
+        update({
+          searchResults: results,
+          searchLoading: false,
+          searchError: false,
+          searchedFull: meta.searchedFull,
+        });
       } catch (err) {
         console.error('Search failed:', err);
-        update({ searchResults: [], searchLoading: false, searchError: true });
+        update({ searchResults: [], searchLoading: false, searchError: true, searchedFull: false });
       }
     }, 300);
   }
 
-  if (changed.has('searchResults') || changed.has('searchLoading')) {
+  if (changed.has('searchResults') || changed.has('searchLoading') || changed.has('searchedFull')) {
     renderResults();
   }
 
@@ -80,7 +85,8 @@ function renderResults(): void {
   }
 
   if (state.searchResults.length === 0 && state.searchQuery.length > 0) {
-    dropdown.innerHTML = `<div class="search-status">No results for "${escapeHtml(state.searchQuery)}"</div>`;
+    const fullScanNote = state.searchedFull ? ' (full scan)' : '';
+    dropdown.innerHTML = `<div class="search-status">No results for "${escapeHtml(state.searchQuery)}"${escapeHtml(fullScanNote)}</div>`;
     return;
   }
 
@@ -98,6 +104,15 @@ function renderResults(): void {
   }
 
   dropdown.innerHTML = '';
+
+  if (state.searchedFull) {
+    const indicator = document.createElement('div');
+    indicator.className = 'search-status search-full-scan-note';
+    const count = state.searchResults.length;
+    indicator.textContent = `${count} result${count !== 1 ? 's' : ''} (full scan)`;
+    dropdown.appendChild(indicator);
+  }
+
   for (const [sessionId, group] of groups) {
     const visibleResults = group.results.slice(0, 3);
     const remaining = group.results.length - visibleResults.length;

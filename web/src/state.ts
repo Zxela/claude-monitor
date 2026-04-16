@@ -12,6 +12,7 @@ export interface AppState {
   searchLoading: boolean;
   searchError: boolean;
   searchOpen: boolean;
+  searchedFull: boolean;
   searchHighlightEventId: number | null;
   connected: boolean;
   eventCount: number;
@@ -67,6 +68,7 @@ export const state: AppState = {
   searchLoading: false,
   searchError: false,
   searchOpen: false,
+  searchedFull: false,
   searchHighlightEventId: null,
   connected: false,
   eventCount: 0,
