@@ -265,13 +265,16 @@ func computeCost(model string, usage rawUsage) float64 {
 		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
 }
 
-// isErrorContent returns true when text looks like an error message from a tool result.
+// isErrorContent is a last-resort heuristic to detect error messages in tool result content.
+// This function should only be applied when b.IsError is not set (the canonical source).
+// Prefer the explicit is_error field from tool_result blocks over this heuristic.
 func isErrorContent(text string) bool {
 	lower := strings.ToLower(text)
 	return strings.HasPrefix(lower, "error:") ||
-		strings.HasPrefix(lower, "error ") ||
+		strings.Contains(lower, "\nerror:") ||
 		strings.Contains(lower, "command failed") ||
-		strings.Contains(lower, "exited with error")
+		strings.Contains(lower, "exited with error") ||
+		strings.Contains(lower, "exit status 1")
 }
 
 // unmarshalLine decodes a JSONL line into the intermediate rawMessage struct.
@@ -360,6 +363,11 @@ func applySystemMetadata(msg *Event, raw *rawMessage) {
 // found on user/tool_result lines.
 func applyToolResultMetadata(msg *Event, raw *rawMessage) {
 	if len(raw.ToolUseResult) == 0 {
+		return
+	}
+	// toolUseResult is sometimes a plain string (e.g. tool output text) rather
+	// than a structured metadata object. Detect and skip gracefully.
+	if len(raw.ToolUseResult) > 0 && raw.ToolUseResult[0] == '"' {
 		return
 	}
 	var tr rawToolResult
