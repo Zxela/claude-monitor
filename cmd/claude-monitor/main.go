@@ -482,6 +482,34 @@ Examples:
 		close(eventsDone)
 	}()
 
+	// Poll for dropped events every 5 seconds and broadcast a warning if the count increases.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		var lastDropped int64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				current := fw.DroppedEvents()
+				if current > lastDropped {
+					delta := current - lastDropped
+					lastDropped = current
+					payload, err := json.Marshal(map[string]any{
+						"type":  "dropped_events",
+						"count": current,
+						"delta": delta,
+					})
+					if err == nil {
+						h.Broadcast(payload)
+					}
+					log.Printf("warning: %d event(s) dropped (total: %d) — event channel was full", delta, current)
+				}
+			}
+		}
+	}()
+
 	// Retention compaction — runs hourly, compresses/deletes old event content.
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
