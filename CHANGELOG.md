@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.3.3](https://github.com/Zxela/claude-monitor/compare/v3.3.2...v3.3.3) (2026-04-16)
+
+
+### Bug Fixes
+
+* add pull-requests: write permission to build-binaries job ([99796d6](https://github.com/Zxela/claude-monitor/commit/99796d6d48ff3e9f1cd4ee1166d701d1a663556d))
+* add pull-requests: write to build-binaries job ([525b68a](https://github.com/Zxela/claude-monitor/commit/525b68a2547360bc49cb786d4f6fd03cb02b54d2))
+
 ## [3.3.2](https://github.com/Zxela/claude-monitor/compare/v3.3.1...v3.3.2) (2026-04-16)
 
 
