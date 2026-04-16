@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.2.0](https://github.com/Zxela/claude-monitor/compare/v3.1.3...v3.2.0) (2026-04-16)
+
+
+### Features
+
+* add session-spanning budget windows with time-window selector ([744ec0c](https://github.com/Zxela/claude-monitor/commit/744ec0c1e1e22e2d4383269e7af4372d01358728))
+* broadcast dropped-events warning to UI when event buffer fills ([53d0bfc](https://github.com/Zxela/claude-monitor/commit/53d0bfc06d7a1c9cbbc39dffc82b4d54236ef4b6))
+* capture and display extended thinking content in feed ([cb1d55c](https://github.com/Zxela/claude-monitor/commit/cb1d55c2efd6cae9fe20a0e97de3075f685d17d4))
+* dynamic pricing table loaded from SQLite with warn-on-unknown-model ([6a0ea7c](https://github.com/Zxela/claude-monitor/commit/6a0ea7c163448da226c16b2b5b859587dbb5441e))
+
+
+### Bug Fixes
+
+* address code review issues in dynamic pricing — deterministic prefix match, price validation, error handling ([903f666](https://github.com/Zxela/claude-monitor/commit/903f6660408d87b925356ac56f371018ec3d72b0))
+* call resolvePendingLinks after Upsert, not before ([ebb6750](https://github.com/Zxela/claude-monitor/commit/ebb67506e7c1eb3bea77f92d658e98219169e8c7))
+* handle string-typed toolUseResult without crashing parser ([6457506](https://github.com/Zxela/claude-monitor/commit/6457506cd48ca1caa0c4f2087ef93b8dfba39491))
+* narrow heuristic error detection to reduce false positives ([393ba38](https://github.com/Zxela/claude-monitor/commit/393ba38a56f487015667a663e0b09dded1abce91))
+* prefer parentUuid over file-path inference for subagent session linking ([46866c8](https://github.com/Zxela/claude-monitor/commit/46866c89e11e3049744ea4fe259d49b3b9c0cc63))
+* resolve test failure and staticcheck lint error ([03b9b71](https://github.com/Zxela/claude-monitor/commit/03b9b71904a4e09b582c72b42456e876e9f8c790))
+* use single click handler on dropped-events dismiss button ([4c3b020](https://github.com/Zxela/claude-monitor/commit/4c3b0204a61225951cf27c3a08ff8938051c4a15))
+
 ## [3.1.3](https://github.com/Zxela/claude-monitor/compare/v3.1.2...v3.1.3) (2026-04-16)
 
 
