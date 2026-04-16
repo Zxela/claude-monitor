@@ -503,6 +503,48 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/search/combined:
+    get:
+      tags: [search]
+      summary: Combined FTS5 + full-content search
+      description: >
+        Runs FTS5 search first (fast, indexes the 200-character content preview).
+        If fewer than 10 results are returned, also runs a full-content substring
+        scan (slower, searches the complete stored text) and merges both result
+        sets, deduplicating by event ID. The response includes a `meta.searchedFull`
+        boolean that is `true` when the full-content scan was also executed.
+
+        Use this endpoint instead of calling `/api/search` and `/api/search/full`
+        separately — it avoids a redundant round trip for queries that already
+        produce sufficient FTS5 results.
+      operationId: searchCombined
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query string.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >
+            Maximum number of results to return per search method. Clamped to 1–200.
+            Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Combined search result with meta flag
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CombinedSearchResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/settings:
     get:
       tags: [settings]
@@ -521,6 +563,7 @@ paths:
                 example:
                   retention_hot_days: "30"
                   retention_warm_days: "90"
+                  preview_max_length: "200"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -528,7 +571,10 @@ paths:
     put:
       tags: [settings]
       summary: Update a setting
-      description: Sets a single setting by key. Creates the key if it does not exist.
+      description: >
+        Sets a single setting by key. Creates the key if it does not exist.
+        Valid keys: `retention_hot_days`, `retention_warm_days`,
+        `preview_max_length` (integer 50–2000; controls content preview truncation length).
       operationId: updateSetting
       parameters:
         - name: key
@@ -1570,6 +1616,34 @@ components:
           format: int64
           description: Total number of event rows in the database.
           example: 150000
+
+    CombinedSearchResponse:
+      type: object
+      description: >
+        Response from /api/search/combined. Contains merged results from FTS5
+        and (conditionally) full-content search, plus metadata indicating
+        whether the slower full-content scan was executed.
+      required: [results, meta]
+      properties:
+        results:
+          type: array
+          description: >
+            Deduplicated event rows from FTS5 search and, when fewer than 10 FTS5
+            results were found, also from the full-content scan.
+          items:
+            $ref: "#/components/schemas/EventRow"
+        meta:
+          type: object
+          required: [searchedFull]
+          description: Metadata about which search strategies were used.
+          properties:
+            searchedFull:
+              type: boolean
+              description: >
+                True when the full-content scan was also run (i.e., FTS5 returned
+                fewer than 10 results). False when FTS5 alone provided sufficient
+                results.
+              example: false
 
     BroadcastEvent:
       type: object

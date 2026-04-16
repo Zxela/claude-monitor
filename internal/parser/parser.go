@@ -15,6 +15,20 @@ import (
 
 const maxContentPreview = 200
 
+// previewMaxLength is the runtime-configurable preview truncation limit.
+// Default matches maxContentPreview. Updated via SetPreviewMaxLength.
+var previewMaxLength atomic.Int64
+
+func init() {
+	previewMaxLength.Store(maxContentPreview)
+}
+
+// SetPreviewMaxLength updates the content preview truncation length at runtime.
+// Safe to call concurrently; takes effect on the next parse.
+func SetPreviewMaxLength(n int) {
+	previewMaxLength.Store(int64(n))
+}
+
 // rawMessage mirrors the on-disk JSONL structure. Content can be a string or
 // an array of content blocks, so we capture it as raw JSON for flexible decoding.
 type rawMessage struct {
@@ -326,8 +340,9 @@ func buildBaseEvent(raw *rawMessage) *Event {
 	if raw.Type == "summary" {
 		msg.Subtype = "compact"
 		if raw.Summary != "" {
-			msg.ContentText = truncate(raw.Summary, maxContentPreview)
-			if len([]rune(raw.Summary)) > maxContentPreview {
+			limit := int(previewMaxLength.Load())
+			msg.ContentText = truncate(raw.Summary, limit)
+			if len([]rune(raw.Summary)) > limit {
 				msg.FullContent = raw.Summary
 			}
 		} else {
@@ -496,10 +511,11 @@ func extractContent(raw json.RawMessage) contentInfo {
 	// Try plain string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		if len([]rune(s)) <= maxContentPreview {
+		limit := int(previewMaxLength.Load())
+		if len([]rune(s)) <= limit {
 			return contentInfo{text: s}
 		}
-		return contentInfo{text: truncate(s, maxContentPreview), fullText: s}
+		return contentInfo{text: truncate(s, limit), fullText: s}
 	}
 
 	// Try array of content blocks.
@@ -514,8 +530,9 @@ func extractContent(raw json.RawMessage) contentInfo {
 		switch b.Type {
 		case "text":
 			if b.Text != "" && info.text == "" {
-				info.text = truncate(b.Text, maxContentPreview)
-				if len([]rune(b.Text)) > maxContentPreview {
+				limit := int(previewMaxLength.Load())
+				info.text = truncate(b.Text, limit)
+				if len([]rune(b.Text)) > limit {
 					info.fullText = b.Text
 				}
 			}
@@ -609,8 +626,9 @@ func extractContent(raw json.RawMessage) contentInfo {
 					resultText = b.Text
 				}
 				if resultText != "" {
-					info.text = truncate(resultText, maxContentPreview)
-					if len([]rune(resultText)) > maxContentPreview {
+					limit := int(previewMaxLength.Load())
+					info.text = truncate(resultText, limit)
+					if len([]rune(resultText)) > limit {
 						info.fullText = resultText
 					}
 				} else {

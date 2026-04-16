@@ -395,6 +395,64 @@ func handleSearchFull(historyDB *store.DB) http.HandlerFunc {
 	}
 }
 
+// handleSearchCombined serves GET /api/search/combined.
+// It runs FTS5 first; if fewer than 10 results are returned, it also runs a
+// full-content scan, merges the two result sets (deduplicating by event ID),
+// and returns a wrapper with a meta.searchedFull boolean so callers can tell
+// whether the slower path was exercised.
+func handleSearchCombined(historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"results":[],"meta":{"searchedFull":false}}`))
+			return
+		}
+		limit := defaultPageLimit
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+
+		ftsResults, err := historyDB.SearchFTS(query, limit)
+		if err != nil {
+			log.Printf("combined search FTS error: %v", err)
+			writeJSONError(w, "search failed", http.StatusInternalServerError)
+			return
+		}
+		if ftsResults == nil {
+			ftsResults = []store.EventRow{}
+		}
+
+		searchedFull := false
+		if len(ftsResults) < 10 {
+			fullResults, err := historyDB.SearchFullContent(query, limit)
+			if err != nil {
+				log.Printf("combined search full error: %v", err)
+				writeJSONError(w, "search failed", http.StatusInternalServerError)
+				return
+			}
+			searchedFull = true
+
+			// Merge, deduplicating by event ID.
+			seen := make(map[int64]bool, len(ftsResults))
+			for _, r := range ftsResults {
+				seen[r.ID] = true
+			}
+			for _, r := range fullResults {
+				if !seen[r.ID] {
+					seen[r.ID] = true
+					ftsResults = append(ftsResults, r)
+				}
+			}
+		}
+
+		writeJSON(w, map[string]any{
+			"results": ftsResults,
+			"meta":    map[string]bool{"searchedFull": searchedFull},
+		})
+	}
+}
+
 // handleSessionEvents serves GET /api/sessions/{id}/events.
 func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -499,6 +557,7 @@ func handleSettings(historyDB *store.DB) http.HandlerFunc {
 var validSettingKeys = map[string]bool{
 	"retention_hot_days":  true,
 	"retention_warm_days": true,
+	"preview_max_length":  true,
 }
 
 // handleSettingsUpdate serves PUT /api/settings/{key}.
@@ -517,9 +576,23 @@ func handleSettingsUpdate(historyDB *store.DB) http.HandlerFunc {
 			writeJSONError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
+		// Key-specific validation.
+		if key == "preview_max_length" {
+			n, err := strconv.Atoi(body.Value)
+			if err != nil || n < 50 || n > 2000 {
+				writeJSONError(w, "preview_max_length must be an integer between 50 and 2000", http.StatusBadRequest)
+				return
+			}
+		}
 		if err := historyDB.SetSetting(key, body.Value); err != nil {
 			writeJSONError(w, "failed to update setting", http.StatusInternalServerError)
 			return
+		}
+		// Apply preview_max_length live so new parses use the updated value immediately.
+		if key == "preview_max_length" {
+			if n, err := strconv.Atoi(body.Value); err == nil {
+				parser.SetPreviewMaxLength(n)
+			}
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	}
