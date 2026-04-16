@@ -225,6 +225,25 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
     });
   }
 
+  // Thinking block: show collapsed <details> when thinkingContent is present
+  if (msg.thinkingContent) {
+    const details = document.createElement('details');
+    details.className = 'thinking-block';
+    details.style.cssText =
+      'margin-top:4px;padding:4px 8px;border-left:2px solid #555;color:#888;font-size:11px;';
+    const summary = document.createElement('summary');
+    summary.textContent = '💭 thinking';
+    summary.style.cssText = 'cursor:pointer;user-select:none;';
+    const pre = document.createElement('pre');
+    pre.className = 'thinking-text';
+    pre.style.cssText =
+      'margin:4px 0 0;white-space:pre-wrap;word-break:break-word;font-size:10px;color:#777;max-height:400px;overflow-y:auto;';
+    pre.textContent = msg.thinkingContent;
+    details.appendChild(summary);
+    details.appendChild(pre);
+    el.appendChild(details);
+  }
+
   // Agent entries: click navigate arrow to go to the subagent session
   if (isAgentEntry) {
     const navBtn = el.querySelector('.fe-navigate');

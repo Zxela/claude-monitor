@@ -126,7 +126,8 @@ type Event struct {
 	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
 	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
 	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
-	TeamName     string    `json:"teamName,omitempty"`     // team name for team agents
+	TeamName        string    `json:"teamName,omitempty"`        // team name for team agents
+	ThinkingContent string    `json:"thinkingContent,omitempty"` // full text from thinking blocks
 	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
 	// Tool result metadata (from toolUseResult on user lines)
 	DurationMs      *int64  `json:"durationMs,omitempty"`
@@ -424,6 +425,7 @@ func applyContentData(msg *Event, raw *rawMessage) {
 	msg.ToolDetail = ci.toolDetail
 	msg.ToolUseID = ci.toolUseID
 	msg.ForToolUseID = ci.forToolUseID
+	msg.ThinkingContent = ci.thinkingContent
 	msg.IsAgent = msg.ToolName == "Agent"
 	msg.IsError = msg.IsError || ci.isError
 
@@ -470,14 +472,15 @@ type toolUseEntry struct {
 
 // contentInfo bundles everything extracted from a content field.
 type contentInfo struct {
-	text         string // preview text (truncated)
-	toolName     string
-	fullText     string // untruncated content
-	toolDetail   string
-	toolUseID    string         // first tool_use block ID
-	toolUseAll   []toolUseEntry // all tool_use blocks (for batched calls)
-	forToolUseID string         // tool_use_id from tool_result block
-	isError      bool           // true if tool_result has is_error or error content
+	text            string // preview text (truncated)
+	toolName        string
+	fullText        string // untruncated content
+	toolDetail      string
+	toolUseID       string         // first tool_use block ID
+	toolUseAll      []toolUseEntry // all tool_use blocks (for batched calls)
+	forToolUseID    string         // tool_use_id from tool_result block
+	isError         bool           // true if tool_result has is_error or error content
+	thinkingContent string         // full text from thinking blocks
 }
 
 // extractContent attempts to decode content as a string first, then as a
@@ -514,6 +517,14 @@ func extractContent(raw json.RawMessage) contentInfo {
 				}
 			}
 		case "thinking":
+			if b.Text != "" {
+				if info.thinkingContent == "" {
+					info.thinkingContent = b.Text
+				}
+				if info.fullText == "" {
+					info.fullText = b.Text
+				}
+			}
 			if info.text == "" {
 				info.text = "[thinking...]"
 			}

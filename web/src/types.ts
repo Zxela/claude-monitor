@@ -43,6 +43,7 @@ export interface Event {
   role: string;
   contentPreview: string;
   fullContent?: string;
+  thinkingContent?: string;
   toolName?: string;
   toolDetail?: string;
   costUSD: number;

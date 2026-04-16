@@ -441,10 +441,10 @@ function appendMessage(msg: Event, opts: { showSessionId?: string } = {}): void 
   // Suppress thinking-only assistant messages — they're streaming intermediates
   // that will be replaced by the actual response with the same messageId.
   // These have no contentPreview text (renderer would fall back to "[thinking...]")
-  // and no tool info. Keep them if they have expandable fullContent.
+  // and no tool info. Keep them if they have expandable fullContent or thinkingContent.
   if (msg.role === 'assistant' && !msg.toolName && !msg.isAgent) {
     const preview = (msg.contentPreview || '').replace(/^\[thinking\.\.\.\]$/, '');
-    if (!preview && !msg.fullContent) {
+    if (!preview && !msg.fullContent && !msg.thinkingContent) {
       return;
     }
   }
