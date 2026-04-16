@@ -99,6 +99,7 @@ jobs:
   build-binaries:
     permissions:
       contents: write
+      pull-requests: write
     needs: release-please
     if: needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-latest
