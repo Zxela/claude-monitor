@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.1](https://github.com/Zxela/claude-monitor/compare/v3.3.0...v3.3.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* handle all toolUseResult shapes — string, array, and object ([276634c](https://github.com/Zxela/claude-monitor/commit/276634cc8722a5b65a8bb153647703d944cc6abf))
+
 ## [3.3.0](https://github.com/Zxela/claude-monitor/compare/v3.2.0...v3.3.0) (2026-04-16)
 
 
