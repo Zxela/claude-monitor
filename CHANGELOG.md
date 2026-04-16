@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.3.0](https://github.com/Zxela/claude-monitor/compare/v3.2.0...v3.3.0) (2026-04-16)
+
+
+### Features
+
+* add /api/search/combined endpoint that falls back to full scan ([9c2e719](https://github.com/Zxela/claude-monitor/commit/9c2e71930f4800edc4a6cc1cbeb061781ac777d1))
+* deep dive fixes — combined search, configurable preview length ([87f9b5d](https://github.com/Zxela/claude-monitor/commit/87f9b5d6fbdef428d74ef263118a73830a7f2820))
+* make content preview length configurable via settings API ([505fe4b](https://github.com/Zxela/claude-monitor/commit/505fe4b252b1e11a2fb9c70c416213b70a181140))
+
 ## [3.2.0](https://github.com/Zxela/claude-monitor/compare/v3.1.3...v3.2.0) (2026-04-16)
 
 
