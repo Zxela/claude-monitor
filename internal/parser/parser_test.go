@@ -719,3 +719,36 @@ func TestParseLine_ToolResultNoErrorsFalsePositive(t *testing.T) {
 		t.Error("IsError should be false for 'No errors found' (false positive)")
 	}
 }
+
+func TestParseLine_ToolUseResultAsString(t *testing.T) {
+	t.Parallel()
+	// toolUseResult is sometimes a plain string in newer Claude JSONL — should not crash
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"ok","tool_use_id":"tu_str"}]},"toolUseResult":"some plain string output","sessionId":"sess-str","uuid":"uuid-str","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error parsing string toolUseResult: %v", err)
+	}
+	// metadata fields should be zero — no duration/tokens extracted from a string
+	if msg.DurationMs != nil {
+		t.Error("DurationMs should be nil when toolUseResult is a string")
+	}
+	if msg.AgentType != "" {
+		t.Error("AgentType should be empty when toolUseResult is a string")
+	}
+}
+
+func TestParseLine_ToolUseResultAsObject(t *testing.T) {
+	t.Parallel()
+	// toolUseResult as a structured object should populate metadata fields
+	line := []byte(`{"type":"human","message":{"role":"user","content":[{"type":"tool_result","content":"ok","tool_use_id":"tu_obj"}]},"toolUseResult":{"durationMs":123,"agentType":"general-purpose","success":true},"sessionId":"sess-obj","uuid":"uuid-obj","timestamp":"2024-01-01T00:00:00Z"}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error parsing object toolUseResult: %v", err)
+	}
+	if msg.DurationMs == nil || *msg.DurationMs != 123 {
+		t.Errorf("DurationMs should be 123, got %v", msg.DurationMs)
+	}
+	if msg.AgentType != "general-purpose" {
+		t.Errorf("AgentType should be 'general-purpose', got %q", msg.AgentType)
+	}
+}
