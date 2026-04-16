@@ -105,9 +105,6 @@ func (p *Pipeline) resolvePendingLinks() {
 
 // Process handles a single watcher event through the full pipeline.
 func (p *Pipeline) Process(ev watcher.Event) {
-	// Resolve any deferred parent links whose parent session has now appeared.
-	p.resolvePendingLinks()
-
 	// Stage 1: Parse
 	event, err := parser.ParseLine(ev.Line)
 	if err != nil {
@@ -168,6 +165,10 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	if sess.ParentID != "" {
 		p.sessions.LinkChild(sess.ParentID, ev.SessionID)
 	}
+
+	// Resolve any deferred child→parent links now that this session exists in the store.
+	// Must run AFTER the Upsert above so the current session is visible to lookups.
+	p.resolvePendingLinks()
 
 	// Stage 4a: Broadcast (immediate)
 	if p.broadcast != nil && !ev.Bootstrap {
