@@ -209,12 +209,7 @@ func SetPricingTable(dbPricing map[string]ExternalPricing) {
 	}
 	// Overwrite / extend with DB values.
 	for prefix, p := range dbPricing {
-		merged[prefix] = modelPricing{
-			InputPerMTok:       p.InputPerMTok,
-			OutputPerMTok:      p.OutputPerMTok,
-			CacheReadPerMTok:   p.CacheReadPerMTok,
-			CacheCreatePerMTok: p.CacheCreatePerMTok,
-		}
+		merged[prefix] = modelPricing(p)
 	}
 	activePricingTableAtomic.Store(merged)
 }

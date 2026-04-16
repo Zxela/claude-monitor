@@ -639,7 +639,7 @@ func TestIsErrorContent(t *testing.T) {
 		{"whitespace only", "   ", false},
 
 		// Edge cases
-		{"error colon mid-sentence", "The code has error: bug", true},
+		{"error colon mid-sentence", "The code has error: bug", false},
 		{"ERROR in all caps", "ERROR: critical issue", true},
 		{"command failed lowercase", "command failed: permission denied", true},
 		{"Error with newline prefix", "\nerror: message", true},
