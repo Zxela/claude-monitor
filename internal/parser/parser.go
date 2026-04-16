@@ -375,9 +375,10 @@ func applyToolResultMetadata(msg *Event, raw *rawMessage) {
 	if len(raw.ToolUseResult) == 0 {
 		return
 	}
-	// toolUseResult is sometimes a plain string (e.g. tool output text) rather
-	// than a structured metadata object. Detect and skip gracefully.
-	if len(raw.ToolUseResult) > 0 && raw.ToolUseResult[0] == '"' {
+	// toolUseResult can be a plain string or array rather than the expected
+	// metadata object — skip any non-object value gracefully.
+	first := raw.ToolUseResult[0]
+	if first != '{' {
 		return
 	}
 	var tr rawToolResult
