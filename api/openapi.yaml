@@ -562,6 +562,46 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/pricing:
+    get:
+      tags: [settings]
+      summary: List all model pricing
+      description: >
+        Returns all model pricing entries currently stored in the database,
+        keyed by model prefix. The response is a JSON object where each key
+        is a model prefix string and the value contains the four per-million-token
+        price fields.
+      operationId: listModelPricing
+      responses:
+        "200":
+          description: Map of model prefix to pricing
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  required: [input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok]
+                  properties:
+                    input_per_mtok:
+                      type: number
+                      description: Input token cost per million tokens (USD).
+                      example: 5.0
+                    output_per_mtok:
+                      type: number
+                      description: Output token cost per million tokens (USD).
+                      example: 25.0
+                    cache_read_per_mtok:
+                      type: number
+                      description: Cache read token cost per million tokens (USD).
+                      example: 0.5
+                    cache_create_per_mtok:
+                      type: number
+                      description: Cache creation token cost per million tokens (USD).
+                      example: 6.25
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/pricing/{model_prefix}:
     put:
       tags: [settings]

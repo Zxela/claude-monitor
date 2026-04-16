@@ -354,20 +354,10 @@ Examples:
 	}
 
 	// Load model pricing from DB and initialise the parser's active pricing table.
-	if dbPricing, err := historyDB.AllModelPricing(); err != nil {
+	if err := applyDBPricingToParser(historyDB); err != nil {
 		log.Printf("warning: could not load model pricing from DB: %v", err)
 	} else {
-		converted := make(map[string]parser.ExternalPricing, len(dbPricing))
-		for prefix, p := range dbPricing {
-			converted[prefix] = parser.ExternalPricing{
-				InputPerMTok:       p.InputPerMTok,
-				OutputPerMTok:      p.OutputPerMTok,
-				CacheReadPerMTok:   p.CacheReadPerMTok,
-				CacheCreatePerMTok: p.CacheCreatePerMTok,
-			}
-		}
-		parser.SetPricingTable(converted)
-		log.Printf("loaded %d model pricing entries from DB", len(dbPricing))
+		log.Printf("loaded model pricing entries from DB")
 	}
 
 	// Repo resolver with persisted cwd→repo cache.
@@ -552,6 +542,7 @@ Examples:
 	mux.HandleFunc("GET /api/sessions/{id}/replay", handleSessionReplay(historyDB))
 	mux.HandleFunc("GET /api/settings", handleSettings(historyDB))
 	mux.HandleFunc("PUT /api/settings/{key}", handleSettingsUpdate(historyDB))
+	mux.HandleFunc("GET /api/pricing", handlePricingGet(historyDB))
 	mux.HandleFunc("PUT /api/pricing/{model_prefix}", handlePricingUpdate(historyDB))
 	mux.HandleFunc("GET /api/storage", handleStorage(historyDB))
 	mux.HandleFunc("DELETE /api/cache/repos", handleCacheClear(resolver, historyDB))

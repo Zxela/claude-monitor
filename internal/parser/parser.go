@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -234,9 +235,16 @@ func lookupPricing(model string) (modelPricing, bool) {
 		return p, true
 	}
 	// Prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001").
-	for key, pricing := range table {
+	// Sort keys by length descending so the most-specific prefix wins when
+	// multiple prefixes could match (e.g. "claude-haiku-4" vs "claude-haiku-4-5").
+	keys := make([]string, 0, len(table))
+	for k := range table {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	for _, key := range keys {
 		if len(model) > len(key) && model[:len(key)] == key {
-			return pricing, true
+			return table[key], true
 		}
 	}
 	return defaultPricing, false

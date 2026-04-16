@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -604,6 +605,32 @@ func handleVersion() http.HandlerFunc {
 	}
 }
 
+// applyDBPricingToParser loads all model pricing from the DB and applies it to the
+// parser's active pricing table. It is used both at startup (main.go) and after
+// each upsert (handlePricingUpdate) to keep the in-memory table in sync.
+func applyDBPricingToParser(historyDB *store.DB) error {
+	dbPricing, err := historyDB.AllModelPricing()
+	if err != nil {
+		return err
+	}
+	converted := make(map[string]parser.ExternalPricing, len(dbPricing))
+	for k, v := range dbPricing {
+		converted[k] = parser.ExternalPricing{
+			InputPerMTok:       v.InputPerMTok,
+			OutputPerMTok:      v.OutputPerMTok,
+			CacheReadPerMTok:   v.CacheReadPerMTok,
+			CacheCreatePerMTok: v.CacheCreatePerMTok,
+		}
+	}
+	parser.SetPricingTable(converted)
+	return nil
+}
+
+// isValidPrice returns true when v is a finite, non-negative number.
+func isValidPrice(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0
+}
+
 // handlePricingUpdate serves PUT /api/pricing/{model_prefix}.
 // It persists new or updated pricing for a model prefix and immediately applies it
 // to the parser's active pricing table for subsequent cost computations.
@@ -612,6 +639,10 @@ func handlePricingUpdate(historyDB *store.DB) http.HandlerFunc {
 		prefix := r.PathValue("model_prefix")
 		if prefix == "" {
 			writeJSONError(w, "model_prefix is required", http.StatusBadRequest)
+			return
+		}
+		if len(prefix) < 5 {
+			writeJSONError(w, "model_prefix must be at least 5 characters", http.StatusBadRequest)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
@@ -623,6 +654,21 @@ func handlePricingUpdate(historyDB *store.DB) http.HandlerFunc {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSONError(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		// Validate: all price fields must be finite and non-negative.
+		switch {
+		case !isValidPrice(body.InputPerMTok):
+			writeJSONError(w, "input_per_mtok must be a finite non-negative number", http.StatusBadRequest)
+			return
+		case !isValidPrice(body.OutputPerMTok):
+			writeJSONError(w, "output_per_mtok must be a finite non-negative number", http.StatusBadRequest)
+			return
+		case !isValidPrice(body.CacheReadPerMTok):
+			writeJSONError(w, "cache_read_per_mtok must be a finite non-negative number", http.StatusBadRequest)
+			return
+		case !isValidPrice(body.CacheCreatePerMTok):
+			writeJSONError(w, "cache_create_per_mtok must be a finite non-negative number", http.StatusBadRequest)
 			return
 		}
 		p := store.ModelPricing{
@@ -637,19 +683,29 @@ func handlePricingUpdate(historyDB *store.DB) http.HandlerFunc {
 			return
 		}
 		// Reload all pricing from DB and re-apply to parser.
-		if dbPricing, err := historyDB.AllModelPricing(); err == nil {
-			converted := make(map[string]parser.ExternalPricing, len(dbPricing))
-			for k, v := range dbPricing {
-				converted[k] = parser.ExternalPricing{
-					InputPerMTok:       v.InputPerMTok,
-					OutputPerMTok:      v.OutputPerMTok,
-					CacheReadPerMTok:   v.CacheReadPerMTok,
-					CacheCreatePerMTok: v.CacheCreatePerMTok,
-				}
-			}
-			parser.SetPricingTable(converted)
+		if err := applyDBPricingToParser(historyDB); err != nil {
+			log.Printf("AllModelPricing after upsert: %v — in-memory pricing may be stale", err)
+			writeJSONError(w, "pricing persisted but failed to reload in-memory table", http.StatusInternalServerError)
+			return
 		}
 		writeJSON(w, map[string]bool{"ok": true})
+	}
+}
+
+// handlePricingGet serves GET /api/pricing.
+// It returns all current model pricing entries from the database as JSON.
+func handlePricingGet(historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		dbPricing, err := historyDB.AllModelPricing()
+		if err != nil {
+			log.Printf("AllModelPricing: %v", err)
+			writeJSONError(w, "failed to retrieve pricing", http.StatusInternalServerError)
+			return
+		}
+		if dbPricing == nil {
+			dbPricing = map[string]store.ModelPricing{}
+		}
+		writeJSON(w, dbPricing)
 	}
 }
 
