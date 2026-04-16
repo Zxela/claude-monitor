@@ -153,6 +153,7 @@ jobs:
       - name: Update Homebrew formula
         env:
           GH_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
         run: |
           VERSION="${TAG_NAME}"
           VERSION_NUM="${VERSION#v}"
@@ -176,18 +177,37 @@ jobs:
           BRANCH="chore/update-formula-${VERSION}"
           git checkout -b "${BRANCH}"
           git add Formula/claude-monitor.rb
-          git commit -m "chore: update Homebrew formula for ${VERSION}" || echo "::warning::No formula changes to commit"
-          git push origin "${BRANCH}" || echo "::warning::Failed to push formula branch"
-          gh pr create --title "chore: update Homebrew formula for ${VERSION}" \
-            --body "Auto-generated formula update for ${VERSION}" \
-            --base main --head "${BRANCH}" || echo "::warning::Failed to create formula PR"
+          git commit -m "chore: update Homebrew formula for ${VERSION}"
 
-          # Also update the Homebrew tap repo
-          git clone https://x-access-token:${GH_TOKEN}@github.com/Zxela/homebrew-tap.git /tmp/tap
+          git push origin "${BRANCH}"
+
+          # Create PR only if one doesn't already exist for this branch
+          EXISTING_PR=$(gh pr list --head "${BRANCH}" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -z "${EXISTING_PR}" ]; then
+            gh pr create --title "chore: update Homebrew formula for ${VERSION}" \
+              --body "Auto-generated formula update for ${VERSION}" \
+              --base main --head "${BRANCH}"
+          else
+            echo "PR #${EXISTING_PR} already exists for ${BRANCH}, skipping creation"
+          fi
+
+          # Update the Homebrew tap repo using HOMEBREW_TAP_PAT (a PAT with write access
+          # to Zxela/homebrew-tap — github.token is scoped to this repo only).
+          # Add secret HOMEBREW_TAP_PAT to this repo's settings to enable tap updates.
+          if [ -z "${HOMEBREW_TAP_PAT}" ]; then
+            echo "::error::HOMEBREW_TAP_PAT secret is not set — tap repo was NOT updated. Add a PAT with write access to Zxela/homebrew-tap as a repository secret named HOMEBREW_TAP_PAT."
+            exit 1
+          fi
+
+          git clone https://x-access-token:${HOMEBREW_TAP_PAT}@github.com/Zxela/homebrew-tap.git /tmp/tap
           cp Formula/claude-monitor.rb /tmp/tap/Formula/claude-monitor.rb
           cd /tmp/tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/claude-monitor.rb
-          git commit -m "Update claude-monitor to ${VERSION}" || echo "::warning::No tap changes to commit"
-          git push origin main || echo "::warning::Failed to push to homebrew-tap"
+          if git diff --cached --quiet; then
+            echo "No tap formula changes to commit"
+          else
+            git commit -m "Update claude-monitor to ${VERSION}"
+            git push origin main
+          fi
