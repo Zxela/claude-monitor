@@ -187,7 +187,7 @@ function updateWindowButtons(): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('stats')) {
+  if (changed.has('stats') || changed.has('budgetThreshold') || changed.has('statsWindow')) {
     updateStats();
   }
   if (changed.has('statsWindow')) {
@@ -218,6 +218,13 @@ function setVal(el: HTMLElement | null, text: string): void {
   el.classList.add('flash');
 }
 
+const WINDOW_LABELS: Record<string, string> = {
+  today: 'today',
+  week: 'this week',
+  month: 'this month',
+  all: 'all time',
+};
+
 function updateStats(): void {
   const stats = state.stats;
   if (!stats) return;
@@ -226,7 +233,59 @@ function updateStats(): void {
     (s) => s.isActive && !s.parentId,
   ).length;
   setVal(statActive, String(activeTopLevel));
-  setVal(statCost, `$${stats.totalCost.toFixed(0)}`);
+
+  // Show window label in muted text when a budget is set
+  if (statCost) {
+    const costStr = `$${stats.totalCost.toFixed(0)}`;
+    if (state.budgetThreshold) {
+      const label = WINDOW_LABELS[state.statsWindow] ?? state.statsWindow;
+      if (statCost.childNodes.length === 1 && statCost.firstChild?.nodeType === Node.TEXT_NODE) {
+        // First time adding the label span — rebuild
+        statCost.textContent = '';
+      }
+      // Find or create cost text node and label span
+      let textNode = statCost.querySelector('.cost-amount');
+      let labelSpan = statCost.querySelector('.cost-window-label');
+      if (!textNode) {
+        textNode = document.createElement('span');
+        textNode.className = 'cost-amount';
+        statCost.textContent = '';
+        statCost.appendChild(textNode);
+      }
+      if (!labelSpan) {
+        labelSpan = document.createElement('span');
+        labelSpan.className = 'cost-window-label';
+        statCost.appendChild(labelSpan);
+      }
+      if (textNode.textContent !== costStr) {
+        textNode.textContent = costStr;
+        // Flash animation on change
+        statCost.classList.remove('flash');
+        void statCost.offsetWidth;
+        statCost.classList.add('flash');
+      }
+      if (labelSpan.textContent !== ` ${label}`) {
+        labelSpan.textContent = ` ${label}`;
+      }
+    } else {
+      // No budget — plain text, remove label span if present
+      const labelSpan = statCost.querySelector('.cost-window-label');
+      if (labelSpan) labelSpan.remove();
+      const textNode = statCost.querySelector('.cost-amount');
+      if (textNode) {
+        if (textNode.textContent !== costStr) {
+          statCost.textContent = '';
+          statCost.textContent = costStr;
+          statCost.classList.remove('flash');
+          void statCost.offsetWidth;
+          statCost.classList.add('flash');
+        }
+      } else {
+        setVal(statCost, costStr);
+      }
+    }
+  }
+
   setVal(statCache, stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—');
   setVal(statRate, stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/min` : '—');
 }
