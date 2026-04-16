@@ -476,8 +476,8 @@ func TestParseLine_RealWorldSample(t *testing.T) {
 	if msg.CacheReadTokens != 128 {
 		t.Errorf("CacheReadTokens: got %d, want 128", msg.CacheReadTokens)
 	}
-	// Cost computed from tokens: 512*3/1e6 + 64*15/1e6 + 128*0.30/1e6
-	expectedCost := float64(512)*3.0/1e6 + float64(64)*15.0/1e6 + float64(128)*0.30/1e6
+	// Cost computed from tokens using claude-opus-4-5 pricing (5.0/25.0/0.50 per MTok)
+	expectedCost := float64(512)*5.0/1e6 + float64(64)*25.0/1e6 + float64(128)*0.50/1e6
 	if math.Abs(msg.CostUSD-expectedCost) > 1e-12 {
 		t.Errorf("CostUSD: got %g, want %g", msg.CostUSD, expectedCost)
 	}

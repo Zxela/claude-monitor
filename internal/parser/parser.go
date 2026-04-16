@@ -187,7 +187,9 @@ type modelPricing struct {
 
 // pricingTable is the compile-time fallback used when the DB is empty or unavailable.
 var pricingTable = map[string]modelPricing{
+	"claude-opus-4-7":   {5.0, 25.0, 0.50, 6.25},
 	"claude-opus-4-6":   {5.0, 25.0, 0.50, 6.25},
+	"claude-opus-4-5":   {5.0, 25.0, 0.50, 6.25},
 	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
 	"claude-haiku-4-5":  {1.0, 5.0, 0.10, 1.25},
 }
@@ -262,8 +264,9 @@ func lookupPricing(model string) (modelPricing, bool) {
 
 func computeCost(model string, usage rawUsage) float64 {
 	p, found := lookupPricing(model)
-	if !found && model != "" {
+	if !found && model != "" && model != "<synthetic>" {
 		// Warn once per unknown model per process run.
+		// "<synthetic>" is an internal Claude Code model string; suppress its warning.
 		if _, alreadyWarned := warnedModels.LoadOrStore(model, true); !alreadyWarned {
 			log.Printf("[WARN] unknown model pricing for %q, using Sonnet default", model)
 		}
