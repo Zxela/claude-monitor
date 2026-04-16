@@ -370,15 +370,43 @@ func applySystemMetadata(msg *Event, raw *rawMessage) {
 }
 
 // applyToolResultMetadata extracts metadata from the toolUseResult JSON field
-// found on user/tool_result lines.
+// found on user/tool_result lines. The field can be one of three shapes:
+//   - object {"durationMs":…} — full metadata, extract all fields
+//   - string "raw output"     — plain text output, use as content preview fallback
+//   - array  […]              — content blocks, extract text from each block
 func applyToolResultMetadata(msg *Event, raw *rawMessage) {
 	if len(raw.ToolUseResult) == 0 {
 		return
 	}
-	// toolUseResult can be a plain string or array rather than the expected
-	// metadata object — skip any non-object value gracefully.
-	first := raw.ToolUseResult[0]
-	if first != '{' {
+	switch raw.ToolUseResult[0] {
+	case '"':
+		// Plain string: raw tool output text. Use as content preview if not already set.
+		var s string
+		if err := json.Unmarshal(raw.ToolUseResult, &s); err == nil && msg.ContentText == "" {
+			msg.ContentText = truncate(s, int(previewMaxLength.Load()))
+			if len([]rune(s)) > int(previewMaxLength.Load()) {
+				msg.FullContent = s
+			}
+		}
+		return
+	case '[':
+		// Array of content blocks: extract text from each block.
+		var blocks []contentBlock
+		if err := json.Unmarshal(raw.ToolUseResult, &blocks); err == nil && msg.ContentText == "" {
+			for _, b := range blocks {
+				if b.Type == "text" && b.Text != "" {
+					msg.ContentText = truncate(b.Text, int(previewMaxLength.Load()))
+					if len([]rune(b.Text)) > int(previewMaxLength.Load()) {
+						msg.FullContent = b.Text
+					}
+					break
+				}
+			}
+		}
+		return
+	case '{':
+		// Object: full metadata struct — fall through to unmarshal below.
+	default:
 		return
 	}
 	var tr rawToolResult
