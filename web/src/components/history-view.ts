@@ -3,13 +3,21 @@ import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions } from '../api';
-import {
-  formatDurationSecs,
-  formatTokens,
-  sessionDisplayName,
-  effectiveInputTokens,
-} from '../utils';
+import { formatDurationSecs, formatTokens, effectiveInputTokens } from '../utils';
 import '../styles/views.css';
+
+function sessionIdentifier(s: Session): string {
+  if (s.sessionName) return s.sessionName;
+  return s.id.slice(0, 8);
+}
+
+function projectLabel(s: Session): string {
+  if (s.cwd) {
+    const parts = s.cwd.replace(/\/+$/, '').split('/');
+    return parts[parts.length - 1] || s.cwd;
+  }
+  return s.repoId || '';
+}
 
 let container: HTMLElement | null = null;
 let data: Session[] = [];
@@ -26,7 +34,8 @@ const COLUMNS: Column[] = [
     cls: 'col-dim',
     fmt: (r) => (r.lastActive ? new Date(r.lastActive).toLocaleString() : ''),
   },
-  { key: 'projectName', label: 'Name', fmt: (r) => sessionDisplayName(r) },
+  { key: 'session', label: 'Session', fmt: sessionIdentifier },
+  { key: 'project', label: 'Project', cls: 'col-dim', fmt: projectLabel },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: (r) => `$${r.totalCost.toFixed(2)}` },
   {
     key: 'duration',
@@ -340,7 +349,8 @@ function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
     const td = document.createElement('td');
     td.textContent = col.fmt(row);
     if (col.cls) td.className = col.cls;
-    if (col.key === 'projectName') td.title = row.taskDescription || '';
+    if (col.key === 'session') td.title = row.taskDescription || '';
+    if (col.key === 'project') td.title = row.repoId || row.cwd || '';
     tr.appendChild(td);
   }
   tr.setAttribute('tabindex', '0');
@@ -367,9 +377,13 @@ function sortData(rows: Session[]): Session[] {
         va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0);
         vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0);
         break;
-      case 'projectName':
-        va = sessionDisplayName(a).toLowerCase();
-        vb = sessionDisplayName(b).toLowerCase();
+      case 'session':
+        va = sessionIdentifier(a).toLowerCase();
+        vb = sessionIdentifier(b).toLowerCase();
+        break;
+      case 'project':
+        va = projectLabel(a).toLowerCase();
+        vb = projectLabel(b).toLowerCase();
         break;
       case 'model':
         va = a.model || '';
