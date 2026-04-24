@@ -270,12 +270,12 @@ Test cases marked with `[LIVE]` require an active Claude Code session running du
 | 12.4 | Session navigation | Arrow up/down navigates sessions. Enter selects. Left/right expands/collapses children | |
 | 12.5 | Filter shortcuts | `1` / `2` / `3` switch active/recent/all filters in session list | |
 | 12.6 | Replay controls | Space=play/pause, R=restart, arrows=step (when replay is open) | |
-| 12.7 | `t` key for table view (POTENTIAL BUG) | Help overlay lists `t` for "Table view" but main.ts has no `t` handler — only `h` for history. Verify: does `t` work or is the help overlay wrong? | |
-| 12.8 | Shortcuts disabled in input | When typing in search box, `g`, `h`, `1`, `2`, `3` etc. type characters, don't trigger view switches | |
+| 12.7 | `t` key for table view | Press `t` -> table view (toggle). Press `t` again -> return to list view | |
+| 12.8 | Shortcuts disabled in form controls | While focused in search input, textarea, repo `<select>`, or other editable controls, shortcuts (`g`, `h`, `a`, `t`, `1`, `2`, `3`) should not trigger view/filter switches | |
 | 12.9 | `/` to focus search | Press `/` outside of input -> search box focuses (handler in topbar.ts) | |
 | 12.10 | Search Escape | While typing in search box, press Escape -> clears search text, closes dropdown, blurs input | |
 | 12.11 | Space on focused card | Space bar on a focused session card -> selects it (via keydown handler). Does NOT trigger page scroll | |
-| 12.12 | Enter toggles selection | Enter on already-selected session -> DEselects it (toggle behavior) | |
+| 12.12 | Enter toggles selection | Enter on already-selected session -> deselects it (toggle behavior) | |
 | 12.13 | Replay keyboard scoping | During replay: Space=play/pause, arrows=step. Without replay: Space does nothing, arrows navigate sessions | |
 
 ---

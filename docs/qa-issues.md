@@ -8,7 +8,7 @@ Tracking issues found during manual QA testing of all frontend features.
 - **Test:** 12.7
 - **Severity:** Low
 - **Description:** Help overlay listed `t` as "Table view" shortcut but `main.ts` had no handler for `t`. Pressing `t` did nothing.
-- **Fix:** Removed `t` entry from help-overlay.ts. Rebuilt frontend + Go binary.
+- **Fix:** Added `t` keyboard handler in `main.ts` to toggle table/list view, keeping help overlay and behavior aligned.
 - **Status:** Fixed
 
 ## Open
