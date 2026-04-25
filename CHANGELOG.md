@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.4.0](https://github.com/Zxela/claude-monitor/compare/v3.3.3...v3.4.0) (2026-04-25)
+
+
+### Features
+
+* split History 'Name' column into Session + Project ([69fa253](https://github.com/Zxela/claude-monitor/commit/69fa25300959decbcab1940ed69d4643f7cde952))
+
+
+### Bug Fixes
+
+* decouple live stats from windowed stats in topbar ([2139e0b](https://github.com/Zxela/claude-monitor/commit/2139e0b45abdcaeece705b3c9bd903aa085e8b7d))
+* topbar live/windowed clarity + history session/project split ([ca37e58](https://github.com/Zxela/claude-monitor/commit/ca37e58dae42e5baa359b177f17da8c963b94af4))
+
 ## [3.3.3](https://github.com/Zxela/claude-monitor/compare/v3.3.2...v3.3.3) (2026-04-16)
 
 
