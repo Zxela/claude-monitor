@@ -29,17 +29,17 @@ export function render(container: HTMLElement): void {
       <span class="brand-diamond">◆</span>
       CLAUDE MONITOR
     </div>
-    <div class="topbar-stat"><span>ACTIVE</span> <span class="val green" data-stat="active">0</span></div>
-    <div class="topbar-stat" title="Total cost across all sessions"><span>TOTAL SPEND</span> <span class="budget-gear" role="button" tabindex="0" aria-label="Open budget and notification settings">⚙</span> <span class="val yellow" data-stat="cost">$0</span>
-      <div class="window-toggle">
+    <div class="topbar-stat" data-scope="live" title="Active sessions right now — always live, not affected by the window filter"><span class="live-dot" aria-hidden="true"></span><span>ACTIVE</span> <span class="val green" data-stat="active">0</span></div>
+    <div class="topbar-stat" data-scope="windowed" title="Total cost — filtered by the window toggle below (today / week / month / all)"><span>TOTAL SPEND</span> <span class="budget-gear" role="button" tabindex="0" aria-label="Open budget and notification settings">⚙</span> <span class="val yellow" data-stat="cost">$0</span>
+      <div class="window-toggle" title="Filters TOTAL SPEND and CACHE HIT">
         <button class="win-btn" data-window="today">TODAY</button>
         <button class="win-btn" data-window="week">WEEK</button>
         <button class="win-btn" data-window="month">MONTH</button>
         <button class="win-btn" data-window="all">ALL</button>
       </div>
     </div>
-    <div class="topbar-stat" title="Weighted cache read percentage across all sessions"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
-    <div class="topbar-stat rate-stat" title="Aggregate cost velocity across all active sessions"><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
+    <div class="topbar-stat" data-scope="windowed" title="Weighted cache read percentage — filtered by the window toggle"><span>CACHE HIT</span> <span class="val" data-stat="cache" style="color:var(--purple)">—</span></div>
+    <div class="topbar-stat rate-stat" data-scope="live" title="Aggregate cost velocity across currently-active sessions — always live, not affected by the window filter"><span class="live-dot" aria-hidden="true"></span><span>$/MIN</span> <span class="val yellow" data-stat="rate">—</span></div>
     <div class="search-box">
       <input type="text" placeholder="Search all sessions..." data-search aria-label="Search sessions" />
     </div>
