@@ -1,30 +1,30 @@
 class ClaudeMonitor < Formula
   desc "Real-time observability dashboard for Claude Code sessions"
   homepage "https://github.com/Zxela/claude-monitor"
-  version "3.3.3"
+  version "3.4.0"
   license "MIT"
 
   on_macos do
     on_intel do
       url "https://github.com/Zxela/claude-monitor/releases/download/v#{version}/claude-monitor-darwin-amd64.tar.gz"
-      sha256 "ad2ad97f41dd6b0ba1cb61d5841b7ac383324a982f48948e320d469b6b27aea6"
+      sha256 "d1ecd631be51e64eee260c4f5d447c40c2eed3dd4dd9d7e111642751ffb2518e"
     end
 
     on_arm do
       url "https://github.com/Zxela/claude-monitor/releases/download/v#{version}/claude-monitor-darwin-arm64.tar.gz"
-      sha256 "23e516df44a3fb88d822180d593a63c4ab443bfaad8843aa10b2f3b39af0fbbe"
+      sha256 "3e7e6dedd86a9805d9421a0d7691712d23467c390333b0bd230c67b9042d60b3"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/Zxela/claude-monitor/releases/download/v#{version}/claude-monitor-linux-amd64.tar.gz"
-      sha256 "e8098877d3bfd6ae9703353eb7e69720217f02dcde650b7e764bd0af3f28427f"
+      sha256 "1539677d4c1d0744adcf6960220aa5496d3bcf558c3f04b1f8f8ec2ed317fd75"
     end
 
     on_arm do
       url "https://github.com/Zxela/claude-monitor/releases/download/v#{version}/claude-monitor-linux-arm64.tar.gz"
-      sha256 "deac04c98190e294d3b83d0a9e4dc43d9e9d1cdf877e731c044b22debfe22ef1"
+      sha256 "bf6d28ea450ac0d665f4d016cb1095d3a0fb74fd3d74fb3b9bd6843940a6004e"
     end
   end
 
