@@ -37,12 +37,6 @@ func TestBuildSessionAutopsyMarkdown(t *testing.T) {
 			ContentPreview: "running tests",
 		},
 		{
-			Type:           "tool_use",
-			ToolName:       "Edit",
-			ToolDetail:     "Updated cmd/claude-monitor/main.go",
-			ContentPreview: "edit file",
-		},
-		{
 			Type:           "error",
 			IsError:        true,
 			ContentPreview: "panic: flaky failure",
@@ -55,7 +49,6 @@ func TestBuildSessionAutopsyMarkdown(t *testing.T) {
 		"**Session ID:** `sess-123`",
 		"**Total cost:** $1.23",
 		"`go test ./...`",
-		"`cmd/claude-monitor/main.go`",
 		"panic: flaky failure",
 	} {
 		if !strings.Contains(md, needle) {

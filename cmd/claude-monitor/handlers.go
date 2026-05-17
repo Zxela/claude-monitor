@@ -552,28 +552,41 @@ func handleSessionAutopsy(sessionStore *session.Store, historyDB *store.DB) http
 }
 
 func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow) string {
-	var sb strings.Builder
-	started := formatRFC3339(sess.StartedAt)
-	ended := formatRFC3339(sess.LastActive)
-	duration := "n/a"
-	if !sess.StartedAt.IsZero() && !sess.LastActive.IsZero() && !sess.LastActive.Before(sess.StartedAt) {
-		duration = fmtDuration(sess.LastActive.Sub(sess.StartedAt))
+	const (
+		maxCommands = 20
+		maxErrors   = 12
+	)
+
+	var commands, errors []string
+	seenCommands := make(map[string]bool)
+	for _, ev := range events {
+		if len(commands) < maxCommands && (strings.EqualFold(ev.ToolName, "bash") || strings.EqualFold(ev.ToolName, "shell")) {
+			cmd := oneLine(firstNonEmpty(ev.ToolDetail, ev.ContentPreview, ev.FullContent))
+			if cmd != "" && !seenCommands[cmd] {
+				seenCommands[cmd] = true
+				commands = append(commands, truncateRunes(cmd, 140))
+			}
+		}
+		if len(errors) < maxErrors && ev.IsError {
+			detail := firstNonEmpty(ev.Stderr, ev.ContentPreview, ev.ToolDetail, ev.FullContent)
+			if detail == "" {
+				detail = "error event"
+			}
+			errors = append(errors, mdInline(truncateRunes(detail, 180)))
+		}
 	}
 
-	commands := collectAutopsyCommands(events, 20)
-	fileTouches := collectAutopsyFileTouches(events, 20)
-	errorLines := collectAutopsyErrors(events, 12)
-	keyEvents := collectAutopsyHighlights(events, 12)
-
+	var sb strings.Builder
 	sb.WriteString("# Session Autopsy\n\n")
 	fmt.Fprintf(&sb, "- **Session ID:** `%s`\n", sess.ID)
 	fmt.Fprintf(&sb, "- **Task:** %s\n", mdInline(sess.TaskDescription))
 	fmt.Fprintf(&sb, "- **Model:** %s\n", mdInline(sess.Model))
 	fmt.Fprintf(&sb, "- **Repo ID:** %s\n", mdInline(sess.RepoID))
 	fmt.Fprintf(&sb, "- **Branch:** %s\n", mdInline(sess.GitBranch))
-	fmt.Fprintf(&sb, "- **Started:** %s\n", mdInline(started))
-	fmt.Fprintf(&sb, "- **Ended:** %s\n", mdInline(ended))
-	fmt.Fprintf(&sb, "- **Duration:** %s\n", mdInline(duration))
+	fmt.Fprintf(&sb, "- **Started:** %s\n", mdInline(formatRFC3339(sess.StartedAt)))
+	fmt.Fprintf(&sb, "- **Ended:** %s\n", mdInline(formatRFC3339(sess.LastActive)))
+	fmt.Fprintf(&sb, "- **Duration:** %s\n", mdInline(sessionDuration(sess)))
+
 	sb.WriteString("\n## Cost & Usage\n\n")
 	fmt.Fprintf(&sb, "- **Total cost:** $%.2f\n", sess.TotalCost)
 	fmt.Fprintf(&sb, "- **Input tokens:** %d\n", sess.InputTokens)
@@ -586,139 +599,36 @@ func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow)
 
 	sb.WriteString("\n## Commands Run\n\n")
 	if len(commands) == 0 {
-		sb.WriteString("_No shell/bash command events captured._\n")
+		sb.WriteString("_No shell command events captured._\n")
 	} else {
-		for _, c := range commands {
-			fmt.Fprintf(&sb, "- `%s`\n", c)
-		}
-	}
-
-	sb.WriteString("\n## Files Touched\n\n")
-	if len(fileTouches) == 0 {
-		sb.WriteString("_No explicit file paths extracted from tool calls._\n")
-	} else {
-		for _, p := range fileTouches {
-			fmt.Fprintf(&sb, "- `%s`\n", p)
-		}
-	}
-
-	sb.WriteString("\n## Key Timeline Events\n\n")
-	if len(keyEvents) == 0 {
-		sb.WriteString("_No notable timeline events captured._\n")
-	} else {
-		for _, line := range keyEvents {
-			fmt.Fprintf(&sb, "- %s\n", line)
+		for _, cmd := range commands {
+			fmt.Fprintf(&sb, "- `%s`\n", cmd)
 		}
 	}
 
 	sb.WriteString("\n## Errors\n\n")
-	if len(errorLines) == 0 {
+	if len(errors) == 0 {
 		sb.WriteString("_No errors recorded._\n")
 	} else {
-		for _, e := range errorLines {
-			fmt.Fprintf(&sb, "- %s\n", e)
+		for _, errLine := range errors {
+			fmt.Fprintf(&sb, "- %s\n", errLine)
 		}
 	}
 
 	return sb.String()
 }
 
-func collectAutopsyCommands(events []store.EventRow, max int) []string {
-	seen := make(map[string]bool)
-	out := make([]string, 0, max)
-	for _, ev := range events {
-		if max > 0 && len(out) >= max {
-			break
-		}
-		if !strings.EqualFold(ev.ToolName, "bash") && !strings.EqualFold(ev.ToolName, "shell") {
-			continue
-		}
-		cmd := strings.TrimSpace(firstNonEmpty(ev.ToolDetail, ev.ContentPreview, ev.FullContent))
-		cmd = strings.Join(strings.Fields(cmd), " ")
-		if cmd == "" || seen[cmd] {
-			continue
-		}
-		seen[cmd] = true
-		out = append(out, truncateRunes(cmd, 140))
-	}
-	return out
-}
-
-func collectAutopsyFileTouches(events []store.EventRow, max int) []string {
-	seen := make(map[string]bool)
-	out := make([]string, 0, max)
-	for _, ev := range events {
-		if max > 0 && len(out) >= max {
-			break
-		}
-		if ev.ToolName == "" || ev.ToolDetail == "" {
-			continue
-		}
-		for _, tok := range strings.Fields(ev.ToolDetail) {
-			if max > 0 && len(out) >= max {
-				break
-			}
-			clean := strings.Trim(tok, ",.;:!\"'`()[]{}")
-			if clean == "" || strings.HasPrefix(clean, "-") || !looksLikePath(clean) || seen[clean] {
-				continue
-			}
-			seen[clean] = true
-			out = append(out, clean)
-		}
-	}
-	return out
-}
-
-func collectAutopsyHighlights(events []store.EventRow, max int) []string {
-	out := make([]string, 0, max)
-	for _, ev := range events {
-		if max > 0 && len(out) >= max {
-			break
-		}
-		if ev.Type == "summary" || ev.IsAgent || ev.ToolName != "" {
-			label := strings.TrimSpace(firstNonEmpty(ev.Type, ev.ToolName, "event"))
-			detail := strings.TrimSpace(firstNonEmpty(ev.ContentPreview, ev.ToolDetail))
-			if detail == "" {
-				continue
-			}
-			out = append(out, fmt.Sprintf("**%s** — %s", mdInline(label), mdInline(truncateRunes(detail, 120))))
-		}
-	}
-	return out
-}
-
-func collectAutopsyErrors(events []store.EventRow, max int) []string {
-	out := make([]string, 0, max)
-	for _, ev := range events {
-		if max > 0 && len(out) >= max {
-			break
-		}
-		if !ev.IsError {
-			continue
-		}
-		detail := strings.TrimSpace(firstNonEmpty(ev.Stderr, ev.ContentPreview, ev.ToolDetail, ev.FullContent))
-		if detail == "" {
-			detail = "error event"
-		}
-		out = append(out, mdInline(truncateRunes(detail, 180)))
-	}
-	return out
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
 		}
 	}
 	return ""
 }
 
-func looksLikePath(v string) bool {
-	if strings.Contains(v, "/") || strings.Contains(v, `\`) {
-		return true
-	}
-	return strings.Contains(v, ".") && len(v) > 2
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func truncateRunes(s string, n int) string {
@@ -733,12 +643,11 @@ func truncateRunes(s string, n int) string {
 }
 
 func mdInline(s string) string {
-	s = strings.TrimSpace(s)
+	s = oneLine(s)
 	if s == "" {
 		return "n/a"
 	}
-	repl := strings.NewReplacer("`", "'", "\n", " ")
-	return repl.Replace(s)
+	return strings.ReplaceAll(s, "`", "'")
 }
 
 func formatRFC3339(t time.Time) string {
@@ -746,6 +655,13 @@ func formatRFC3339(t time.Time) string {
 		return "n/a"
 	}
 	return t.Format(time.RFC3339)
+}
+
+func sessionDuration(sess *session.Session) string {
+	if sess.StartedAt.IsZero() || sess.LastActive.IsZero() || sess.LastActive.Before(sess.StartedAt) {
+		return "n/a"
+	}
+	return fmtDuration(sess.LastActive.Sub(sess.StartedAt))
 }
 
 func fmtDuration(d time.Duration) string {

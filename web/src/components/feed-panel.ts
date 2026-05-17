@@ -2,7 +2,7 @@
 import type { Event, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchSessionAutopsy, fetchSessionEvents, fetchPinnedEvents } from '../api';
+import { fetchSessionEvents, fetchPinnedEvents } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
@@ -249,30 +249,22 @@ function updateHeader(): void {
       }
     });
     const autopsyBtn = headerEl.querySelector('.autopsy-btn');
-    const downloadAutopsy = async () => {
+    const downloadAutopsy = () => {
       if (!state.selectedSessionId) return;
-      try {
-        const md = await fetchSessionAutopsy(state.selectedSessionId);
-        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-        const link = document.createElement('a');
-        const safeId = state.selectedSessionId.replace(/[^a-zA-Z0-9_-]+/g, '-');
-        link.href = URL.createObjectURL(blob);
-        link.download = `claude-monitor-autopsy-${safeId || 'session'}.md`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-      } catch {
-        // Silent fail; feed remains usable.
-      }
+      const link = document.createElement('a');
+      link.href = `/api/sessions/${encodeURIComponent(state.selectedSessionId)}/autopsy`;
+      link.download = '';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     };
     autopsyBtn?.addEventListener('click', () => {
-      void downloadAutopsy();
+      downloadAutopsy();
     });
     autopsyBtn?.addEventListener('keydown', (e) => {
       if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
         e.preventDefault();
-        void downloadAutopsy();
+        downloadAutopsy();
       }
     });
   } else {

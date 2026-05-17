@@ -16,14 +16,6 @@ async function request<T>(url: string): Promise<T> {
   return res.json();
 }
 
-async function requestText(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`);
-  }
-  return res.text();
-}
-
 export async function fetchGroupedSessions(): Promise<GroupedSessions> {
   return request<GroupedSessions>(`/api/sessions?group=activity`);
 }
@@ -96,8 +88,4 @@ export async function fetchSettings(): Promise<Record<string, string>> {
 
 export async function clearRepoCache(): Promise<void> {
   await fetch(`/api/cache/repos`, { method: 'DELETE' });
-}
-
-export async function fetchSessionAutopsy(sessionId: string): Promise<string> {
-  return requestText(`/api/sessions/${sessionId}/autopsy`);
 }
