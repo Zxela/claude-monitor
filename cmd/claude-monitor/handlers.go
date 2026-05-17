@@ -566,30 +566,30 @@ func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow)
 	keyEvents := collectAutopsyHighlights(events, 12)
 
 	sb.WriteString("# Session Autopsy\n\n")
-	sb.WriteString(fmt.Sprintf("- **Session ID:** `%s`\n", sess.ID))
-	sb.WriteString(fmt.Sprintf("- **Task:** %s\n", mdInline(sess.TaskDescription)))
-	sb.WriteString(fmt.Sprintf("- **Model:** %s\n", mdInline(sess.Model)))
-	sb.WriteString(fmt.Sprintf("- **Repo ID:** %s\n", mdInline(sess.RepoID)))
-	sb.WriteString(fmt.Sprintf("- **Branch:** %s\n", mdInline(sess.GitBranch)))
-	sb.WriteString(fmt.Sprintf("- **Started:** %s\n", mdInline(started)))
-	sb.WriteString(fmt.Sprintf("- **Ended:** %s\n", mdInline(ended)))
-	sb.WriteString(fmt.Sprintf("- **Duration:** %s\n", mdInline(duration)))
+	fmt.Fprintf(&sb, "- **Session ID:** `%s`\n", sess.ID)
+	fmt.Fprintf(&sb, "- **Task:** %s\n", mdInline(sess.TaskDescription))
+	fmt.Fprintf(&sb, "- **Model:** %s\n", mdInline(sess.Model))
+	fmt.Fprintf(&sb, "- **Repo ID:** %s\n", mdInline(sess.RepoID))
+	fmt.Fprintf(&sb, "- **Branch:** %s\n", mdInline(sess.GitBranch))
+	fmt.Fprintf(&sb, "- **Started:** %s\n", mdInline(started))
+	fmt.Fprintf(&sb, "- **Ended:** %s\n", mdInline(ended))
+	fmt.Fprintf(&sb, "- **Duration:** %s\n", mdInline(duration))
 	sb.WriteString("\n## Cost & Usage\n\n")
-	sb.WriteString(fmt.Sprintf("- **Total cost:** $%.2f\n", sess.TotalCost))
-	sb.WriteString(fmt.Sprintf("- **Input tokens:** %d\n", sess.InputTokens))
-	sb.WriteString(fmt.Sprintf("- **Output tokens:** %d\n", sess.OutputTokens))
-	sb.WriteString(fmt.Sprintf("- **Cache read tokens:** %d\n", sess.CacheReadTokens))
-	sb.WriteString(fmt.Sprintf("- **Cache creation tokens:** %d\n", sess.CacheCreationTokens))
-	sb.WriteString(fmt.Sprintf("- **Messages:** %d\n", sess.MessageCount))
-	sb.WriteString(fmt.Sprintf("- **Events:** %d\n", sess.EventCount))
-	sb.WriteString(fmt.Sprintf("- **Errors:** %d\n", sess.ErrorCount))
+	fmt.Fprintf(&sb, "- **Total cost:** $%.2f\n", sess.TotalCost)
+	fmt.Fprintf(&sb, "- **Input tokens:** %d\n", sess.InputTokens)
+	fmt.Fprintf(&sb, "- **Output tokens:** %d\n", sess.OutputTokens)
+	fmt.Fprintf(&sb, "- **Cache read tokens:** %d\n", sess.CacheReadTokens)
+	fmt.Fprintf(&sb, "- **Cache creation tokens:** %d\n", sess.CacheCreationTokens)
+	fmt.Fprintf(&sb, "- **Messages:** %d\n", sess.MessageCount)
+	fmt.Fprintf(&sb, "- **Events:** %d\n", sess.EventCount)
+	fmt.Fprintf(&sb, "- **Errors:** %d\n", sess.ErrorCount)
 
 	sb.WriteString("\n## Commands Run\n\n")
 	if len(commands) == 0 {
 		sb.WriteString("_No shell/bash command events captured._\n")
 	} else {
 		for _, c := range commands {
-			sb.WriteString(fmt.Sprintf("- `%s`\n", c))
+			fmt.Fprintf(&sb, "- `%s`\n", c)
 		}
 	}
 
@@ -598,7 +598,7 @@ func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow)
 		sb.WriteString("_No explicit file paths extracted from tool calls._\n")
 	} else {
 		for _, p := range fileTouches {
-			sb.WriteString(fmt.Sprintf("- `%s`\n", p))
+			fmt.Fprintf(&sb, "- `%s`\n", p)
 		}
 	}
 
@@ -607,7 +607,7 @@ func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow)
 		sb.WriteString("_No notable timeline events captured._\n")
 	} else {
 		for _, line := range keyEvents {
-			sb.WriteString(fmt.Sprintf("- %s\n", line))
+			fmt.Fprintf(&sb, "- %s\n", line)
 		}
 	}
 
@@ -616,7 +616,7 @@ func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow)
 		sb.WriteString("_No errors recorded._\n")
 	} else {
 		for _, e := range errorLines {
-			sb.WriteString(fmt.Sprintf("- %s\n", e))
+			fmt.Fprintf(&sb, "- %s\n", e)
 		}
 	}
 
