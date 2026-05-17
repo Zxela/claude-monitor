@@ -2,7 +2,7 @@
 import type { Event, WsEvent } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchSessionEvents, fetchPinnedEvents } from '../api';
+import { fetchSessionAutopsy, fetchSessionEvents, fetchPinnedEvents } from '../api';
 import { onMessage } from '../ws';
 import { renderFeedEntry, detectType } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
@@ -216,6 +216,7 @@ function updateHeader(): void {
       <span style="color:var(--text-dim);font-size:10px;letter-spacing:0.5px">${escapeHtml(name)}</span>
       <span class="timeline-btn" role="button" tabindex="0" aria-label="Open timeline view" style="margin-left:8px;color:var(--yellow);font-size:9px;cursor:pointer;border:1px solid rgba(255,204,0,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">TIMELINE</span>
       <span class="replay-btn" role="button" tabindex="0" aria-label="Open session replay" style="margin-left:6px;color:var(--green);font-size:9px;cursor:pointer;border:1px solid rgba(63,185,80,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">REPLAY</span>
+      <span class="autopsy-btn" role="button" tabindex="0" aria-label="Download session autopsy markdown" style="margin-left:6px;color:var(--purple, #aa77dd);font-size:9px;cursor:pointer;border:1px solid rgba(170,119,221,0.4);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">AUTOPSY</span>
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
     const backBtn = headerEl.querySelector('.back-to-feed');
     backBtn?.addEventListener('click', () => {
@@ -245,6 +246,33 @@ function updateHeader(): void {
       if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
         e.preventDefault();
         if (state.selectedSessionId) openReplay(state.selectedSessionId);
+      }
+    });
+    const autopsyBtn = headerEl.querySelector('.autopsy-btn');
+    const downloadAutopsy = async () => {
+      if (!state.selectedSessionId) return;
+      try {
+        const md = await fetchSessionAutopsy(state.selectedSessionId);
+        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+        const link = document.createElement('a');
+        const safeId = state.selectedSessionId.replace(/[^a-zA-Z0-9_-]+/g, '-');
+        link.href = URL.createObjectURL(blob);
+        link.download = `claude-monitor-autopsy-${safeId || 'session'}.md`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      } catch {
+        // Silent fail; feed remains usable.
+      }
+    };
+    autopsyBtn?.addEventListener('click', () => {
+      void downloadAutopsy();
+    });
+    autopsyBtn?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault();
+        void downloadAutopsy();
       }
     });
   } else {
