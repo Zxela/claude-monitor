@@ -23,6 +23,9 @@ export interface Session {
   taskDescription: string;
   version?: string;
   entrypoint?: string;
+  workflowId?: string;
+  agentId?: string;
+  agentKind?: string;
 }
 
 export interface GroupedSessions {

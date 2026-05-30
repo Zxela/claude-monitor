@@ -36,6 +36,13 @@ const (
 	activeWindow       = 30 * time.Second // how long after last emit a file is considered "active"
 )
 
+// Agent-kind classifications derived from the JSONL file path by classifyPath.
+const (
+	kindSession       = "session"
+	kindSubagent      = "subagent"
+	kindWorkflowAgent = "workflow_agent"
+)
+
 // defaultBasePaths are the well-known locations Claude Code writes session files.
 var defaultBasePaths = []string{
 	"~/.claude/projects/",
@@ -55,6 +62,13 @@ type Event struct {
 	Label string
 	// Bootstrap is true for events emitted from historical data read on startup.
 	Bootstrap bool
+	// Workflow/agent identity derived from the file path by classifyPath.
+	// AgentKind is one of: session, subagent, workflow_agent.
+	// AgentID is the 'agent-<id>' file stem (== SessionID for shapes 2/3); empty for normal sessions.
+	// WorkflowID is the 'wf_<id>' directory name for shape 3; empty otherwise.
+	WorkflowID string
+	AgentID    string
+	AgentKind  string
 }
 
 // fileState tracks our read position within a single JSONL file.
@@ -477,6 +491,7 @@ func (w *Watcher) emit(filePath string, line []byte) {
 	sessionID := sessionIDFromPath(filePath)
 	projectDir := projectDirFromPath(filePath)
 	label := w.labelForPath(filePath)
+	kind, agentID, workflowID := classifyPath(filePath)
 
 	ev := Event{
 		SessionID:  sessionID,
@@ -485,6 +500,9 @@ func (w *Watcher) emit(filePath string, line []byte) {
 		Line:       append([]byte(nil), line...), // copy
 		Label:      label,
 		Bootstrap:  w.bootstrapping,
+		WorkflowID: workflowID,
+		AgentID:    agentID,
+		AgentKind:  kind,
 	}
 
 	if !w.bootstrapping {
@@ -532,6 +550,47 @@ func sessionIDFromPath(path string) string {
 // projectDirFromPath returns the name of the immediate parent directory.
 func projectDirFromPath(path string) string {
 	return filepath.Base(filepath.Dir(path))
+}
+
+// classifyPath derives the workflow/agent identity of a JSONL file from its path.
+// It returns (kind, agentID, workflowID) for the three known on-disk shapes:
+//
+//	shape 1 normal:        <uuid>.jsonl                                           -> (kindSession,       "",           "")
+//	shape 2 task subagent: <parent>/subagents/agent-<id>.jsonl                    -> (kindSubagent,      "agent-<id>", "")
+//	shape 3 workflow:      <parent>/subagents/workflows/wf_<id>/agent-<id>.jsonl  -> (kindWorkflowAgent, "agent-<id>", "wf_<id>")
+//
+// It is a pure function of the path (mirrors sessionIDFromPath/projectDirFromPath)
+// and is independent of pipeline parentage logic.
+func classifyPath(path string) (kind, agentID, workflowID string) {
+	stem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if !strings.HasPrefix(stem, "agent-") {
+		return kindSession, "", ""
+	}
+	agentID = stem
+	// Walk UP looking for a wf_<id> segment and/or a subagents segment.
+	hasSubagents := false
+	wf := ""
+	dir := filepath.Dir(path)
+	for dir != "." && dir != string(filepath.Separator) {
+		base := filepath.Base(dir)
+		if base == "subagents" {
+			hasSubagents = true
+		}
+		if wf == "" && strings.HasPrefix(base, "wf_") {
+			wf = base
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	if hasSubagents && wf != "" {
+		return kindWorkflowAgent, agentID, wf
+	}
+	// shape 2, or defensive fallback (agent-* file without a subagents/ ancestor):
+	// classify as a subagent so it is never mistaken for a top-level session.
+	return kindSubagent, agentID, ""
 }
 
 // expandHome replaces a leading "~/" with the actual home directory.

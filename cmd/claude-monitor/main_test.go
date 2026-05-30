@@ -476,3 +476,42 @@ func TestCacheClear(t *testing.T) {
 		t.Error("expected ok=true in response")
 	}
 }
+
+// TestWorkflows verifies GET /api/workflows returns 200 and a JSON array
+// (empty on a fresh DB, not null).
+func TestWorkflows(t *testing.T) {
+	t.Parallel()
+	var body []json.RawMessage
+	getJSON(t, "/api/workflows", &body)
+	if body == nil {
+		t.Error("expected non-nil array, got null")
+	}
+}
+
+// TestSessionsWorkflowFilter verifies GET /api/sessions?workflow=... is accepted
+// and returns a JSON array.
+func TestSessionsWorkflowFilter(t *testing.T) {
+	t.Parallel()
+	var body []json.RawMessage
+	getJSON(t, "/api/sessions?workflow=wf_nonexistent", &body)
+	if body == nil {
+		t.Error("expected non-nil array, got null")
+	}
+}
+
+// TestSessionReplay verifies GET /api/sessions/{id}/replay returns 200 with the
+// {sessionId, events} envelope even for an unknown session (empty events, not null).
+func TestSessionReplay(t *testing.T) {
+	t.Parallel()
+	var body struct {
+		SessionID string            `json:"sessionId"`
+		Events    []json.RawMessage `json:"events"`
+	}
+	getJSON(t, "/api/sessions/replay-unknown-id/replay", &body)
+	if body.SessionID != "replay-unknown-id" {
+		t.Errorf("sessionId = %q, want replay-unknown-id", body.SessionID)
+	}
+	if body.Events == nil {
+		t.Error("events should be non-nil array")
+	}
+}

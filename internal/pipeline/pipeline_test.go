@@ -521,11 +521,16 @@ func TestParentLinking_Shape2_InContentSessionID(t *testing.T) {
 			"model":   "claude-sonnet-4-6",
 		},
 	})
+	// AgentKind/AgentID are stamped by watcher.emit in production; in unit tests
+	// Process receives the Event directly, so populate them with literal strings
+	// (the pipeline package must not import the watcher kind constants).
 	p.Process(watcher.Event{
 		SessionID: childKey,
 		FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/subagents/" + childKey + ".jsonl",
 		Line:      childLine,
 		Bootstrap: true,
+		AgentKind: "subagent",
+		AgentID:   childKey,
 	})
 
 	childSess, ok := sessions.Get(childKey)
@@ -534,6 +539,15 @@ func TestParentLinking_Shape2_InContentSessionID(t *testing.T) {
 	}
 	if childSess.ParentID != parentID {
 		t.Errorf("child ParentID = %q, want %q (in-content sessionId)", childSess.ParentID, parentID)
+	}
+	if childSess.AgentKind != "subagent" {
+		t.Errorf("child AgentKind = %q, want subagent", childSess.AgentKind)
+	}
+	if childSess.AgentID != childKey {
+		t.Errorf("child AgentID = %q, want %q", childSess.AgentID, childKey)
+	}
+	if childSess.WorkflowID != "" {
+		t.Errorf("child WorkflowID = %q, want empty (shape 2 has no workflow)", childSess.WorkflowID)
 	}
 
 	// The in-content sessionId resolves the child's ParentID immediately even
@@ -621,11 +635,16 @@ func TestParentLinking_Shape3_Workflow(t *testing.T) {
 			"model":   "claude-sonnet-4-6",
 		},
 	})
+	// Workflow identity is stamped by watcher.emit in production; populate the
+	// Event fields with literal strings here (see shape-2 test note).
 	p.Process(watcher.Event{
-		SessionID: childKey,
-		FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/subagents/workflows/wf_x/" + childKey + ".jsonl",
-		Line:      childLine,
-		Bootstrap: true,
+		SessionID:  childKey,
+		FilePath:   "/home/user/.claude/projects/hash/" + parentID + "/subagents/workflows/wf_x/" + childKey + ".jsonl",
+		Line:       childLine,
+		Bootstrap:  true,
+		AgentKind:  "workflow_agent",
+		AgentID:    childKey,
+		WorkflowID: "wf_x",
 	})
 
 	childSess, ok := sessions.Get(childKey)
@@ -634,6 +653,15 @@ func TestParentLinking_Shape3_Workflow(t *testing.T) {
 	}
 	if childSess.ParentID != parentID {
 		t.Errorf("workflow agent ParentID = %q, want %q", childSess.ParentID, parentID)
+	}
+	if childSess.AgentKind != "workflow_agent" {
+		t.Errorf("workflow agent AgentKind = %q, want workflow_agent", childSess.AgentKind)
+	}
+	if childSess.AgentID != childKey {
+		t.Errorf("workflow agent AgentID = %q, want %q", childSess.AgentID, childKey)
+	}
+	if childSess.WorkflowID != "wf_x" {
+		t.Errorf("workflow agent WorkflowID = %q, want wf_x", childSess.WorkflowID)
 	}
 }
 

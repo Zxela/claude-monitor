@@ -57,6 +57,9 @@ type Session struct {
 	TaskDescription string          `json:"taskDescription"`
 	Version        string           `json:"version,omitempty"`
 	Entrypoint     string           `json:"entrypoint,omitempty"`
+	WorkflowID     string           `json:"workflowId,omitempty"` // wf_<id> grouping all agents of one Claude Code workflow run; empty for non-workflow sessions
+	AgentID        string           `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
+	AgentKind      string           `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
 	repoSourceRank int              `json:"-"` // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 }

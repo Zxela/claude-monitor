@@ -45,7 +45,8 @@ const sessionSelectCols = `id, COALESCE(repo_id,''), COALESCE(parent_id,''), COA
 	COALESCE(model,''), COALESCE(started_at,''), COALESCE(ended_at,''),
 	total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 	message_count, event_count, error_count,
-	COALESCE(version,''), COALESCE(entrypoint,'')`
+	COALESCE(version,''), COALESCE(entrypoint,''),
+	COALESCE(workflow_id,''), COALESCE(agent_id,''), COALESCE(agent_kind,'')`
 
 // SessionRow represents a session as stored in the database.
 type SessionRow struct {
@@ -69,6 +70,9 @@ type SessionRow struct {
 	ErrorCount          int     `json:"errorCount"`
 	Version             string  `json:"version,omitempty"`
 	Entrypoint          string  `json:"entrypoint,omitempty"`
+	WorkflowID          string  `json:"workflowId,omitempty"`
+	AgentID             string  `json:"agentId,omitempty"`
+	AgentKind           string  `json:"agentKind,omitempty"`
 }
 
 // ToSession converts a SessionRow to a session.Session with default runtime fields.
@@ -92,6 +96,9 @@ func (r *SessionRow) ToSession() *session.Session {
 		TaskDescription:     r.TaskDescription,
 		Version:             r.Version,
 		Entrypoint:          r.Entrypoint,
+		WorkflowID:          r.WorkflowID,
+		AgentID:             r.AgentID,
+		AgentKind:           r.AgentKind,
 		IsActive:            false,
 		Status:              "idle",
 		CostRate:            0,
@@ -347,8 +354,8 @@ func (d *DB) SaveSession(s *session.Session) error {
 		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
 		 started_at, ended_at, total_cost, input_tokens, output_tokens,
 		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-		 version, entrypoint)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 version, entrypoint, workflow_id, agent_id, agent_kind)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 repo_id=excluded.repo_id,
 		 parent_id=excluded.parent_id,
@@ -368,13 +375,17 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 event_count=excluded.event_count,
 		 error_count=excluded.error_count,
 		 version=excluded.version,
-		 entrypoint=excluded.entrypoint`,
+		 entrypoint=excluded.entrypoint,
+		 workflow_id=excluded.workflow_id,
+		 agent_id=excluded.agent_id,
+		 agent_kind=excluded.agent_kind`,
 		s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
 		s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
 		s.TotalCost, s.InputTokens, s.OutputTokens,
 		s.CacheReadTokens, s.CacheCreationTokens,
 		s.MessageCount, s.EventCount, s.ErrorCount,
 		s.Version, s.Entrypoint,
+		s.WorkflowID, s.AgentID, s.AgentKind,
 	)
 	if err != nil {
 		return fmt.Errorf("SaveSession: %w", err)
@@ -402,8 +413,8 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
 		 started_at, ended_at, total_cost, input_tokens, output_tokens,
 		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-		 version, entrypoint)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 version, entrypoint, workflow_id, agent_id, agent_kind)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 repo_id=excluded.repo_id,
 		 parent_id=excluded.parent_id,
@@ -423,7 +434,10 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 		 event_count=excluded.event_count,
 		 error_count=excluded.error_count,
 		 version=excluded.version,
-		 entrypoint=excluded.entrypoint`)
+		 entrypoint=excluded.entrypoint,
+		 workflow_id=excluded.workflow_id,
+		 agent_id=excluded.agent_id,
+		 agent_kind=excluded.agent_kind`)
 	if err != nil {
 		return fmt.Errorf("FlushSessions prepare session: %w", err)
 	}
@@ -453,6 +467,7 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 			s.CacheReadTokens, s.CacheCreationTokens,
 			s.MessageCount, s.EventCount, s.ErrorCount,
 			s.Version, s.Entrypoint,
+			s.WorkflowID, s.AgentID, s.AgentKind,
 		); err != nil {
 			return fmt.Errorf("FlushSessions save %s: %w", s.ID, err)
 		}
@@ -550,6 +565,55 @@ func (d *DB) ListSessionsByRepo(repoID string, limit, offset int) ([]SessionRow,
 	return scanSessionRows(rows)
 }
 
+// ListSessionsByWorkflow returns sessions belonging to a workflow, ordered by ended_at descending.
+func (d *DB) ListSessionsByWorkflow(workflowID string, limit, offset int) ([]SessionRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+		FROM sessions WHERE workflow_id = ? ORDER BY ended_at DESC LIMIT ? OFFSET ?`, workflowID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
+// WorkflowRow is a per-workflow aggregate: one row per distinct workflow_id.
+type WorkflowRow struct {
+	WorkflowID string  `json:"workflowId"`
+	AgentCount int     `json:"agentCount"`
+	TotalCost  float64 `json:"totalCost"`
+	LastActive string  `json:"lastActive"`
+}
+
+// ListWorkflows returns one aggregate row per distinct workflow_id, ordered by
+// most-recent activity. Cost is summed across every agent row in the workflow,
+// so a workflow's spend is counted exactly once across its agents.
+//
+// workflow_id is nullable (migration 013 adds it as plain TEXT, no DEFAULT ''),
+// so the non-empty filter uses COALESCE(workflow_id,'') <> ''.
+func (d *DB) ListWorkflows() ([]WorkflowRow, error) {
+	rows, err := d.db.Query(`SELECT workflow_id, COUNT(*), COALESCE(SUM(total_cost),0), COALESCE(MAX(ended_at),'')
+		FROM sessions WHERE COALESCE(workflow_id,'') <> '' GROUP BY workflow_id ORDER BY MAX(ended_at) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []WorkflowRow
+	for rows.Next() {
+		var wr WorkflowRow
+		if err := rows.Scan(&wr.WorkflowID, &wr.AgentCount, &wr.TotalCost, &wr.LastActive); err != nil {
+			return nil, err
+		}
+		result = append(result, wr)
+	}
+	return result, rows.Err()
+}
+
 // AggregateStatsByRepo returns aggregate statistics for a single repo.
 func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 	r := &AggregateResult{
@@ -626,6 +690,7 @@ func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 			&r.CacheReadTokens, &r.CacheCreationTokens,
 			&r.MessageCount, &r.EventCount, &r.ErrorCount,
 			&r.Version, &r.Entrypoint,
+			&r.WorkflowID, &r.AgentID, &r.AgentKind,
 		); err != nil {
 			return result, err
 		}
@@ -634,7 +699,12 @@ func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 	return result, rows.Err()
 }
 
-// AggregateStats returns aggregate statistics. Includes ALL sessions (no parent filter).
+// AggregateStats returns lifetime aggregate statistics across ALL session rows
+// (parents and their workflow/subagent children). Cost and tokens are summed
+// exactly once because each row carries only its own spend. SessionCount here
+// counts every row (a workflow's agents are individual rows); contrast TrendData,
+// whose SessionCount counts only top-level sessions (parent_id empty) while still
+// summing cost/tokens across all rows. Both definitions count each dollar once.
 func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	r := &AggregateResult{
 		CostByModel: make(map[string]float64),
@@ -699,12 +769,18 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 }
 
 // trendParams holds the parsed query parameters shared across TrendData helpers.
+//
+// windowWhere = all rows in window (used for cost/token SUMs, so each dollar is
+// counted exactly once where it was incurred — including workflow/subagent child rows).
+// where = top-level sessions only (windowWhere + parent_id empty); used for the
+// COUNT/AVG/percentile distributions, which describe top-level sessions.
 type trendParams struct {
-	dateFmt  string
-	interval string
-	where    string
-	args     []interface{}
-	repoID   string
+	dateFmt     string
+	interval    string
+	windowWhere string
+	where       string
+	args        []interface{}
+	repoID      string
 }
 
 // TrendData returns time-bucketed analytics for the given window and optional repo filter.
@@ -726,14 +802,18 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 		return nil, fmt.Errorf("invalid window: %s", window)
 	}
 
-	where := fmt.Sprintf("started_at >= datetime('now', '%s') AND (parent_id IS NULL OR parent_id = '')", interval)
+	// windowWhere matches ALL rows in the window (for cost/token SUMs, counted
+	// once). where additionally restricts to top-level sessions (parent_id empty)
+	// for COUNT/AVG/percentile distributions.
+	windowWhere := fmt.Sprintf("started_at >= datetime('now', '%s')", interval)
 	var args []interface{}
 	if repoID != "" {
-		where += " AND repo_id = ?"
+		windowWhere += " AND repo_id = ?"
 		args = append(args, repoID)
 	}
+	where := windowWhere + " AND (parent_id IS NULL OR parent_id = '')"
 
-	p := &trendParams{dateFmt: dateFmt, interval: interval, where: where, args: args, repoID: repoID}
+	p := &trendParams{dateFmt: dateFmt, interval: interval, windowWhere: windowWhere, where: where, args: args, repoID: repoID}
 
 	buckets, err := d.trendBuckets(p)
 	if err != nil {
@@ -778,13 +858,20 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 }
 
 // trendBuckets queries time-bucketed session aggregates.
+//
+// Cost and tokens are summed over ALL rows in the window (p.windowWhere) so each
+// dollar is counted exactly once, including workflow/subagent child rows. The
+// SessionCount and AvgSessionCost are computed via CASE over top-level sessions
+// only (parent_id empty), keeping those distributions about top-level sessions.
 func (d *DB) trendBuckets(p *trendParams) ([]TrendBucket, error) {
 	bucketQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket,
 		COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
-		COUNT(*), COALESCE(AVG(total_cost),0)
+		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN total_cost ELSE 0 END)
+			/ NULLIF(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0),0)
 		FROM sessions WHERE %s
-		GROUP BY bucket ORDER BY bucket`, p.dateFmt, p.where)
+		GROUP BY bucket ORDER BY bucket`, p.dateFmt, p.windowWhere)
 
 	rows, err := d.db.Query(bucketQuery, p.args...)
 	if err != nil {
@@ -855,17 +942,22 @@ func (d *DB) trendPercentiles(p *trendParams, buckets []TrendBucket) error {
 }
 
 // trendByRepo queries cost/token breakdown grouped by repository.
+//
+// Cost and tokens are summed over ALL rows in the window (counted once,
+// including child rows). The session count is over top-level sessions only
+// (parent_id empty) via CASE. For shapes 2/3 children share the parent's
+// repo_id (set in pipeline), so repo attribution stays stable.
 func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
-	repoWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s') AND (s.parent_id IS NULL OR s.parent_id = '')", p.interval)
+	repoWindowWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s')", p.interval)
 	if p.repoID != "" {
-		repoWhere += " AND s.repo_id = ?"
+		repoWindowWhere += " AND s.repo_id = ?"
 	}
 	repoQuery := fmt.Sprintf(`SELECT s.repo_id, COALESCE(r.name,''), COALESCE(SUM(s.total_cost),0),
 		COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens),0),
-		COUNT(*)
+		COALESCE(SUM(CASE WHEN s.parent_id IS NULL OR s.parent_id = '' THEN 1 ELSE 0 END),0)
 		FROM sessions s JOIN repos r ON r.id = s.repo_id
 		WHERE %s AND s.repo_id != ''
-		GROUP BY r.id ORDER BY SUM(s.total_cost) DESC`, repoWhere)
+		GROUP BY r.id ORDER BY SUM(s.total_cost) DESC`, repoWindowWhere)
 
 	repoRows, err := d.db.Query(repoQuery, p.args...)
 	if err != nil {
@@ -891,12 +983,17 @@ func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
 }
 
 // trendByModel queries cost/token breakdown grouped by model.
+//
+// Cost and tokens are summed over ALL rows in the window (p.windowWhere),
+// counted once. This now includes child (e.g. subagent on a different model)
+// spend, which is desired since a workflow can mix models. The session count is
+// over top-level sessions only (parent_id empty) via CASE.
 func (d *DB) trendByModel(p *trendParams) ([]ModelTrend, error) {
 	modelQuery := fmt.Sprintf(`SELECT COALESCE(model,'unknown'), COALESCE(SUM(total_cost),0),
 		COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens),0),
-		COUNT(*)
+		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0)
 		FROM sessions WHERE %s AND model != ''
-		GROUP BY model ORDER BY SUM(total_cost) DESC`, p.where)
+		GROUP BY model ORDER BY SUM(total_cost) DESC`, p.windowWhere)
 
 	modelRows, err := d.db.Query(modelQuery, p.args...)
 	if err != nil {
@@ -1115,6 +1212,38 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 		WHERE e.session_id = ?
 		ORDER BY e.timestamp ASC
 		LIMIT ? OFFSET ?`, sessionID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEventRows(rows)
+}
+
+// ListReplayEvents returns events for a session plus all events belonging to its
+// direct children (subagents / workflow agents linked via parent_id), merged in
+// chronological order. Used by the replay endpoint so a parent (or workflow root)
+// plays back as a single timeline.
+//
+// parent_id is the Phase-1 in-content parentage link, so selecting children by
+// parent_id covers both shape-2 subagents and shape-3 workflow agents without a
+// separate workflow join. A leaf session with no children returns exactly the
+// same rows as ListEvents (the subquery matches nothing), so this is backward
+// compatible. The secondary `e.id ASC` sort keeps the timeline deterministic
+// when parent and child events share a timestamp.
+func (d *DB) ListReplayEvents(sessionID string, limit, offset int) ([]EventRow, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+		COALESCE(ec.content,''), ec.compressed
+		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
+		WHERE e.session_id = ?
+		   OR e.session_id IN (SELECT id FROM sessions WHERE parent_id = ?)
+		ORDER BY e.timestamp ASC, e.id ASC
+		LIMIT ? OFFSET ?`, sessionID, sessionID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

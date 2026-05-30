@@ -270,16 +270,17 @@ Full OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml). Enable Swagger UI w
 |----------|-------------|
 | `GET /health` | Health check (includes `droppedEvents` counter) |
 | `GET /api/version` | Server version |
-| `GET /api/sessions` | List sessions (supports `?active=true`, `?group=activity`, pagination) |
+| `GET /api/sessions` | List sessions (supports `?active=true`, `?group=activity`, `?repo=`, `?workflow=`, pagination) |
 | `GET /api/sessions/{id}` | Single session lookup (live store, then DB fallback) |
 | `GET /api/sessions/{id}/events` | Session events (supports `?pinned`, `?errors`, `?last=N`, pagination) |
-| `GET /api/sessions/{id}/replay` | Replay manifest (all events, up to 10k) |
+| `GET /api/sessions/{id}/replay` | Replay manifest (session + its child agents, up to 10k events) |
 | `POST /api/sessions/{id}/stop` | Stop Docker container for a session |
 | `GET /api/stats` | Aggregated stats with `?window=` (all, today, week, month) |
 | `GET /api/stats/trends` | Trend data with `?window=` (24h, 7d, 30d) and optional `?repo=` |
 | `GET /api/repos` | Repository list with total costs |
 | `GET /api/repos/{id}/stats` | Per-repo aggregate statistics |
 | `GET /api/repos/{id}/sessions` | Paginated sessions for a repo |
+| `GET /api/workflows` | Workflow list with agent count and total cost |
 | `GET /api/search?q=&limit=` | FTS5 full-text search across sessions |
 | `GET /api/search/full?q=&limit=` | Full-content substring search (slower, searches complete text) |
 | `GET /api/settings` | Get all user-configurable settings |

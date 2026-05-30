@@ -20,8 +20,14 @@ export async function fetchGroupedSessions(): Promise<GroupedSessions> {
   return request<GroupedSessions>(`/api/sessions?group=activity`);
 }
 
-export async function fetchSessions(limit = 50, offset = 0): Promise<Session[]> {
-  return request<Session[]>(`/api/sessions?limit=${limit}&offset=${offset}`);
+export async function fetchSessions(
+  limit = 50,
+  offset = 0,
+  workflow?: string,
+): Promise<Session[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (workflow) params.set('workflow', workflow);
+  return request<Session[]>(`/api/sessions?${params}`);
 }
 
 export async function fetchSearch(query: string, limit = 50): Promise<Event[]> {

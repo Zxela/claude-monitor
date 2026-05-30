@@ -279,6 +279,7 @@ func main() {
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	swaggerEnabled := flag.Bool("swagger", false, "serve Swagger UI at /swagger")
+	rebuildHistory := flag.Bool("rebuild-history", false, "re-ingest all historical JSONL from scratch (idempotent; rebuilds dedup from DB) and re-run the v013 identity backfill")
 	// Handle --version before any other initialization.
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Printf("claude-monitor %s\n", version)
@@ -318,6 +319,7 @@ Examples:
   claude-monitor                                  # Start with defaults (localhost:7700)
   claude-monitor --port 8080 --watch /extra/path  # Custom port + extra watch dir
   claude-monitor --broadcast --swagger            # All interfaces + Swagger UI
+  claude-monitor --rebuild-history                # Re-scan all history and re-link workflows
 `)
 	}
 
@@ -351,6 +353,27 @@ Examples:
 	historyDB, err := store.Open(filepath.Join(dbDir, "history.db"))
 	if err != nil {
 		log.Fatalf("cannot open database: %v", err)
+	}
+
+	// One-time, idempotent v013 identity backfill: link agent transcripts that
+	// predate Workstream-2 identity stamping (parent_id/workflow_id/agent_id/
+	// agent_kind). Runs synchronously AFTER migrations (inside store.Open) and
+	// BEFORE the watcher's bootstrap scan (fw.Start below), so live ingestion sees
+	// already-linked rows. It is marker-guarded (settings key "backfill_v013_done")
+	// so steady-state startups short-circuit with no walk.
+	//
+	// --rebuild-history forces the backfill to re-run; the actual re-INGEST is
+	// achieved by the watcher reading every tracked file from offset 0 during
+	// bootstrap (idempotent: PersistBatch dedups on (session_id,
+	// COALESCE(message_id,uuid)) and the pipeline rebuilds dedup state from the DB).
+	backfillPaths := store.DefaultBackfillBasePaths()
+	if res, err := historyDB.RunBackfillV013(backfillPaths, *rebuildHistory); err != nil {
+		// Never Fatalf: a partial/failed backfill must not block the daemon. The
+		// marker stays unset so it retries on the next start.
+		log.Printf("warning: backfill v013 failed (will retry next start): %v", err)
+	} else if res.Scanned > 0 || res.Updated > 0 {
+		log.Printf("backfill v013: scanned=%d updated=%d skipped=%d errors=%d",
+			res.Scanned, res.Updated, res.Skipped, res.Errors)
 	}
 
 	// Load model pricing from DB and initialise the parser's active pricing table.
@@ -572,6 +595,7 @@ Examples:
 	mux.HandleFunc("GET /api/repos", handleRepos(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/stats", handleRepoStats(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/sessions", handleRepoSessions(historyDB))
+	mux.HandleFunc("GET /api/workflows", handleWorkflows(historyDB))
 	mux.HandleFunc("GET /api/search", handleSearch(historyDB))
 	mux.HandleFunc("GET /api/search/full", handleSearchFull(historyDB))
 	mux.HandleFunc("GET /api/search/combined", handleSearchCombined(historyDB))

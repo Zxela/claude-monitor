@@ -253,8 +253,24 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 	p.applyRepoResolution(s, msg, r)
 	p.applySessionMeta(s, msg, ev)
 	p.applyParentDetection(s, msg, ev, resolvedParentID)
+	p.applyWorkflowIdentity(s, ev)
 	p.applyCostDedup(s, msg)
 	p.applyStatusUpdate(s, msg, ev)
+}
+
+// applyWorkflowIdentity records the workflow/agent identity derived by the
+// watcher from the file path. AgentKind/AgentID/WorkflowID are set-once (never
+// overwritten with empty) so a later non-identity line cannot clear them.
+func (p *Pipeline) applyWorkflowIdentity(s *session.Session, ev watcher.Event) {
+	if ev.AgentKind != "" && s.AgentKind == "" {
+		s.AgentKind = ev.AgentKind
+	}
+	if ev.AgentID != "" && s.AgentID == "" {
+		s.AgentID = ev.AgentID
+	}
+	if ev.WorkflowID != "" && s.WorkflowID == "" {
+		s.WorkflowID = ev.WorkflowID
+	}
 }
 
 // applyRepoResolution persists the resolved repo and copies CWD/branch/model metadata.

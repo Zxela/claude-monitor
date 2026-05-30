@@ -31,6 +31,45 @@ func TestOpen_CreatesDatabase(t *testing.T) {
 	openTestDB(t) // just verifying it doesn't panic/error
 }
 
+// TestMigration013_WorkflowColumns verifies migration 013 added the workflow
+// identity columns and the workflow index to the sessions table.
+func TestMigration013_WorkflowColumns(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	cols := make(map[string]bool)
+	rows, err := db.db.Query(`PRAGMA table_info(sessions)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info failed: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt interface{}
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			t.Fatalf("scan table_info: %v", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	for _, want := range []string{"workflow_id", "agent_id", "agent_kind"} {
+		if !cols[want] {
+			t.Errorf("sessions table missing column %q", want)
+		}
+	}
+
+	var idxName string
+	err = db.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sessions_workflow'`).Scan(&idxName)
+	if err != nil {
+		t.Fatalf("expected idx_sessions_workflow index to exist: %v", err)
+	}
+	if idxName != "idx_sessions_workflow" {
+		t.Errorf("index name: got %q, want idx_sessions_workflow", idxName)
+	}
+}
+
 func TestUpsertRepo(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
@@ -246,6 +285,103 @@ func TestAggregateStats_IncludesChildren(t *testing.T) {
 	}
 	if agg.InputTokens != 250 {
 		t.Errorf("InputTokens: got %d, want 250", agg.InputTokens)
+	}
+}
+
+func TestSession_WorkflowColumnsRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	sess := &session.Session{
+		ID:         "agent-abc",
+		WorkflowID: "wf_xyz",
+		AgentID:    "agent-abc",
+		AgentKind:  "workflow_agent",
+		ParentID:   "parent-1",
+		TotalCost:  0.42,
+		StartedAt:  now.Add(-5 * time.Minute),
+		LastActive: now,
+	}
+	if err := db.SaveSession(sess); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+
+	got, err := db.GetSession("agent-abc")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("GetSession returned nil")
+	}
+	if got.WorkflowID != "wf_xyz" {
+		t.Errorf("WorkflowID: got %q, want %q", got.WorkflowID, "wf_xyz")
+	}
+	if got.AgentID != "agent-abc" {
+		t.Errorf("AgentID: got %q, want %q", got.AgentID, "agent-abc")
+	}
+	if got.AgentKind != "workflow_agent" {
+		t.Errorf("AgentKind: got %q, want %q", got.AgentKind, "workflow_agent")
+	}
+
+	// Also verify ToSession propagates the fields onto the runtime session.
+	rt := got.ToSession()
+	if rt.WorkflowID != "wf_xyz" || rt.AgentID != "agent-abc" || rt.AgentKind != "workflow_agent" {
+		t.Errorf("ToSession identity: got (%q,%q,%q), want (wf_xyz,agent-abc,workflow_agent)",
+			rt.WorkflowID, rt.AgentID, rt.AgentKind)
+	}
+}
+
+func TestListSessionsByWorkflow(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	// Two sessions in workflow wf_a (a parent and a child) plus one unrelated.
+	sessions := []*session.Session{
+		{
+			ID: "parent-1", WorkflowID: "wf_a", AgentKind: "session",
+			TotalCost: 1.00, StartedAt: now.Add(-10 * time.Minute), LastActive: now.Add(-2 * time.Minute),
+		},
+		{
+			ID: "agent-1", WorkflowID: "wf_a", AgentID: "agent-1", AgentKind: "workflow_agent",
+			ParentID: "parent-1", TotalCost: 0.50, StartedAt: now.Add(-9 * time.Minute), LastActive: now,
+		},
+		{
+			ID: "other-1", WorkflowID: "", AgentKind: "session",
+			TotalCost: 3.00, StartedAt: now.Add(-8 * time.Minute), LastActive: now,
+		},
+	}
+	for _, s := range sessions {
+		if err := db.SaveSession(s); err != nil {
+			t.Fatalf("SaveSession(%s) failed: %v", s.ID, err)
+		}
+	}
+
+	rows, err := db.ListSessionsByWorkflow("wf_a", 50, 0)
+	if err != nil {
+		t.Fatalf("ListSessionsByWorkflow failed: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows for wf_a, got %d", len(rows))
+	}
+	for _, r := range rows {
+		if r.WorkflowID != "wf_a" {
+			t.Errorf("row %s WorkflowID: got %q, want wf_a", r.ID, r.WorkflowID)
+		}
+	}
+	// Ordered by ended_at descending: agent-1 (ended now) before parent-1.
+	if rows[0].ID != "agent-1" {
+		t.Errorf("expected agent-1 first (most recent ended_at), got %s", rows[0].ID)
+	}
+
+	// Empty workflow returns nothing.
+	none, err := db.ListSessionsByWorkflow("wf_missing", 50, 0)
+	if err != nil {
+		t.Fatalf("ListSessionsByWorkflow(missing) failed: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("expected 0 rows for missing workflow, got %d", len(none))
 	}
 }
 
@@ -810,6 +946,122 @@ func TestTrendByModel(t *testing.T) {
 	}
 }
 
+// TestTrendByRepo_CountsChildCostOnce proves the cost-once invariant on the
+// per-repo breakdown: a child row's spend is summed into its repo (counted once,
+// since each row carries only its own cost) while the child is NOT counted as a
+// top-level session. A regression that re-added a parent_id filter to the cost
+// SUM would undercount this repo's spend and fail here.
+func TestTrendByRepo_CountsChildCostOnce(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-a", Name: "repo-a"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
+	// Parent: top-level session in repo-a, cost 5.00.
+	if err := db.SaveSession(&session.Session{
+		ID: "parent-1", RepoID: "repo-a", TotalCost: 5.00, InputTokens: 500,
+		StartedAt: now.Add(-2 * time.Hour), LastActive: now,
+		Model: "claude-sonnet-4-6",
+	}); err != nil {
+		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}
+	// Child: workflow agent in the same repo (children inherit parent repo_id),
+	// cost 1.00, parent_id set so it is not a top-level session.
+	if err := db.SaveSession(&session.Session{
+		ID: "child-1", RepoID: "repo-a", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
+		StartedAt: now.Add(-1 * time.Hour), LastActive: now,
+		Model: "claude-sonnet-4-6",
+	}); err != nil {
+		t.Fatalf("SaveSession(child) failed: %v", err)
+	}
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	if len(result.ByRepo) != 1 {
+		t.Fatalf("expected 1 repo trend, got %d", len(result.ByRepo))
+	}
+	rt := result.ByRepo[0]
+	if rt.RepoID != "repo-a" {
+		t.Errorf("repo: got %q, want repo-a", rt.RepoID)
+	}
+	// Cost summed across parent + child, counted once: 5.00 + 1.00 = 6.00.
+	if rt.Cost != 6.00 {
+		t.Errorf("repo-a cost: got %f, want 6.00 (parent 5.00 + child 1.00, counted once)", rt.Cost)
+	}
+	// Only the parent counts as a top-level session.
+	if rt.Sessions != 1 {
+		t.Errorf("repo-a sessions: got %d, want 1 (top-level only)", rt.Sessions)
+	}
+}
+
+// TestTrendByModel_CountsChildCostOnce proves the cost-once invariant on the
+// per-model breakdown for the dangerous mixed-model case: a child running a
+// different model than its parent contributes spend to a model with zero
+// top-level sessions. That cost must still appear (counted once). A regression
+// that filtered the cost SUM by parent_id would make the child-only model row
+// vanish entirely with no other failing test.
+func TestTrendByModel_CountsChildCostOnce(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	// Parent on opus, cost 5.00, top-level.
+	if err := db.SaveSession(&session.Session{
+		ID: "parent-1", TotalCost: 5.00, InputTokens: 500,
+		StartedAt: now.Add(-2 * time.Hour), LastActive: now,
+		Model: "claude-opus-4-6",
+	}); err != nil {
+		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}
+	// Child on sonnet (different model), cost 1.00, parent_id set.
+	if err := db.SaveSession(&session.Session{
+		ID: "child-1", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
+		StartedAt: now.Add(-1 * time.Hour), LastActive: now,
+		Model: "claude-sonnet-4-6",
+	}); err != nil {
+		t.Fatalf("SaveSession(child) failed: %v", err)
+	}
+
+	result, err := db.TrendData("7d", "")
+	if err != nil {
+		t.Fatalf("TrendData failed: %v", err)
+	}
+
+	byModel := make(map[string]ModelTrend, len(result.ByModel))
+	for _, mt := range result.ByModel {
+		byModel[mt.Model] = mt
+	}
+
+	opus, ok := byModel["claude-opus-4-6"]
+	if !ok {
+		t.Fatalf("expected opus model row, got models %v", byModel)
+	}
+	if opus.Cost != 5.00 {
+		t.Errorf("opus cost: got %f, want 5.00", opus.Cost)
+	}
+	if opus.Sessions != 1 {
+		t.Errorf("opus sessions: got %d, want 1", opus.Sessions)
+	}
+
+	// The child-only model must still appear with its cost counted once, even
+	// though it has zero top-level sessions.
+	sonnet, ok := byModel["claude-sonnet-4-6"]
+	if !ok {
+		t.Fatalf("expected child-only sonnet model row to appear, got models %v", byModel)
+	}
+	if sonnet.Cost != 1.00 {
+		t.Errorf("sonnet (child-only) cost: got %f, want 1.00 (child spend counted once)", sonnet.Cost)
+	}
+	if sonnet.Sessions != 0 {
+		t.Errorf("sonnet (child-only) sessions: got %d, want 0 (no top-level session on this model)", sonnet.Sessions)
+	}
+}
+
 func TestPercentile(t *testing.T) {
 	data := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	if got := percentile(data, 0.5); got != 6 {
@@ -899,7 +1151,7 @@ func TestTrendData_InvalidWindow(t *testing.T) {
 	}
 }
 
-func TestTrendData_ExcludesChildSessions(t *testing.T) {
+func TestTrendData_CountsChildCostOnceButNotAsSession(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
@@ -912,7 +1164,8 @@ func TestTrendData_ExcludesChildSessions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveSession failed: %v", err)
 	}
-	// Child session — should be excluded by the parent_id filter in TrendData
+	// Child session — its cost is summed (counted once) but the child is NOT
+	// counted as a top-level session.
 	if err := db.SaveSession(&session.Session{
 		ID: "child-1", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-30 * time.Minute), LastActive: now,
@@ -926,12 +1179,14 @@ func TestTrendData_ExcludesChildSessions(t *testing.T) {
 		t.Fatalf("TrendData failed: %v", err)
 	}
 
-	// TrendData excludes child sessions (parent_id IS NULL OR parent_id = '')
+	// SessionCount counts top-level sessions only (parent_id empty): parent only.
 	if result.Summary.SessionCount != 1 {
 		t.Errorf("expected 1 session (parent only), got %d", result.Summary.SessionCount)
 	}
-	if result.Summary.TotalCost != 5.00 {
-		t.Errorf("expected cost 5.00 (parent only), got %f", result.Summary.TotalCost)
+	// Cost is summed across ALL rows so the child's spend is counted once:
+	// 5.00 (parent) + 1.00 (child) = 6.00.
+	if result.Summary.TotalCost != 6.00 {
+		t.Errorf("expected cost 6.00 (parent 5.00 + child 1.00, counted once), got %f", result.Summary.TotalCost)
 	}
 }
 
@@ -2039,6 +2294,64 @@ func TestAggregateStatsByRepo(t *testing.T) {
 	}
 }
 
+// TestAggregateStatsByRepo_IncludesChildCostOnce proves the cost-once invariant
+// for the per-repo lifetime aggregate: a workflow child (parent_id set, same
+// repo) has its spend summed into the repo total exactly once. Children share
+// the parent's repo_id, so a regression that filtered child cost out would
+// undercount the repo's CostByRepo and TotalCost.
+func TestAggregateStatsByRepo_IncludesChildCostOnce(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	if err := db.UpsertRepo(&repo.Repo{ID: "repo-agg", Name: "repo-agg"}); err != nil {
+		t.Fatalf("UpsertRepo failed: %v", err)
+	}
+	// Parent: top-level session on opus, cost 5.00.
+	if err := db.SaveSession(&session.Session{
+		ID: "parent-1", RepoID: "repo-agg", TotalCost: 5.00, InputTokens: 500, OutputTokens: 250,
+		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
+		Model: "claude-opus-4-6",
+	}); err != nil {
+		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}
+	// Child: workflow agent on sonnet (different model), same repo, cost 1.00.
+	if err := db.SaveSession(&session.Session{
+		ID: "child-1", RepoID: "repo-agg", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100, OutputTokens: 50,
+		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
+		Model: "claude-sonnet-4-6",
+	}); err != nil {
+		t.Fatalf("SaveSession(child) failed: %v", err)
+	}
+
+	agg, err := db.AggregateStatsByRepo("repo-agg")
+	if err != nil {
+		t.Fatalf("AggregateStatsByRepo failed: %v", err)
+	}
+	// Parent 5.00 + child 1.00, counted once.
+	if agg.TotalCost != 6.00 {
+		t.Errorf("TotalCost: got %f, want 6.00 (parent 5.00 + child 1.00, counted once)", agg.TotalCost)
+	}
+	if agg.CostByRepo["repo-agg"] != 6.00 {
+		t.Errorf("CostByRepo[repo-agg]: got %f, want 6.00", agg.CostByRepo["repo-agg"])
+	}
+	if agg.InputTokens != 600 {
+		t.Errorf("InputTokens: got %d, want 600", agg.InputTokens)
+	}
+	// Both rows count toward the per-repo aggregate session count (this aggregate
+	// counts every row; trend SessionCount is the top-level-only definition).
+	if agg.SessionCount != 2 {
+		t.Errorf("SessionCount: got %d, want 2", agg.SessionCount)
+	}
+	// The child's distinct model still contributes its cost to the model breakdown.
+	if agg.CostByModel["claude-sonnet-4-6"] != 1.00 {
+		t.Errorf("CostByModel[sonnet] (child-only model): got %f, want 1.00", agg.CostByModel["claude-sonnet-4-6"])
+	}
+	if agg.CostByModel["claude-opus-4-6"] != 5.00 {
+		t.Errorf("CostByModel[opus]: got %f, want 5.00", agg.CostByModel["claude-opus-4-6"])
+	}
+}
+
 func TestAggregateStats_WithSinceFilter(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
@@ -2615,3 +2928,105 @@ func TestListSessionsByRepo_Pagination(t *testing.T) {
 		t.Error("page 1 and page 2 returned the same first session")
 	}
 }
+
+// TestListWorkflows_Aggregates verifies one aggregate row per distinct
+// workflow_id, with cost summed once across the workflow's agents, and rows
+// with an empty workflow_id excluded.
+func TestListWorkflows_Aggregates(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	save := func(id, wf string, cost float64) {
+		if err := db.SaveSession(&session.Session{
+			ID: id, WorkflowID: wf, TotalCost: cost,
+			StartedAt: now.Add(-time.Minute), LastActive: now,
+		}); err != nil {
+			t.Fatalf("SaveSession(%s): %v", id, err)
+		}
+	}
+	save("agent-1", "wf_1", 1.00)
+	save("agent-2", "wf_1", 0.50)
+	save("agent-3", "wf_2", 2.00)
+	save("plain", "", 9.99) // empty workflow_id must be excluded
+
+	workflows, err := db.ListWorkflows()
+	if err != nil {
+		t.Fatalf("ListWorkflows failed: %v", err)
+	}
+	if len(workflows) != 2 {
+		t.Fatalf("expected 2 workflows, got %d: %+v", len(workflows), workflows)
+	}
+
+	byID := make(map[string]WorkflowRow)
+	for _, w := range workflows {
+		byID[w.WorkflowID] = w
+	}
+	if _, ok := byID[""]; ok {
+		t.Error("empty workflow_id should be excluded from ListWorkflows")
+	}
+	wf1, ok := byID["wf_1"]
+	if !ok {
+		t.Fatalf("wf_1 missing from results: %+v", workflows)
+	}
+	if wf1.AgentCount != 2 {
+		t.Errorf("wf_1 AgentCount = %d, want 2", wf1.AgentCount)
+	}
+	if wf1.TotalCost != 1.50 {
+		t.Errorf("wf_1 TotalCost = %f, want 1.50", wf1.TotalCost)
+	}
+}
+
+// TestListReplayEvents_IncludesChildren locks in the UNION-vs-per-session
+// distinction: replay merges a parent's events with its direct children's
+// events chronologically, while ListEvents returns only the session's own.
+func TestListReplayEvents_IncludesChildren(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	base := time.Now().UTC().Truncate(time.Second)
+	if err := db.SaveSession(&session.Session{
+		ID: "p1", StartedAt: base, LastActive: base,
+	}); err != nil {
+		t.Fatalf("SaveSession(p1): %v", err)
+	}
+	if err := db.SaveSession(&session.Session{
+		ID: "agent-1", ParentID: "p1", StartedAt: base, LastActive: base,
+	}); err != nil {
+		t.Fatalf("SaveSession(agent-1): %v", err)
+	}
+
+	batch := &EventBatch{Events: []EventInsert{
+		{SessionID: "p1", Event: &parser.Event{
+			Type: "assistant", Role: "assistant", ContentText: "parent msg",
+			Timestamp: base, UUID: "u-parent",
+		}},
+		{SessionID: "agent-1", Event: &parser.Event{
+			Type: "assistant", Role: "assistant", ContentText: "child msg",
+			Timestamp: base.Add(time.Second), UUID: "u-child",
+		}},
+	}}
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
+
+	replay, err := db.ListReplayEvents("p1", 1000, 0)
+	if err != nil {
+		t.Fatalf("ListReplayEvents failed: %v", err)
+	}
+	if len(replay) != 2 {
+		t.Fatalf("ListReplayEvents returned %d events, want 2 (parent + child)", len(replay))
+	}
+	if replay[0].ContentPreview != "parent msg" || replay[1].ContentPreview != "child msg" {
+		t.Errorf("replay order wrong: [0]=%q [1]=%q", replay[0].ContentPreview, replay[1].ContentPreview)
+	}
+
+	own, err := db.ListEvents("p1", 100, 0)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+	if len(own) != 1 {
+		t.Fatalf("ListEvents returned %d events, want 1 (parent only)", len(own))
+	}
+}
+

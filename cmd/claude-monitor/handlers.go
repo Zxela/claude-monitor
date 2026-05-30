@@ -149,9 +149,12 @@ func handleSessions(sessionStore *session.Store, historyDB *store.DB) http.Handl
 		}
 		var rows []store.SessionRow
 		var err error
-		if repoID := q.Get("repo"); repoID != "" {
-			rows, err = historyDB.ListSessionsByRepo(repoID, limit, offset)
-		} else {
+		switch {
+		case q.Get("workflow") != "":
+			rows, err = historyDB.ListSessionsByWorkflow(q.Get("workflow"), limit, offset)
+		case q.Get("repo") != "":
+			rows, err = historyDB.ListSessionsByRepo(q.Get("repo"), limit, offset)
+		default:
 			rows, err = historyDB.ListSessions(limit, offset)
 		}
 		if err != nil {
@@ -343,6 +346,22 @@ func handleRepoSessions(historyDB *store.DB) http.HandlerFunc {
 	}
 }
 
+// handleWorkflows serves GET /api/workflows.
+func handleWorkflows(historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		workflows, err := historyDB.ListWorkflows()
+		if err != nil {
+			log.Printf("list workflows error: %v", err)
+			writeJSONError(w, "failed to list workflows", http.StatusInternalServerError)
+			return
+		}
+		if workflows == nil {
+			workflows = []store.WorkflowRow{}
+		}
+		writeJSON(w, workflows)
+	}
+}
+
 // handleSearch serves GET /api/search.
 func handleSearch(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -524,7 +543,7 @@ func handleSessionReplay(historyDB *store.DB) http.HandlerFunc {
 		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
 			offset = n
 		}
-		events, err := historyDB.ListEvents(id, limit, offset)
+		events, err := historyDB.ListReplayEvents(id, limit, offset)
 		if err != nil {
 			writeJSONError(w, "failed to list events", http.StatusInternalServerError)
 			return

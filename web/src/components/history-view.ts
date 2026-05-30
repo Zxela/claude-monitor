@@ -199,6 +199,20 @@ function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] 
   }));
 }
 
+/** Reduce children into one entry per distinct non-empty workflowId. */
+function workflowSummary(children: Session[]): { id: string; count: number; cost: number }[] {
+  const byWorkflow = new Map<string, { id: string; count: number; cost: number }>();
+  for (const c of children) {
+    const id = c.workflowId;
+    if (!id) continue;
+    const entry = byWorkflow.get(id) || { id, count: 0, cost: 0 };
+    entry.count += 1;
+    entry.cost += c.totalCost;
+    byWorkflow.set(id, entry);
+  }
+  return [...byWorkflow.values()];
+}
+
 function show(): void {
   if (!container) return;
   container.innerHTML = '';
@@ -277,6 +291,7 @@ function show(): void {
   for (const { parent, children } of grouped) {
     const hasChildren = children.length > 0;
     const isCollapsed = collapsedParents.has(parent.id) || !state.historyShowSubagents;
+    const workflows = workflowSummary(children);
 
     // Parent row
     const tr = createRow(parent, false);
@@ -323,12 +338,34 @@ function show(): void {
         const childCost = children.reduce((sum, c) => sum + c.totalCost, 0);
         badge.textContent = `(${children.length} subagent${children.length > 1 ? 's' : ''}, $${childCost.toFixed(2)})`;
         nameCell.appendChild(badge);
+
+        // Per-workflow badges (additive to the subagent badge)
+        for (const wf of workflows) {
+          const wfBadge = document.createElement('span');
+          wfBadge.className = 'history-subagent-badge';
+          const shortId = wf.id.replace(/^wf_/, '').slice(0, 8);
+          wfBadge.textContent = `wf ${shortId} (${wf.count} agent${wf.count > 1 ? 's' : ''}, $${wf.cost.toFixed(2)})`;
+          nameCell.appendChild(wfBadge);
+        }
       }
     }
     tbody.appendChild(tr);
 
     // Child rows (if not collapsed)
     if (hasChildren && !isCollapsed) {
+      // Workflow summary bands heading the agents that share each workflowId
+      for (const wf of workflows) {
+        const bandTr = document.createElement('tr');
+        bandTr.className = 'history-child-row history-workflow-band';
+        for (const col of COLUMNS) {
+          const td = document.createElement('td');
+          if (col.key === 'session') {
+            td.textContent = `Workflow wf_${wf.id.replace(/^wf_/, '')} — ${wf.count} agent${wf.count > 1 ? 's' : ''} · $${wf.cost.toFixed(2)}`;
+          }
+          bandTr.appendChild(td);
+        }
+        tbody.appendChild(bandTr);
+      }
       for (const child of children) {
         const childTr = createRow(child, true);
         tbody.appendChild(childTr);

@@ -394,3 +394,15 @@ body {
   margin-left: 8px;
   font-style: italic;
 }
+
+.history-workflow-band {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.02));
+}
+
+.history-workflow-band td {
+  color: var(--cyan, #56b6c2);
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.85;
+  cursor: default;
+}

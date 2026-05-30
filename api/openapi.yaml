@@ -4,7 +4,7 @@ info:
   description: >
     REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
     JSONL session files and broadcasts activity over WebSocket.
-  version: "3.1.1"
+  version: "3.5.0"
 
 servers:
   - url: http://localhost:7700
@@ -23,6 +23,8 @@ tags:
     description: Full-text search across sessions
   - name: repos
     description: Repository aggregations
+  - name: workflows
+    description: Claude Code workflow aggregations
   - name: stats
     description: Aggregated statistics and trends
   - name: settings
@@ -93,7 +95,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "v3.1.1"
+                version: "v3.5.0"
 
   /api/sessions:
     get:
@@ -130,6 +132,13 @@ paths:
         - name: repo
           in: query
           description: Filter sessions by repository ID (only applies to default/flat mode).
+          schema:
+            type: string
+        - name: workflow
+          in: query
+          description: >
+            Filter sessions to those belonging to a workflow (workflow_id), in
+            default/flat mode. Takes precedence over ?repo= when both are set.
           schema:
             type: string
         - name: limit
@@ -253,7 +262,10 @@ paths:
       summary: Replay manifest for a session
       description: >
         Returns the full ordered list of events for the session from the database
-        (up to 10,000), plus the session ID. Suitable for driving a timeline scrubber.
+        (up to 10,000), plus the session ID. The manifest also includes events
+        from the session's direct children (subagents / workflow agents), merged
+        chronologically, so a parent or workflow root replays as a single unified
+        timeline. Suitable for driving a timeline scrubber.
       operationId: getSessionReplay
       parameters:
         - $ref: "#/components/parameters/SessionId"
@@ -427,6 +439,27 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Session"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/workflows:
+    get:
+      tags: [workflows]
+      summary: List workflows
+      description: >
+        Returns one aggregate row per distinct Claude Code workflow (workflow_id),
+        with the number of agents in the workflow, total cost summed across all
+        its agents (counted once), and the most recent activity timestamp.
+      operationId: listWorkflows
+      responses:
+        "200":
+          description: Array of workflow aggregates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkflowRow"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -953,6 +986,19 @@ components:
           type: string
           description: How the session was started (e.g. "cli", "vscode"). Omitted when empty.
           example: "cli"
+        workflowId:
+          type: string
+          description: Workflow this agent session belongs to. Omitted when empty.
+          example: "wf_abc123"
+        agentId:
+          type: string
+          description: Stable agent identifier within a workflow/subagent run (agent-<id>). Omitted when empty.
+          example: "agent-2"
+        agentKind:
+          type: string
+          description: Origin of the session record.
+          enum: [session, subagent, workflow_agent]
+          example: "workflow_agent"
 
     GroupedSessions:
       type: object
@@ -1215,7 +1261,12 @@ components:
 
     ReplayManifest:
       type: object
-      description: Full ordered event list for a session, used to drive a replay timeline.
+      description: >
+        Full ordered event list for a replay timeline. The manifest now includes
+        events from the session AND its direct children (subagents / workflow
+        agents linked via parent_id), merged chronologically, so a parent or
+        workflow root replays as a single unified timeline. The response shape is
+        unchanged.
       required: [sessionId, events]
       properties:
         sessionId:
@@ -1224,9 +1275,35 @@ components:
           example: "abc123def456"
         events:
           type: array
-          description: All events in chronological order (up to 10,000).
+          description: >
+            All events for the session and its direct children, in chronological
+            order (up to 10,000).
           items:
             $ref: "#/components/schemas/EventRow"
+
+    WorkflowRow:
+      type: object
+      description: Aggregate stats for a single Claude Code workflow.
+      required: [workflowId, agentCount, totalCost, lastActive]
+      properties:
+        workflowId:
+          type: string
+          description: Workflow identifier (wf_<id> from the transcript path).
+          example: "wf_abc123"
+        agentCount:
+          type: integer
+          description: Number of agent sessions belonging to this workflow.
+          example: 4
+        totalCost:
+          type: number
+          format: double
+          description: Total cost summed across all agents in the workflow.
+          example: 1.85
+        lastActive:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp of the workflow's most recent agent activity. May be empty.
+          example: "2026-05-29T14:05:00Z"
 
     RepoRow:
       type: object
