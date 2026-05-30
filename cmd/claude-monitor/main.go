@@ -367,7 +367,9 @@ Examples:
 	// (idempotent — PersistBatch dedups on (session_id, COALESCE(message_id,uuid))
 	// and the pipeline rebuilds dedup state from the DB). --rebuild-history's only
 	// effect is forcing THIS v013 identity backfill to re-run past its done-marker.
-	backfillPaths := store.DefaultBackfillBasePaths()
+	// Include any --watch dirs so agent transcripts under custom watch paths are
+	// linked too (the done-marker would otherwise permanently skip them).
+	backfillPaths := append(store.DefaultBackfillBasePaths(), []string(extraPaths)...)
 	if res, err := historyDB.RunBackfillV013(backfillPaths, *rebuildHistory); err != nil {
 		// Never Fatalf: a partial/failed backfill must not block the daemon. The
 		// marker stays unset so it retries on the next start.

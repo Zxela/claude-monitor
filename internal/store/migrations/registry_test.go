@@ -250,3 +250,87 @@ func TestFailedMigration_RollsBack(t *testing.T) {
 		t.Errorf("expected version 1 after failed migration 2, got %d", v)
 	}
 }
+
+// columnExists reports whether a column is present on a table.
+func columnExists(t *testing.T, db *sql.DB, table, col string) bool {
+	t.Helper()
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		t.Fatalf("pragma_table_info(%s): %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		if name == col {
+			return true
+		}
+	}
+	return false
+}
+
+// indexExists reports whether a named index exists.
+func indexExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n); err != nil {
+		t.Fatalf("index lookup: %v", err)
+	}
+	return n > 0
+}
+
+// TestMigration013_DownRoundTrip runs the REAL registry to head, rolls back past
+// migration 013 (workflow columns), asserts the columns + index are dropped, then
+// re-applies to head — verifying 013's Down is correct and reversible. It rolls
+// back to version 12 generically so it stays valid as later migrations stack on 013.
+func TestMigration013_DownRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	for _, col := range []string{"workflow_id", "agent_id", "agent_kind"} {
+		if !columnExists(t, db, "sessions", col) {
+			t.Fatalf("after RunUp: sessions.%s missing", col)
+		}
+	}
+	if !indexExists(t, db, "idx_sessions_workflow") {
+		t.Fatal("after RunUp: idx_sessions_workflow missing")
+	}
+
+	// Roll back everything above migration 12 (013 and anything stacked on it).
+	for {
+		v, err := GetVersion(db)
+		if err != nil {
+			t.Fatalf("GetVersion: %v", err)
+		}
+		if v <= 12 {
+			break
+		}
+		if _, err := RunDown(db); err != nil {
+			t.Fatalf("RunDown from v%d: %v", v, err)
+		}
+	}
+
+	// 013's columns and index must be gone.
+	for _, col := range []string{"workflow_id", "agent_id", "agent_kind"} {
+		if columnExists(t, db, "sessions", col) {
+			t.Errorf("after rollback past 013: sessions.%s should be dropped", col)
+		}
+	}
+	if indexExists(t, db, "idx_sessions_workflow") {
+		t.Error("after rollback past 013: idx_sessions_workflow should be dropped")
+	}
+
+	// Re-apply to head — 013 (and anything above) must cleanly re-create the columns.
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp after rollback: %v", err)
+	}
+	if !columnExists(t, db, "sessions", "workflow_id") {
+		t.Error("after re-RunUp: workflow_id not restored")
+	}
+	if !indexExists(t, db, "idx_sessions_workflow") {
+		t.Error("after re-RunUp: idx_sessions_workflow not restored")
+	}
+}
