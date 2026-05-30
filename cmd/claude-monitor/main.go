@@ -279,7 +279,7 @@ func main() {
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	swaggerEnabled := flag.Bool("swagger", false, "serve Swagger UI at /swagger")
-	rebuildHistory := flag.Bool("rebuild-history", false, "re-ingest all historical JSONL from scratch (idempotent; rebuilds dedup from DB) and re-run the v013 identity backfill")
+	rebuildHistory := flag.Bool("rebuild-history", false, "force the one-time v013 workflow-identity backfill to re-run (ignores its done-marker). Historical JSONL is re-ingested on every startup regardless of this flag.")
 	// Handle --version before any other initialization.
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Printf("claude-monitor %s\n", version)
@@ -319,7 +319,7 @@ Examples:
   claude-monitor                                  # Start with defaults (localhost:7700)
   claude-monitor --port 8080 --watch /extra/path  # Custom port + extra watch dir
   claude-monitor --broadcast --swagger            # All interfaces + Swagger UI
-  claude-monitor --rebuild-history                # Re-scan all history and re-link workflows
+  claude-monitor --rebuild-history                # Force the workflow-identity backfill to re-run
 `)
 	}
 
@@ -362,10 +362,11 @@ Examples:
 	// already-linked rows. It is marker-guarded (settings key "backfill_v013_done")
 	// so steady-state startups short-circuit with no walk.
 	//
-	// --rebuild-history forces the backfill to re-run; the actual re-INGEST is
-	// achieved by the watcher reading every tracked file from offset 0 during
-	// bootstrap (idempotent: PersistBatch dedups on (session_id,
-	// COALESCE(message_id,uuid)) and the pipeline rebuilds dedup state from the DB).
+	// Re-INGEST of historical JSONL happens on EVERY startup regardless of this
+	// flag: the watcher reads every tracked file from offset 0 during bootstrap
+	// (idempotent — PersistBatch dedups on (session_id, COALESCE(message_id,uuid))
+	// and the pipeline rebuilds dedup state from the DB). --rebuild-history's only
+	// effect is forcing THIS v013 identity backfill to re-run past its done-marker.
 	backfillPaths := store.DefaultBackfillBasePaths()
 	if res, err := historyDB.RunBackfillV013(backfillPaths, *rebuildHistory); err != nil {
 		// Never Fatalf: a partial/failed backfill must not block the daemon. The

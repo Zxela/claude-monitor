@@ -143,6 +143,53 @@ func TestRunBackfillV013_OrphanRowLinked(t *testing.T) {
 	}
 }
 
+// TestRunBackfillV013_SessionIDOnLaterLine covers the realistic transcript shape
+// where the first lines carry no in-content sessionId — a leading blank line and a
+// summary line — and an unparseable line appears before the real assistant line.
+// firstValidEventSessionID must skip the blank/summary/garbage lines and link the
+// orphan row using the sessionId from the later line.
+func TestRunBackfillV013_SessionIDOnLaterLine(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	tmp := t.TempDir()
+	parentUUID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	path := filepath.Join(tmp, "proj", parentUUID, "subagents", "agent-LATE.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	summary := `{"type":"summary","summary":"prior session","leafUuid":"x"}` // parses, no sessionId
+	garbage := `this is not json`                                          // unparseable
+	real := fmt.Sprintf(`{"type":"assistant","sessionId":%q,"isSidechain":true,"uuid":"u2","timestamp":%q,"message":{"role":"assistant","content":"hi"}}`,
+		parentUUID, time.Now().UTC().Format(time.RFC3339))
+	// Leading blank line + no-sessionId summary + garbage, then the real line.
+	content := "\n" + summary + "\n" + garbage + "\n" + real + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	saveOrphan(t, db, "agent-LATE")
+
+	res, err := db.RunBackfillV013([]string{tmp}, false)
+	if err != nil {
+		t.Fatalf("RunBackfillV013 failed: %v", err)
+	}
+	if res.Updated != 1 {
+		t.Errorf("Updated = %d, want 1", res.Updated)
+	}
+
+	a, err := db.GetSession("agent-LATE")
+	if err != nil || a == nil {
+		t.Fatalf("GetSession(agent-LATE): %v / %v", a, err)
+	}
+	if a.ParentID != parentUUID {
+		t.Errorf("ParentID = %q, want %q (sessionId resolved from a later line)", a.ParentID, parentUUID)
+	}
+	if a.AgentKind != backfillKindSubagent {
+		t.Errorf("AgentKind = %q, want %q", a.AgentKind, backfillKindSubagent)
+	}
+}
+
 func TestRunBackfillV013_MarkerPreventsRerun(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)

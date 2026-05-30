@@ -4,7 +4,7 @@ info:
   description: >
     REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
     JSONL session files and broadcasts activity over WebSocket.
-  version: "3.5.0"
+  version: "3.4.0"
 
 servers:
   - url: http://localhost:7700
@@ -95,7 +95,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "v3.5.0"
+                version: "v3.4.0"
 
   /api/sessions:
     get:
