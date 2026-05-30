@@ -1168,6 +1168,54 @@ func TestApplyRepoResolution_NoDowngradeOrThrash(t *testing.T) {
 	}
 }
 
+// TestApplyRepoResolution_RemoteUpgradesToplevel verifies the provenance ranking
+// (remote > toplevel > fallback): a git toplevel-basename resolution (FromGit, no
+// URL) is upgraded when a git remote-origin resolution (FromGit, with URL) arrives
+// for the same session, and the reverse never downgrades. Guards the review
+// finding that a binary FromGit flag let a toplevel resolution permanently shadow
+// a stronger remote one for the same cwd-set.
+func TestApplyRepoResolution_RemoteUpgradesToplevel(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const sid = "remote-upgrade-session"
+	toplevel := &repo.Repo{ID: "widget", Name: "widget", FromGit: true} // git toplevel basename, no remote URL
+	remote := &repo.Repo{ID: "github.com/acme/widget", Name: "widget", URL: "git@github.com:acme/widget.git", FromGit: true}
+
+	// First: git toplevel basename (rank = SourceGitToplevel).
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, toplevel)
+	})
+	sess, _ := sessions.Get(sid)
+	if sess.RepoID != "widget" || sess.RepoSourceRank() != repo.SourceGitToplevel {
+		t.Fatalf("after toplevel: RepoID=%q rank=%d, want widget/%d", sess.RepoID, sess.RepoSourceRank(), repo.SourceGitToplevel)
+	}
+
+	// Then: git remote origin (rank = SourceGitRemote) -> must upgrade.
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, remote)
+	})
+	sess, _ = sessions.Get(sid)
+	if sess.RepoID != "github.com/acme/widget" {
+		t.Errorf("after remote: RepoID = %q, want github.com/acme/widget (remote should upgrade toplevel)", sess.RepoID)
+	}
+	if sess.RepoSourceRank() != repo.SourceGitRemote {
+		t.Errorf("after remote: rank = %d, want %d", sess.RepoSourceRank(), repo.SourceGitRemote)
+	}
+
+	// A later toplevel resolution must NOT downgrade the remote.
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, &repo.Repo{ID: "widget", Name: "widget", FromGit: true})
+	})
+	sess, _ = sessions.Get(sid)
+	if sess.RepoID != "github.com/acme/widget" {
+		t.Errorf("toplevel must not downgrade remote: RepoID = %q, want github.com/acme/widget", sess.RepoID)
+	}
+}
+
 // TestApplyRepoResolution_RestartReupsertPreservesMetadata ties P1-1 and P1-2 at the
 // pipeline layer: after a full git resolution is persisted, a restart-shaped re-upsert
 // (a cache-hit Repo carrying only the ID, FromGit=false) must not blank the stored

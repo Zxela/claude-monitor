@@ -260,17 +260,20 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 // applyRepoResolution persists the resolved repo and copies CWD/branch/model metadata.
 func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo) {
 	if r != nil {
+		newRank := r.SourceRank()
 		// First resolution for this session.
 		if s.RepoID == "" {
 			s.RepoID = r.ID
-			s.SetRepoFromGit(r.FromGit)
+			s.SetRepoSourceRank(newRank)
 			if err := p.db.UpsertRepo(r); err != nil {
 				log.Printf("upsert repo error: %v", err)
 			}
-		} else if r.FromGit && !s.RepoFromGit() && r.ID != s.RepoID {
-			// Upgrade an earlier non-git fallback to an authoritative git repo.
+		} else if r.ID != s.RepoID && newRank > s.RepoSourceRank() {
+			// Upgrade to a strictly more authoritative resolution: a non-git
+			// fallback can be upgraded by a git resolution, and a git toplevel
+			// basename can be upgraded by a git remote origin. Never downgrades.
 			s.RepoID = r.ID
-			s.SetRepoFromGit(true)
+			s.SetRepoSourceRank(newRank)
 			if err := p.db.UpsertRepo(r); err != nil {
 				log.Printf("upsert repo error: %v", err)
 			}

@@ -58,14 +58,19 @@ type Session struct {
 	Version        string           `json:"version,omitempty"`
 	Entrypoint     string           `json:"entrypoint,omitempty"`
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
-	repoFromGit    bool             `json:"-"` // true when RepoID was resolved from git (authoritative); runtime-only, not persisted
+	repoSourceRank int              `json:"-"` // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 }
 
-// RepoFromGit reports whether the current RepoID came from an authoritative git resolution.
-func (s *Session) RepoFromGit() bool { return s.repoFromGit }
+// RepoSourceRank reports the resolution-authority rank of the current RepoID
+// (see repo.Source* constants). Higher means more authoritative.
+func (s *Session) RepoSourceRank() int { return s.repoSourceRank }
 
-// SetRepoFromGit records repo-resolution provenance.
-func (s *Session) SetRepoFromGit(v bool) { s.repoFromGit = v }
+// SetRepoSourceRank records the resolution-authority rank of the current RepoID.
+func (s *Session) SetRepoSourceRank(rank int) { s.repoSourceRank = rank }
+
+// RepoFromGit reports whether the current RepoID came from an authoritative git
+// resolution (git remote or toplevel), as opposed to a non-git fallback.
+func (s *Session) RepoFromGit() bool { return s.repoSourceRank >= 2 }
 
 // HasSeenMessageID reports whether the given key has been recorded.
 func (s *Session) HasSeenMessageID(key string) bool {
