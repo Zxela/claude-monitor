@@ -599,6 +599,7 @@ Examples:
 	mux.HandleFunc("GET /api/search/full", handleSearchFull(historyDB))
 	mux.HandleFunc("GET /api/search/combined", handleSearchCombined(historyDB))
 	mux.HandleFunc("GET /api/sessions/{id}/events", handleSessionEvents(historyDB))
+	mux.HandleFunc("GET /api/sessions/{id}/autopsy", handleSessionAutopsy(sessionStore, historyDB))
 	mux.HandleFunc("GET /api/sessions/{id}/replay", handleSessionReplay(historyDB))
 	mux.HandleFunc("GET /api/settings", handleSettings(historyDB))
 	mux.HandleFunc("PUT /api/settings/{key}", handleSettingsUpdate(historyDB))

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -525,6 +526,191 @@ func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 		}
 		writeJSON(w, events)
 	}
+}
+
+// handleSessionAutopsy serves GET /api/sessions/{id}/autopsy as markdown.
+func handleSessionAutopsy(sessionStore *session.Store, historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.PathValue("id"))
+		if id == "" {
+			writeJSONError(w, "missing session id", http.StatusBadRequest)
+			return
+		}
+
+		var sess *session.Session
+		if live, ok := sessionStore.Get(id); ok {
+			sess = live
+		} else {
+			row, err := historyDB.GetSession(id)
+			if err != nil {
+				writeJSONError(w, "failed to get session", http.StatusInternalServerError)
+				return
+			}
+			if row == nil {
+				writeJSONError(w, "session not found", http.StatusNotFound)
+				return
+			}
+			sess = row.ToSession()
+		}
+
+		events, err := historyDB.ListEvents(id, 5000, 0)
+		if err != nil {
+			writeJSONError(w, "failed to list session events", http.StatusInternalServerError)
+			return
+		}
+
+		report := buildSessionAutopsyMarkdown(sess, events)
+		filename := fmt.Sprintf("claude-monitor-autopsy-%s.md", safeFilenamePart(id))
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		_, _ = w.Write([]byte(report))
+	}
+}
+
+func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow) string {
+	const (
+		maxCommands = 20
+		maxErrors   = 12
+	)
+
+	var commands, errors []string
+	seenCommands := make(map[string]bool)
+	for _, ev := range events {
+		if len(commands) < maxCommands && (strings.EqualFold(ev.ToolName, "bash") || strings.EqualFold(ev.ToolName, "shell")) {
+			cmd := oneLine(firstNonEmpty(ev.ToolDetail, ev.ContentPreview, ev.FullContent))
+			if cmd != "" && !seenCommands[cmd] {
+				seenCommands[cmd] = true
+				commands = append(commands, truncateRunes(cmd, 140))
+			}
+		}
+		if len(errors) < maxErrors && ev.IsError {
+			detail := firstNonEmpty(ev.Stderr, ev.ContentPreview, ev.ToolDetail, ev.FullContent)
+			if detail == "" {
+				detail = "error event"
+			}
+			errors = append(errors, mdInline(truncateRunes(detail, 180)))
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Session Autopsy\n\n")
+	fmt.Fprintf(&sb, "- **Session ID:** `%s`\n", sess.ID)
+	fmt.Fprintf(&sb, "- **Task:** %s\n", mdInline(sess.TaskDescription))
+	fmt.Fprintf(&sb, "- **Model:** %s\n", mdInline(sess.Model))
+	fmt.Fprintf(&sb, "- **Repo ID:** %s\n", mdInline(sess.RepoID))
+	fmt.Fprintf(&sb, "- **Branch:** %s\n", mdInline(sess.GitBranch))
+	fmt.Fprintf(&sb, "- **Started:** %s\n", mdInline(formatRFC3339(sess.StartedAt)))
+	fmt.Fprintf(&sb, "- **Ended:** %s\n", mdInline(formatRFC3339(sess.LastActive)))
+	fmt.Fprintf(&sb, "- **Duration:** %s\n", mdInline(sessionDuration(sess)))
+
+	sb.WriteString("\n## Cost & Usage\n\n")
+	fmt.Fprintf(&sb, "- **Total cost:** $%.2f\n", sess.TotalCost)
+	fmt.Fprintf(&sb, "- **Input tokens:** %d\n", sess.InputTokens)
+	fmt.Fprintf(&sb, "- **Output tokens:** %d\n", sess.OutputTokens)
+	fmt.Fprintf(&sb, "- **Cache read tokens:** %d\n", sess.CacheReadTokens)
+	fmt.Fprintf(&sb, "- **Cache creation tokens:** %d\n", sess.CacheCreationTokens)
+	fmt.Fprintf(&sb, "- **Messages:** %d\n", sess.MessageCount)
+	fmt.Fprintf(&sb, "- **Events:** %d\n", sess.EventCount)
+	fmt.Fprintf(&sb, "- **Errors:** %d\n", sess.ErrorCount)
+
+	sb.WriteString("\n## Commands Run\n\n")
+	if len(commands) == 0 {
+		sb.WriteString("_No shell command events captured._\n")
+	} else {
+		for _, cmd := range commands {
+			fmt.Fprintf(&sb, "- `%s`\n", cmd)
+		}
+	}
+
+	sb.WriteString("\n## Errors\n\n")
+	if len(errors) == 0 {
+		sb.WriteString("_No errors recorded._\n")
+	} else {
+		for _, errLine := range errors {
+			fmt.Fprintf(&sb, "- %s\n", errLine)
+		}
+	}
+
+	return sb.String()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
+}
+
+func mdInline(s string) string {
+	s = oneLine(s)
+	if s == "" {
+		return "n/a"
+	}
+	return strings.ReplaceAll(s, "`", "'")
+}
+
+func formatRFC3339(t time.Time) string {
+	if t.IsZero() {
+		return "n/a"
+	}
+	return t.Format(time.RFC3339)
+}
+
+func sessionDuration(sess *session.Session) string {
+	if sess.StartedAt.IsZero() || sess.LastActive.IsZero() || sess.LastActive.Before(sess.StartedAt) {
+		return "n/a"
+	}
+	return fmtDuration(sess.LastActive.Sub(sess.StartedAt))
+}
+
+func fmtDuration(d time.Duration) string {
+	if d < 0 {
+		d = -d
+	}
+	total := int(d.Seconds())
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
+
+func safeFilenamePart(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteRune('-')
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "session"
+	}
+	return out
 }
 
 // handleSessionReplay serves GET /api/sessions/{id}/replay.

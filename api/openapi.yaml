@@ -257,6 +257,28 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/sessions/{id}/autopsy:
+    get:
+      tags: [sessions]
+      summary: Export a session autopsy report
+      description: >
+        Returns a markdown report summarizing a session, including timing,
+        cost/tokens, command highlights, file touches, and error excerpts.
+      operationId: getSessionAutopsy
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Markdown autopsy report
+          content:
+            text/markdown:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/sessions/{id}/replay:
     get:
       tags: [replay]
