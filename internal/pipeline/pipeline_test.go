@@ -753,6 +753,185 @@ func TestParentLinking_InContent_ChildBeforeParent_BackfillsChildren(t *testing.
 	}
 }
 
+// TestParentLinking_InContentBeatsParentUuid is the precedence guard for the REAL
+// on-disk shape, where a sidechain line carries BOTH an in-content sessionId (the
+// true parent session UUID) AND a parentUuid (an intra-file message-chain pointer
+// that is NOT a session key). resolveParentID must prefer the in-content sessionId.
+// The decoy parent named by parentUuid is pre-seeded into the store so that an
+// (incorrect) parentUuid-first ordering WOULD resolve to it — if a future refactor
+// moved the parentUuid lookup above the in-content branch, this test fails instead
+// of silently re-breaking every real workflow's parent attribution.
+func TestParentLinking_InContentBeatsParentUuid(t *testing.T) {
+	cases := []struct {
+		name     string
+		childKey string
+		childDir string
+	}{
+		{"shape2_task_subagent", "agent-prec2", "subagents"},
+		{"shape3_workflow_agent", "agent-prec3", "subagents/workflows/wf_p"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			sessions := session.NewStore()
+			resolver := repo.NewResolver()
+			p := New(sessions, db, resolver, nil)
+			defer p.Stop()
+
+			const realParent = "real-parent-uuid"
+			const decoyParent = "decoy-parent-uuid"
+			ts := time.Now()
+
+			// Pre-seed the decoy parent so a parentUuid-first lookup WOULD succeed.
+			decoyLine := makeJSONL(t, map[string]interface{}{
+				"type":      "assistant",
+				"timestamp": ts.Format(time.RFC3339Nano),
+				"sessionId": decoyParent,
+				"message": map[string]interface{}{
+					"id":      "msg-decoy",
+					"role":    "assistant",
+					"content": "decoy",
+					"usage":   map[string]interface{}{"input_tokens": 5, "output_tokens": 5},
+					"model":   "claude-sonnet-4-6",
+				},
+			})
+			p.Process(watcher.Event{SessionID: decoyParent, Line: decoyLine, Bootstrap: true})
+
+			// Child carries BOTH in-content sessionId (real parent) and parentUuid (decoy).
+			childLine := makeJSONL(t, map[string]interface{}{
+				"type":        "assistant",
+				"timestamp":   ts.Add(time.Second).Format(time.RFC3339Nano),
+				"sessionId":   realParent,
+				"parentUuid":  decoyParent,
+				"isSidechain": true,
+				"message": map[string]interface{}{
+					"id":      "msg-" + tc.childKey,
+					"role":    "assistant",
+					"content": "agent response",
+					"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+					"model":   "claude-sonnet-4-6",
+				},
+			})
+			p.Process(watcher.Event{
+				SessionID: tc.childKey,
+				FilePath:  "/home/user/.claude/projects/hash/" + realParent + "/" + tc.childDir + "/" + tc.childKey + ".jsonl",
+				Line:      childLine,
+				Bootstrap: true,
+			})
+
+			childSess, ok := sessions.Get(tc.childKey)
+			if !ok {
+				t.Fatal("child session not found")
+			}
+			if childSess.ParentID != realParent {
+				t.Errorf("child ParentID = %q, want %q (in-content sessionId must beat parentUuid %q)", childSess.ParentID, realParent, decoyParent)
+			}
+		})
+	}
+}
+
+// TestParentLinking_InContent_ParentBeforeChild covers the common live-tailing
+// order: the parent <uuid>.jsonl is read BEFORE a sidechain agent line carrying
+// the in-content sessionId. The parent already exists, so the child must link
+// immediately, parent.Children must contain it, and no deferred link should
+// linger. Mirrors TestParentLinking_DirectUUID but drives the in-content branch
+// (ev.SessionID != msg.SessionID, no parentUuid).
+func TestParentLinking_InContent_ParentBeforeChild(t *testing.T) {
+	cases := []struct {
+		name     string
+		childKey string
+		childDir string
+	}{
+		{"shape2_task_subagent", "agent-pbc2", "subagents"},
+		{"shape3_workflow_agent", "agent-pbc3", "subagents/workflows/wf_q"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			sessions := session.NewStore()
+			resolver := repo.NewResolver()
+			p := New(sessions, db, resolver, nil)
+			defer p.Stop()
+
+			const parentID = "parent-pbc-uuid"
+			ts := time.Now()
+
+			// Step 1: parent arrives first.
+			parentLine := makeJSONL(t, map[string]interface{}{
+				"type":      "assistant",
+				"timestamp": ts.Format(time.RFC3339Nano),
+				"sessionId": parentID,
+				"message": map[string]interface{}{
+					"id":      "msg-parent-pbc",
+					"role":    "assistant",
+					"content": "parent response",
+					"usage":   map[string]interface{}{"input_tokens": 20, "output_tokens": 10},
+					"model":   "claude-sonnet-4-6",
+				},
+			})
+			p.Process(watcher.Event{
+				SessionID: parentID,
+				FilePath:  "/home/user/.claude/projects/hash/" + parentID + ".jsonl",
+				Line:      parentLine,
+				Bootstrap: true,
+			})
+
+			// Step 2: child sidechain line, in-content sessionId == parent, no parentUuid.
+			childLine := makeJSONL(t, map[string]interface{}{
+				"type":        "assistant",
+				"timestamp":   ts.Add(time.Second).Format(time.RFC3339Nano),
+				"sessionId":   parentID,
+				"isSidechain": true,
+				"message": map[string]interface{}{
+					"id":      "msg-" + tc.childKey,
+					"role":    "assistant",
+					"content": "agent response",
+					"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+					"model":   "claude-sonnet-4-6",
+				},
+			})
+			p.Process(watcher.Event{
+				SessionID: tc.childKey,
+				FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/" + tc.childDir + "/" + tc.childKey + ".jsonl",
+				Line:      childLine,
+				Bootstrap: true,
+			})
+
+			childSess, ok := sessions.Get(tc.childKey)
+			if !ok {
+				t.Fatal("child session not found")
+			}
+			if childSess.ParentID != parentID {
+				t.Errorf("child ParentID = %q, want %q", childSess.ParentID, parentID)
+			}
+
+			parentSess, ok := sessions.Get(parentID)
+			if !ok {
+				t.Fatal("parent session not found")
+			}
+			found := false
+			for _, c := range parentSess.Children {
+				if c == tc.childKey {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("parent.Children does not contain %q; got %v", tc.childKey, parentSess.Children)
+			}
+
+			// Parent already existed, so resolvePendingLinks must clear the deferred
+			// backlink within the same Process call.
+			p.linkMu.Lock()
+			remaining := p.pendingParentLinks[tc.childKey]
+			p.linkMu.Unlock()
+			if remaining != "" {
+				t.Errorf("pendingParentLinks[%q] should be cleared (parent already present); got %q", tc.childKey, remaining)
+			}
+		})
+	}
+}
+
 // TestParentLinking_TwoAgentsShareParent verifies that two distinct agents (one a
 // task subagent, one a workflow agent) carrying the same in-content sessionId both
 // link to the same parent session.
