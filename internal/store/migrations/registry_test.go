@@ -214,6 +214,66 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+// TestOpus48Pricing_SeededAndReversible runs the REAL migration registry to head
+// and asserts migration 014 seeds the claude-opus-4-8 model_pricing row at $5/$25
+// (matching Opus 4.5/4.6/4.7), then rolls back 014 and confirms only that row is
+// removed (011's rows survive).
+func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
+	// Uses the real package registry (no swap) so all numbered migrations apply.
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	var input, output, cacheRead, cacheCreate float64
+	err := db.QueryRow(
+		`SELECT input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`,
+	).Scan(&input, &output, &cacheRead, &cacheCreate)
+	if err != nil {
+		t.Fatalf("claude-opus-4-8 row not found after RunUp: %v", err)
+	}
+	if input != 5.0 {
+		t.Errorf("input_per_mtok = %v, want 5", input)
+	}
+	if output != 25.0 {
+		t.Errorf("output_per_mtok = %v, want 25", output)
+	}
+	// Cache rates follow the Opus convention from migration 011: cache read is
+	// 10% of input and 5m cache create is 1.25x input.
+	if cacheRead != 0.50 {
+		t.Errorf("cache_read_per_mtok = %v, want 0.50", cacheRead)
+	}
+	if cacheCreate != 6.25 {
+		t.Errorf("cache_create_per_mtok = %v, want 6.25", cacheCreate)
+	}
+
+	// Roll back migration 014 only.
+	name, err := RunDown(db)
+	if err != nil {
+		t.Fatalf("RunDown: %v", err)
+	}
+	if name != "opus_4_8_pricing" {
+		t.Fatalf("RunDown rolled back %q, want opus_4_8_pricing (014 must be the head)", name)
+	}
+
+	// The opus-4-8 row must be gone.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`).Scan(&n); err != nil {
+		t.Fatalf("count after down: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("claude-opus-4-8 row should be removed after RunDown, found %d", n)
+	}
+
+	// But the rows seeded by migration 011 must remain intact.
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix = 'claude-opus-4-6'`).Scan(&n); err != nil {
+		t.Fatalf("count opus-4-6 after down: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("claude-opus-4-6 (from migration 011) should survive 014 rollback, found %d", n)
+	}
+}
+
 func TestFailedMigration_RollsBack(t *testing.T) {
 	saved := registry
 	defer func() { registry = saved }()

@@ -9,16 +9,20 @@
     "lint": "eslint src/",
     "lint:fix": "eslint --fix src/",
     "format": "prettier --write src/",
-    "format:check": "prettier --check src/"
+    "format:check": "prettier --check src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.1.1",
     "prettier": "^3.8.1",
     "typescript": "~5.7.0",
     "typescript-eslint": "^8.58.1",
-    "vite": "^6.4.2"
+    "vite": "^6.4.2",
+    "vitest": "^4.1.7"
   },
   "dependencies": {
     "chart.js": "4.5.1"

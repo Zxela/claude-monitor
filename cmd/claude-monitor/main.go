@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,9 +35,6 @@ import (
 
 // version is set by -ldflags at build time.
 var version = "dev"
-
-// validContainerName matches safe Docker container names (alphanumeric, dash, underscore, dot).
-var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // writeJSON writes a JSON success response, logging any encoding error.
 func writeJSON(w http.ResponseWriter, v any) {
@@ -259,7 +255,7 @@ const swaggerHTML = `<!DOCTYPE html>
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
 SwaggerUIBundle({
-  url: '/swagger/openapi.yaml',
+  url: '/api/openapi.yaml',
   dom_id: '#swagger-ui',
   presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
   layout: "BaseLayout"
@@ -278,7 +274,7 @@ func main() {
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
-	swaggerEnabled := flag.Bool("swagger", false, "serve Swagger UI at /swagger")
+	swaggerEnabled := flag.Bool("swagger", false, "deprecated: API docs are always served at /api (flag retained for backward compatibility, no effect)")
 	rebuildHistory := flag.Bool("rebuild-history", false, "force the one-time v013 workflow-identity backfill to re-run (ignores its done-marker). Historical JSONL is re-ingested on every startup regardless of this flag.")
 	// Handle --version before any other initialization.
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
@@ -318,7 +314,7 @@ Data:
 Examples:
   claude-monitor                                  # Start with defaults (localhost:7700)
   claude-monitor --port 8080 --watch /extra/path  # Custom port + extra watch dir
-  claude-monitor --broadcast --swagger            # All interfaces + Swagger UI
+  claude-monitor --broadcast                      # All interfaces (API docs always at /api)
   claude-monitor --rebuild-history                # Force the workflow-identity backfill to re-run
 `)
 	}
@@ -610,7 +606,6 @@ Examples:
 	mux.HandleFunc("PUT /api/pricing/{model_prefix}", handlePricingUpdate(historyDB))
 	mux.HandleFunc("GET /api/storage", handleStorage(historyDB))
 	mux.HandleFunc("DELETE /api/cache/repos", handleCacheClear(resolver, historyDB))
-	mux.HandleFunc("POST /api/sessions/{id}/stop", handleSessionStop(sessionStore, &dc))
 	mux.HandleFunc("GET /health", handleHealth(historyDB, fw))
 	mux.HandleFunc("GET /api/version", handleVersion())
 
@@ -619,15 +614,20 @@ Examples:
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	// Swagger UI (opt-in via --swagger flag).
-	if *swaggerEnabled {
-		mux.HandleFunc("GET /swagger/openapi.yaml", handleSwaggerYAML())
-		mux.HandleFunc("GET /swagger", handleSwaggerUI())
-		mux.HandleFunc("GET /swagger/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/swagger", http.StatusMovedPermanently)
-		})
-		log.Println("swagger UI enabled at /swagger")
-	}
+	// API docs — always served. Swagger UI HTML at GET /api, spec at GET /api/openapi.yaml.
+	// `GET /api` is an exact (non-trailing-slash) pattern in Go 1.22 ServeMux, so it does
+	// NOT match /api/sessions, /api/stats, /api/openapi.yaml, etc. — no route conflict.
+	mux.HandleFunc("GET /api", handleSwaggerUI())
+	mux.HandleFunc("GET /api/openapi.yaml", handleSwaggerYAML())
+	// Legacy /swagger paths redirect to /api (the --swagger flag is now a deprecated no-op).
+	mux.HandleFunc("GET /swagger", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("GET /swagger/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api", http.StatusMovedPermanently)
+	})
+	// --swagger is retained for backward compatibility but has no effect; silence unused var.
+	_ = swaggerEnabled
 
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{

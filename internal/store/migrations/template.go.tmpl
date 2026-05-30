@@ -5,11 +5,11 @@ import "database/sql"
 func init() {
 	Register({{.Version}}, Migration{
 		Name: "{{.Name}}",
-		Up: func(db *sql.DB) error {
+		Up: func(tx *sql.Tx) error {
 			// TODO: implement up migration
 			return nil
 		},
-		Down: func(db *sql.DB) error {
+		Down: func(tx *sql.Tx) error {
 			// TODO: implement down migration
 			return nil
 		},

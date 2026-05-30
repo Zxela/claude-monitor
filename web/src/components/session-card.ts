@@ -13,6 +13,29 @@ import {
 } from '../utils';
 import { getLastTool } from '../tool-tracker';
 
+/**
+ * Filter map used by the "N err" badge to show only error entries in the feed.
+ * Every feed entry type that feed-panel knows about must appear here as `false`
+ * so that applyFilters()'s `filters[type] ?? true` default does NOT leak it.
+ * This must cover EVERY value render-message's detectType() can return — that
+ * includes `command` (omitting it leaked command entries) and the `system`
+ * fallback, which applyFilters() also assigns to entries with no dataset.type
+ * (`entry.dataset.type || 'system'`). Both must be explicitly false.
+ */
+export function errorsOnlyFilters(): Record<string, boolean> {
+  return {
+    user: false,
+    assistant: false,
+    tool_use: false,
+    tool_result: false,
+    agent: false,
+    hook: false,
+    command: false,
+    system: false,
+    error: true,
+  };
+}
+
 function getCostTier(cost: number): string {
   if (cost < 0.5) return 'cost-tier-low';
   if (cost < 2) return 'cost-tier-mid';
@@ -115,15 +138,7 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
       e.stopPropagation();
       update({
         selectedSessionId: session.id,
-        feedTypeFilters: {
-          user: false,
-          assistant: false,
-          tool_use: false,
-          tool_result: false,
-          agent: false,
-          hook: false,
-          error: true,
-        },
+        feedTypeFilters: errorsOnlyFilters(),
       });
     };
     errEl.addEventListener('click', filterErrors);
@@ -211,15 +226,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       e.stopPropagation();
       update({
         selectedSessionId: session.id,
-        feedTypeFilters: {
-          user: false,
-          assistant: false,
-          tool_use: false,
-          tool_result: false,
-          agent: false,
-          hook: false,
-          error: true,
-        },
+        feedTypeFilters: errorsOnlyFilters(),
       });
     };
     errEl.addEventListener('click', filterErrors);

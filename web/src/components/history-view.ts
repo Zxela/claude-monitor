@@ -145,8 +145,9 @@ function exportCsv(): void {
   URL.revokeObjectURL(url);
 }
 
-/** Group rows: parents first (sorted), children grouped under their parent */
-function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] {
+/** Group rows: parents first (sorted), children grouped under their parent.
+ *  Exported for unit testing of the orphan-promotion / nested-flatten logic. */
+export function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] {
   const childrenByParent = new Map<string, Session[]>();
   const parents: Session[] = [];
   const rowById = new Map<string, Session>();

@@ -4,7 +4,7 @@ import { state, subscribe, update } from '../state';
 import { escapeHtml, formatDurationSecs } from '../utils';
 import '../styles/views.css';
 
-interface TimelineEvent {
+export interface TimelineEvent {
   index: number;
   timestamp: string;
   type: string;
@@ -12,6 +12,28 @@ interface TimelineEvent {
   contentPreview: string;
   toolName?: string;
   costUSD: number;
+}
+
+// A drawn bar: a run of consecutive events in the same lane. Built once by
+// buildSpans() and consumed by BOTH draw() and getEventAt() so the hover
+// hit-test geometry exactly matches what is rendered.
+export interface Span {
+  start: number;
+  end: number;
+  lane: number;
+  color: string;
+  label: string;
+  events: TimelineEvent[];
+}
+
+// The drawing/hit-test coordinate frame. draw() and getEventAt() MUST use the
+// same instance so a cursor over a drawn bar resolves to that bar.
+export interface TimelineGeometry {
+  t0: number; // timestamp (ms) of the first event = x-origin
+  pixelsPerMs: number; // zoom
+  offsetX: number; // horizontal pan
+  laneH: number; // per-lane height
+  topY: number; // y of the first lane
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -111,7 +133,10 @@ function show(): void {
 
   canvas = document.createElement('canvas');
   canvas.setAttribute('role', 'img');
-  canvas.setAttribute('aria-label', 'Session timeline — horizontal lanes show user, assistant, and tool activity over time');
+  canvas.setAttribute(
+    'aria-label',
+    'Session timeline — horizontal lanes show user, assistant, and tool activity over time',
+  );
   canvas.textContent = 'Session timeline visualization';
   wrapper.appendChild(canvas);
 
@@ -182,6 +207,108 @@ function getColor(evt: TimelineEvent): string {
   return TYPE_COLORS[evt.role] || TYPE_COLORS[evt.type] || TYPE_COLORS.system;
 }
 
+// 2s gap in the same lane breaks a span. Exported so tests reference the same
+// threshold the merge logic uses.
+export const GAP_THRESHOLD = 2000;
+
+// Build spans: group consecutive events in the same lane into bars.
+// A span starts when an event enters a lane and ends when the next event
+// is in a different lane, or there's a gap > GAP_THRESHOLD in the same lane.
+// PURE over its `evts` argument — shared by draw() (rendering) and
+// getEventAt() (hover hit-test) so the tooltip target always matches the drawn
+// bar. Exported (taking events as an arg) so the merge/split geometry is
+// testable without module state. Requires evts.length >= 2 for meaningful bars.
+export function buildSpansFrom(evts: TimelineEvent[]): Span[] {
+  const spans: Span[] = [];
+  let cur: Span | null = null;
+
+  for (let i = 0; i < evts.length; i++) {
+    const evt = evts[i];
+    const ts = new Date(evt.timestamp).getTime();
+    const lane = getLane(evt);
+    // Duration: time until the next event in a different lane starts
+    // (meaning this lane was "active" until then), or until the next
+    // event in the same lane if it's close (continuation).
+    let end: number;
+    if (i < evts.length - 1) {
+      const nextTs = new Date(evts[i + 1].timestamp).getTime();
+      // If the next global event is in a different lane, this lane was
+      // active until that event started.
+      if (getLane(evts[i + 1]) !== lane) {
+        end = nextTs;
+      } else {
+        // Same lane next — bar ends at a small fixed duration (point event).
+        end = ts + Math.min(nextTs - ts, 500);
+      }
+    } else {
+      end = ts + 500; // last event
+    }
+
+    if (cur && cur.lane === lane && ts - cur.end < GAP_THRESHOLD) {
+      // Extend current span
+      cur.end = end;
+      cur.events.push(evt);
+    } else {
+      // Start new span
+      if (cur) spans.push(cur);
+      cur = {
+        start: ts,
+        end,
+        lane,
+        color: getColor(evt),
+        label: evt.toolName || evt.role || '',
+        events: [evt],
+      };
+    }
+  }
+  if (cur) spans.push(cur);
+  return spans;
+}
+
+// Module wrapper: build spans from the current module-level events.
+function buildSpans(): Span[] {
+  return buildSpansFrom(events);
+}
+
+/**
+ * PURE hit-test core: given a set of spans, the shared drawing geometry, and a
+ * cursor at (mx, my), return the event under the cursor (the one whose own
+ * timestamp maps nearest to mx within the hit span), or null if no bar is hit.
+ * Uses byte-identical x/barW/y/barH math to draw() so hover matches the bar.
+ * Exported so the geometry is testable without a canvas / module state.
+ */
+export function pickEventAt(
+  spans: Span[],
+  geom: TimelineGeometry,
+  mx: number,
+  my: number,
+): TimelineEvent | null {
+  const { t0, pixelsPerMs, offsetX, laneH, topY } = geom;
+  for (const span of spans) {
+    const x = (span.start - t0) * pixelsPerMs + offsetX;
+    const barW = Math.max((span.end - span.start) * pixelsPerMs, 4); // min 4px
+    const y = topY + span.lane * laneH + 4;
+    const barH = laneH - 8;
+
+    if (mx >= x && mx <= x + barW && my >= y && my <= y + barH) {
+      // Return the event whose own timestamp is nearest the cursor for a
+      // finer tooltip; falls back to the first event in the span.
+      let best = span.events[0];
+      let bestDist = Infinity;
+      for (const evt of span.events) {
+        const evtX = (new Date(evt.timestamp).getTime() - t0) * pixelsPerMs + offsetX;
+        const dist = Math.abs(evtX - mx);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = evt;
+        }
+      }
+      return best;
+    }
+  }
+  return null;
+}
+
 function draw(): void {
   if (!ctx || !canvas || !container || events.length === 0) return;
   const w = container.clientWidth,
@@ -226,61 +353,8 @@ function draw(): void {
     ctx.stroke();
   }
 
-  // Build spans: group consecutive events in the same lane into bars.
-  // A span starts when an event enters a lane and ends when the next event
-  // is in a different lane, or there's a gap > 2s in the same lane.
-  interface Span {
-    start: number;
-    end: number;
-    lane: number;
-    color: string;
-    label: string;
-    events: TimelineEvent[];
-  }
-  const spans: Span[] = [];
-  let cur: Span | null = null;
-  const GAP_THRESHOLD = 2000; // 2s gap breaks a span
-
-  for (let i = 0; i < events.length; i++) {
-    const evt = events[i];
-    const ts = new Date(evt.timestamp).getTime();
-    const lane = getLane(evt);
-    // Duration: time until the next event in a different lane starts
-    // (meaning this lane was "active" until then), or until the next
-    // event in the same lane if it's close (continuation).
-    let end: number;
-    if (i < events.length - 1) {
-      const nextTs = new Date(events[i + 1].timestamp).getTime();
-      // If the next global event is in a different lane, this lane was
-      // active until that event started.
-      if (getLane(events[i + 1]) !== lane) {
-        end = nextTs;
-      } else {
-        // Same lane next — bar ends at a small fixed duration (point event).
-        end = ts + Math.min(nextTs - ts, 500);
-      }
-    } else {
-      end = ts + 500; // last event
-    }
-
-    if (cur && cur.lane === lane && ts - cur.end < GAP_THRESHOLD) {
-      // Extend current span
-      cur.end = end;
-      cur.events.push(evt);
-    } else {
-      // Start new span
-      if (cur) spans.push(cur);
-      cur = {
-        start: ts,
-        end,
-        lane,
-        color: getColor(evt),
-        label: evt.toolName || evt.role || '',
-        events: [evt],
-      };
-    }
-  }
-  if (cur) spans.push(cur);
+  // Build the same spans used for hit-testing, then draw them.
+  const spans = buildSpans();
 
   // Draw spans
   for (const span of spans) {
@@ -321,26 +395,17 @@ function getEventAt(mx: number, my: number): TimelineEvent | null {
   // used here — it would cause hit-testing to target the wrong lane on
   // HiDPI displays.
   const h = container.clientHeight;
-  const laneH = (h - 30) / 3;
-  const topY = 30;
-  const t0 = new Date(events[0].timestamp).getTime();
-
-  for (let i = 0; i < events.length; i++) {
-    const evt = events[i];
-    const ts = new Date(evt.timestamp).getTime();
-    const nextTs = i < events.length - 1 ? new Date(events[i + 1].timestamp).getTime() : ts + 1000;
-    const duration = Math.max(nextTs - ts, 200);
-    const x = (ts - t0) * pixelsPerMs + offsetX;
-    const barW = Math.max(duration * pixelsPerMs, 4);
-    const lane = getLane(evt);
-    const y = topY + lane * laneH + 4;
-    const barH = laneH - 8;
-
-    if (mx >= x && mx <= x + barW && my >= y && my <= y + barH) {
-      return evt;
-    }
-  }
-  return null;
+  const geom: TimelineGeometry = {
+    t0: new Date(events[0].timestamp).getTime(),
+    pixelsPerMs,
+    offsetX,
+    laneH: (h - 30) / 3,
+    topY: 30,
+  };
+  // Iterate the SAME spans draw() renders, using identical x/barW/y/barH
+  // geometry (via pickEventAt), so the hover target lines up exactly with
+  // the visible bar.
+  return pickEventAt(buildSpans(), geom, mx, my);
 }
 
 function onMouseDown(e: MouseEvent): void {

@@ -123,7 +123,11 @@ func (h *Hub) Run() {
 	}
 }
 
-// Stop signals the hub to stop processing events and return from Run.
+// Stop is an abrupt stop intended for tests only: it signals Run to return
+// immediately without closing client send channels, so connected clients do
+// NOT receive a WebSocket close frame. Use GracefulStop in production for a
+// clean shutdown. After Run returns it closes the `stopped` channel, which the
+// readPump deferred unregister selects on so its goroutine cannot leak.
 func (h *Hub) Stop() {
 	close(h.done)
 }
@@ -174,7 +178,14 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 // frames to keep the connection alive.
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		// Try to unregister, but don't block forever: once Run has returned
+		// (Stop/GracefulStop) the unregister channel is no longer drained, so
+		// select on the hub's `stopped` channel (closed by Run's defer) to
+		// avoid leaking this goroutine.
+		select {
+		case c.hub.unregister <- c:
+		case <-c.hub.stopped:
+		}
 		c.conn.Close()
 	}()
 
@@ -222,6 +233,15 @@ func (c *Client) writePump() {
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+
+		case <-c.hub.stopped:
+			// Hub has stopped (abrupt Stop never closes c.send), so this pump
+			// would otherwise block on the ping ticker until the next tick and
+			// leak. Send a close frame and exit immediately.
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
+			return
 		}
 	}
 }

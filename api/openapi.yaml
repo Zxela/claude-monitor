@@ -4,6 +4,7 @@ info:
   description: >
     REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
     JSONL session files and broadcasts activity over WebSocket.
+    Interactive Swagger UI is served at /api and this spec at /api/openapi.yaml.
   version: "3.4.0"
 
 servers:
@@ -276,32 +277,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReplayManifest"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/sessions/{id}/stop:
-    post:
-      tags: [sessions]
-      summary: Stop the Docker container for a session
-      description: >
-        Sends a stop signal to the Docker container associated with this
-        session. Only applicable to sessions discovered via Docker container
-        mounts. Returns 400 if the session is not a Docker session or if
-        Docker integration is unavailable.
-      operationId: stopSession
-      parameters:
-        - $ref: "#/components/parameters/SessionId"
-      responses:
-        "200":
-          description: Container stopped successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OkResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 

@@ -32,6 +32,9 @@ jobs:
       - name: Frontend lint
         run: cd web && npm run lint
 
+      - name: Frontend test
+        run: cd web && npm test
+
       - name: Build
         run: go build ./...
 

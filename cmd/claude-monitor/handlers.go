@@ -1,17 +1,14 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/zxela/claude-monitor/api"
-	"github.com/zxela/claude-monitor/internal/docker"
 	"github.com/zxela/claude-monitor/internal/hub"
 	"github.com/zxela/claude-monitor/internal/parser"
 	"github.com/zxela/claude-monitor/internal/repo"
@@ -641,42 +638,6 @@ func handleCacheClear(resolver *repo.Resolver, historyDB *store.DB) http.Handler
 	}
 }
 
-// handleSessionStop serves POST /api/sessions/{id}/stop.
-func handleSessionStop(sessionStore *session.Store, dc **docker.Client) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess, ok := sessionStore.Get(id)
-		if !ok {
-			writeJSONError(w, "session not found", http.StatusNotFound)
-			return
-		}
-		// Extract container name from sessionName (format: "container / project")
-		containerName := ""
-		if parts := strings.SplitN(sess.SessionName, " / ", 2); len(parts) == 2 {
-			containerName = parts[0]
-		}
-		if containerName == "" || *dc == nil {
-			writeJSONError(w, "not a Docker session or Docker not available", http.StatusBadRequest)
-			return
-		}
-		// Validate container name contains only safe characters.
-		if !validContainerName.MatchString(containerName) {
-			writeJSONError(w, "invalid container name", http.StatusBadRequest)
-			return
-		}
-		stopCtx, stopCancel := context.WithTimeout(r.Context(), shutdownTimeout)
-		defer stopCancel()
-		if err := (*dc).StopContainer(stopCtx, containerName); err != nil {
-			log.Printf("stop container %s: %v", containerName, err)
-			writeJSONError(w, "failed to stop container", http.StatusInternalServerError)
-			return
-		}
-		log.Printf("stopped container %s for session %s", containerName, id)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}
-}
-
 // handleHealth serves GET /health.
 func handleHealth(historyDB *store.DB, fw *watcher.Watcher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -801,7 +762,7 @@ func handlePricingGet(historyDB *store.DB) http.HandlerFunc {
 	}
 }
 
-// handleSwaggerYAML serves GET /swagger/openapi.yaml using the embedded spec (Issue 13).
+// handleSwaggerYAML serves GET /api/openapi.yaml using the embedded spec (Issue 13).
 func handleSwaggerYAML() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/yaml")
@@ -809,7 +770,7 @@ func handleSwaggerYAML() http.HandlerFunc {
 	}
 }
 
-// handleSwaggerUI serves GET /swagger.
+// handleSwaggerUI serves GET /api (Swagger UI).
 func handleSwaggerUI() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
