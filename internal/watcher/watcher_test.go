@@ -122,10 +122,10 @@ func TestWatcher_EmitsEventsForAppendedLines(t *testing.T) {
 	}
 	f.Close()
 
-	w, err := New([]string{dir})
-	if err != nil {
-		t.Fatalf("creating watcher: %v", err)
-	}
+	// Use newTestWatcher to watch ONLY the temp dir. Using New() would prepend
+	// defaultBasePaths (~/.claude/projects/ etc.), causing the watcher to emit
+	// events for real host session files and making assertions non-hermetic.
+	w := newTestWatcher(t, []string{dir})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
