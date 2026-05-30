@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.0](https://github.com/Zxela/claude-monitor/compare/v3.4.0...v3.5.0) (2026-05-30)
+
+
+### Features
+
+* workflow/subagent attribution, first-class workflow logging, and audit cleanup ([#221](https://github.com/Zxela/claude-monitor/issues/221)) ([3dabc65](https://github.com/Zxela/claude-monitor/commit/3dabc65be851871c44bd4bbb36e8e68053db4802))
+
 ## [3.4.0](https://github.com/Zxela/claude-monitor/compare/v3.3.3...v3.4.0) (2026-04-25)
 
 
