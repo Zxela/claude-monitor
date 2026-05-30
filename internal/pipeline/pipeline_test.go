@@ -162,6 +162,7 @@ func TestParentSessionIDFromPath(t *testing.T) {
 		want string
 	}{
 		{"/home/user/.claude/projects/hash/abc-123/subagents/agent-xyz.jsonl", "abc-123"},
+		{"/home/user/.claude/projects/hash/abc-123/subagents/workflows/wf_def/agent-xyz.jsonl", "abc-123"},
 		{"/home/user/.claude/projects/hash/session.jsonl", ""},
 		{"/tmp/test.jsonl", ""},
 	}
@@ -486,6 +487,551 @@ func TestParentLinking_DirectUUID(t *testing.T) {
 	p.linkMu.Unlock()
 	if pending != "" {
 		t.Errorf("no pending link expected; got %q", pending)
+	}
+}
+
+// TestParentLinking_Shape2_InContentSessionID verifies a Task subagent (shape 2)
+// is linked to its parent via the in-content sessionId, which on disk equals the
+// PARENT session UUID while the watcher keys the row on the agent-<id> filename
+// stem. parentUuid is absent (mirrors real disk), the parent is not yet in the
+// store, and the link must still be set immediately (no deferral).
+func TestParentLinking_Shape2_InContentSessionID(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const parentID = "parent-uuid-shape2"
+	const childKey = "agent-aaa"
+	ts := time.Now()
+
+	// In-content sessionId IS the parent UUID; no parentUuid; isSidechain=true.
+	childLine := makeJSONL(t, map[string]interface{}{
+		"type":        "assistant",
+		"timestamp":   ts.Format(time.RFC3339Nano),
+		"sessionId":   parentID,
+		"isSidechain": true,
+		"message": map[string]interface{}{
+			"id":      "msg-child-shape2",
+			"role":    "assistant",
+			"content": "child response",
+			"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+			"model":   "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: childKey,
+		FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/subagents/" + childKey + ".jsonl",
+		Line:      childLine,
+		Bootstrap: true,
+	})
+
+	childSess, ok := sessions.Get(childKey)
+	if !ok {
+		t.Fatal("child session not found")
+	}
+	if childSess.ParentID != parentID {
+		t.Errorf("child ParentID = %q, want %q (in-content sessionId)", childSess.ParentID, parentID)
+	}
+
+	// The in-content sessionId resolves the child's ParentID immediately even
+	// before the parent arrives, but a deferred parent→child backlink must also
+	// be recorded so parent.Children is backfilled once the parent shows up.
+	// (parent.Children is only ever populated by LinkChild.)
+	p.linkMu.Lock()
+	pending := p.pendingParentLinks[childKey]
+	p.linkMu.Unlock()
+	if pending != parentID {
+		t.Errorf("pendingParentLinks[%q] = %q, want %q (deferred backlink)", childKey, pending, parentID)
+	}
+
+	// Now process a parent line. resolvePendingLinks should fire and record the
+	// child in parent.Children WITHOUT re-processing the child line.
+	parentLine := makeJSONL(t, map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": ts.Add(time.Second).Format(time.RFC3339Nano),
+		"sessionId": parentID,
+		"message": map[string]interface{}{
+			"id":      "msg-parent-shape2",
+			"role":    "assistant",
+			"content": "parent response",
+			"usage":   map[string]interface{}{"input_tokens": 20, "output_tokens": 10},
+			"model":   "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: parentID,
+		FilePath:  "/home/user/.claude/projects/hash/" + parentID + ".jsonl",
+		Line:      parentLine,
+		Bootstrap: true,
+	})
+
+	parentSess, ok := sessions.Get(parentID)
+	if !ok {
+		t.Fatal("parent session not found")
+	}
+	found := false
+	for _, c := range parentSess.Children {
+		if c == childKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("parent.Children does not contain %q; got %v", childKey, parentSess.Children)
+	}
+
+	// The deferred link should be cleared after resolution.
+	p.linkMu.Lock()
+	remaining := p.pendingParentLinks[childKey]
+	p.linkMu.Unlock()
+	if remaining != "" {
+		t.Errorf("pendingParentLinks[%q] should be cleared after resolution; got %q", childKey, remaining)
+	}
+}
+
+// TestParentLinking_Shape3_Workflow verifies a workflow agent (shape 3) is linked
+// to its parent via the in-content sessionId. Previously this regressed to "" both
+// because parentUuid is absent on disk and because the path inference did not walk
+// up past the wf_<id> directory. With P0-2 the in-content sessionId resolves it.
+func TestParentLinking_Shape3_Workflow(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const parentID = "parent-uuid-shape3"
+	const childKey = "agent-w1"
+	ts := time.Now()
+
+	childLine := makeJSONL(t, map[string]interface{}{
+		"type":        "assistant",
+		"timestamp":   ts.Format(time.RFC3339Nano),
+		"sessionId":   parentID,
+		"isSidechain": true,
+		"message": map[string]interface{}{
+			"id":      "msg-child-shape3",
+			"role":    "assistant",
+			"content": "workflow agent response",
+			"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+			"model":   "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: childKey,
+		FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/subagents/workflows/wf_x/" + childKey + ".jsonl",
+		Line:      childLine,
+		Bootstrap: true,
+	})
+
+	childSess, ok := sessions.Get(childKey)
+	if !ok {
+		t.Fatal("child session not found")
+	}
+	if childSess.ParentID != parentID {
+		t.Errorf("workflow agent ParentID = %q, want %q", childSess.ParentID, parentID)
+	}
+}
+
+// TestParentLinking_InContent_ChildBeforeParent_BackfillsChildren is the
+// regression guard for the out-of-order (child-before-parent) ordering that
+// happens during bootstrap/replay: a finished subagent's lines may all be read
+// BEFORE the parent's top-level <uuid>.jsonl line. The in-content sessionId sets
+// the child's ParentID immediately, but parent.Children must ALSO be backfilled
+// once the parent arrives — WITHOUT re-processing the child line (mirroring the
+// TestParentLinking_DeferredUUID contract for the parentUuid path). Covers both
+// shape 2 (task subagent) and shape 3 (workflow agent) file layouts.
+func TestParentLinking_InContent_ChildBeforeParent_BackfillsChildren(t *testing.T) {
+	cases := []struct {
+		name     string
+		childKey string
+		childDir string // directory holding the agent JSONL, relative to the project hash dir
+	}{
+		{
+			name:     "shape2_task_subagent",
+			childKey: "agent-ooo2",
+			childDir: "subagents",
+		},
+		{
+			name:     "shape3_workflow_agent",
+			childKey: "agent-ooo3",
+			childDir: "subagents/workflows/wf_z",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			sessions := session.NewStore()
+			resolver := repo.NewResolver()
+
+			p := New(sessions, db, resolver, nil)
+			defer p.Stop()
+
+			const parentID = "parent-uuid-ooo"
+			ts := time.Now()
+
+			childLine := makeJSONL(t, map[string]interface{}{
+				"type":        "assistant",
+				"timestamp":   ts.Format(time.RFC3339Nano),
+				"sessionId":   parentID, // in-content sessionId == parent UUID on disk
+				"isSidechain": true,
+				"message": map[string]interface{}{
+					"id":      "msg-" + tc.childKey,
+					"role":    "assistant",
+					"content": "agent response",
+					"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+					"model":   "claude-sonnet-4-6",
+				},
+			})
+
+			// Step 1: process the CHILD first; the parent session does not exist yet.
+			p.Process(watcher.Event{
+				SessionID: tc.childKey,
+				FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/" + tc.childDir + "/" + tc.childKey + ".jsonl",
+				Line:      childLine,
+				Bootstrap: true,
+			})
+
+			childSess, ok := sessions.Get(tc.childKey)
+			if !ok {
+				t.Fatal("child session not found")
+			}
+			if childSess.ParentID != parentID {
+				t.Errorf("child ParentID = %q, want %q", childSess.ParentID, parentID)
+			}
+
+			// Step 2: process the PARENT line. Do NOT re-process the child.
+			parentLine := makeJSONL(t, map[string]interface{}{
+				"type":      "assistant",
+				"timestamp": ts.Add(time.Second).Format(time.RFC3339Nano),
+				"sessionId": parentID,
+				"message": map[string]interface{}{
+					"id":      "msg-parent-ooo",
+					"role":    "assistant",
+					"content": "parent response",
+					"usage":   map[string]interface{}{"input_tokens": 20, "output_tokens": 10},
+					"model":   "claude-sonnet-4-6",
+				},
+			})
+			p.Process(watcher.Event{
+				SessionID: parentID,
+				FilePath:  "/home/user/.claude/projects/hash/" + parentID + ".jsonl",
+				Line:      parentLine,
+				Bootstrap: true,
+			})
+
+			// The parent's Children must now contain the child, backfilled by the
+			// deferred link via resolvePendingLinks — no child re-processing.
+			parentSess, ok := sessions.Get(parentID)
+			if !ok {
+				t.Fatal("parent session not found")
+			}
+			found := false
+			for _, c := range parentSess.Children {
+				if c == tc.childKey {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("parent.Children does not contain %q after parent arrival (no child re-process); got %v", tc.childKey, parentSess.Children)
+			}
+
+			// The deferred link should be cleared after resolution.
+			p.linkMu.Lock()
+			remaining := p.pendingParentLinks[tc.childKey]
+			p.linkMu.Unlock()
+			if remaining != "" {
+				t.Errorf("pendingParentLinks[%q] should be cleared after resolution; got %q", tc.childKey, remaining)
+			}
+		})
+	}
+}
+
+// TestParentLinking_TwoAgentsShareParent verifies that two distinct agents (one a
+// task subagent, one a workflow agent) carrying the same in-content sessionId both
+// link to the same parent session.
+func TestParentLinking_TwoAgentsShareParent(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const parentID = "shared-parent-uuid"
+	ts := time.Now()
+
+	mkChild := func(key string) []byte {
+		return makeJSONL(t, map[string]interface{}{
+			"type":        "assistant",
+			"timestamp":   ts.Format(time.RFC3339Nano),
+			"sessionId":   parentID,
+			"isSidechain": true,
+			"message": map[string]interface{}{
+				"id":      "msg-" + key,
+				"role":    "assistant",
+				"content": "agent response",
+				"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+				"model":   "claude-sonnet-4-6",
+			},
+		})
+	}
+
+	p.Process(watcher.Event{
+		SessionID: "agent-1",
+		FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/subagents/agent-1.jsonl",
+		Line:      mkChild("agent-1"),
+		Bootstrap: true,
+	})
+	p.Process(watcher.Event{
+		SessionID: "agent-2",
+		FilePath:  "/home/user/.claude/projects/hash/" + parentID + "/subagents/workflows/wf_y/agent-2.jsonl",
+		Line:      mkChild("agent-2"),
+		Bootstrap: true,
+	})
+
+	for _, key := range []string{"agent-1", "agent-2"} {
+		sess, ok := sessions.Get(key)
+		if !ok {
+			t.Fatalf("session %q not found", key)
+		}
+		if sess.ParentID != parentID {
+			t.Errorf("%q ParentID = %q, want %q", key, sess.ParentID, parentID)
+		}
+	}
+}
+
+// TestParentLinking_NoSelfParent verifies a sidechain line never self-parents: when
+// the in-content sessionId equals ev.SessionID, ParentID stays empty and no deferred
+// self-link is recorded — including when path inference would also yield ev.SessionID.
+func TestParentLinking_NoSelfParent(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const sameID = "same-id"
+	ts := time.Now()
+
+	line := makeJSONL(t, map[string]interface{}{
+		"type":        "assistant",
+		"timestamp":   ts.Format(time.RFC3339Nano),
+		"sessionId":   sameID,
+		"isSidechain": true,
+		"message": map[string]interface{}{
+			"id":      "msg-self",
+			"role":    "assistant",
+			"content": "response",
+			"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+			"model":   "claude-sonnet-4-6",
+		},
+	})
+	// FilePath path inference would also yield "same-id" (dir above subagents),
+	// confirming the sid != ev.SessionID guard.
+	p.Process(watcher.Event{
+		SessionID: sameID,
+		FilePath:  "/home/user/.claude/projects/hash/" + sameID + "/subagents/" + sameID + ".jsonl",
+		Line:      line,
+		Bootstrap: true,
+	})
+
+	sess, ok := sessions.Get(sameID)
+	if !ok {
+		t.Fatal("session not found")
+	}
+	if sess.ParentID != "" {
+		t.Errorf("ParentID = %q, want empty (must never self-parent)", sess.ParentID)
+	}
+	p.linkMu.Lock()
+	pending := p.pendingParentLinks[sameID]
+	p.linkMu.Unlock()
+	if pending != "" {
+		t.Errorf("pendingParentLinks[%q] = %q, want empty (no self deferral)", sameID, pending)
+	}
+}
+
+// TestProcess_NormalSessionUnaffected locks in that a normal (non-sidechain) session
+// whose in-content sessionId equals ev.SessionID is completely unaffected by P0-2:
+// no ParentID is set and no deferred link is recorded.
+func TestProcess_NormalSessionUnaffected(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const sid = "normal-session"
+	line := makeJSONL(t, map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": time.Now().Format(time.RFC3339Nano),
+		"sessionId": sid,
+		"message": map[string]interface{}{
+			"id":      "msg-normal",
+			"role":    "assistant",
+			"content": "hello",
+			"usage":   map[string]interface{}{"input_tokens": 10, "output_tokens": 5},
+			"model":   "claude-sonnet-4-6",
+		},
+	})
+	p.Process(watcher.Event{
+		SessionID: sid,
+		FilePath:  "/home/user/.claude/projects/hash/" + sid + ".jsonl",
+		Line:      line,
+		Bootstrap: true,
+	})
+
+	sess, ok := sessions.Get(sid)
+	if !ok {
+		t.Fatal("session not found")
+	}
+	if sess.ParentID != "" {
+		t.Errorf("normal session ParentID = %q, want empty", sess.ParentID)
+	}
+	p.linkMu.Lock()
+	pending := p.pendingParentLinks[sid]
+	p.linkMu.Unlock()
+	if pending != "" {
+		t.Errorf("pendingParentLinks[%q] = %q, want empty", sid, pending)
+	}
+}
+
+// TestApplyRepoResolution_UpgradesFallbackToGit verifies that a session whose first
+// repo resolution was a non-git fallback is upgraded to an authoritative git repo
+// when a later resolution arrives with FromGit=true and a different ID.
+func TestApplyRepoResolution_UpgradesFallbackToGit(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const sid = "upgrade-session"
+	fallback := &repo.Repo{ID: "my-project", Name: "my-project", FromGit: false}
+	gitRepo := &repo.Repo{ID: "github.com/acme/my-project", Name: "my-project", URL: "git@github.com:acme/my-project.git", FromGit: true}
+
+	// First resolution: non-git fallback.
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, fallback)
+	})
+	sess, _ := sessions.Get(sid)
+	if sess.RepoID != "my-project" {
+		t.Fatalf("after fallback: RepoID = %q, want %q", sess.RepoID, "my-project")
+	}
+	if sess.RepoFromGit() {
+		t.Error("after fallback: RepoFromGit() = true, want false")
+	}
+
+	// Second resolution: git-backed, different ID -> upgrade.
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, gitRepo)
+	})
+	sess, _ = sessions.Get(sid)
+	if sess.RepoID != "github.com/acme/my-project" {
+		t.Errorf("after upgrade: RepoID = %q, want %q", sess.RepoID, "github.com/acme/my-project")
+	}
+	if !sess.RepoFromGit() {
+		t.Error("after upgrade: RepoFromGit() = false, want true")
+	}
+}
+
+// TestApplyRepoResolution_NoDowngradeOrThrash verifies that once a git-backed repo
+// is set, a subsequent non-git fallback does NOT replace it, and an identical git
+// resolution causes no spurious change.
+func TestApplyRepoResolution_NoDowngradeOrThrash(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const sid = "stable-git-session"
+	gitRepo := &repo.Repo{ID: "github.com/acme/widget", Name: "widget", URL: "https://github.com/acme/widget", FromGit: true}
+	fallback := &repo.Repo{ID: "widget", Name: "widget", FromGit: false}
+
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, gitRepo)
+	})
+	sess, _ := sessions.Get(sid)
+	if sess.RepoID != "github.com/acme/widget" || !sess.RepoFromGit() {
+		t.Fatalf("setup: RepoID=%q fromGit=%v", sess.RepoID, sess.RepoFromGit())
+	}
+
+	// A non-git fallback must NOT downgrade.
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, fallback)
+	})
+	sess, _ = sessions.Get(sid)
+	if sess.RepoID != "github.com/acme/widget" {
+		t.Errorf("after fallback attempt: RepoID = %q, want unchanged %q", sess.RepoID, "github.com/acme/widget")
+	}
+	if !sess.RepoFromGit() {
+		t.Error("after fallback attempt: RepoFromGit() flipped to false")
+	}
+
+	// An identical git resolution must cause no change (r.ID == s.RepoID guard).
+	sessions.Upsert(sid, func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, gitRepo)
+	})
+	sess, _ = sessions.Get(sid)
+	if sess.RepoID != "github.com/acme/widget" {
+		t.Errorf("after identical git: RepoID = %q, want %q", sess.RepoID, "github.com/acme/widget")
+	}
+}
+
+// TestApplyRepoResolution_RestartReupsertPreservesMetadata ties P1-1 and P1-2 at the
+// pipeline layer: after a full git resolution is persisted, a restart-shaped re-upsert
+// (a cache-hit Repo carrying only the ID, FromGit=false) must not blank the stored
+// repo's Name/URL.
+func TestApplyRepoResolution_RestartReupsertPreservesMetadata(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const id = "github.com/acme/widget"
+	gitRepo := &repo.Repo{ID: id, Name: "widget", URL: "https://github.com/acme/widget", FromGit: true}
+
+	sessions.Upsert("sess-a", func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, gitRepo)
+	})
+
+	// Simulate restart: a new session for a cwd whose cache entry only has the ID.
+	cacheHit := &repo.Repo{ID: id} // empty Name/URL, FromGit=false
+	sessions.Upsert("sess-b", func(s *session.Session) {
+		p.applyRepoResolution(s, &parser.Event{}, cacheHit)
+	})
+
+	rows, err := db.ListRepos()
+	if err != nil {
+		t.Fatalf("ListRepos failed: %v", err)
+	}
+	var found bool
+	for _, r := range rows {
+		if r.ID == id {
+			found = true
+			if r.Name != "widget" {
+				t.Errorf("Name = %q, want %q after restart re-upsert", r.Name, "widget")
+			}
+			if r.URL != "https://github.com/acme/widget" {
+				t.Errorf("URL = %q, want %q after restart re-upsert", r.URL, "https://github.com/acme/widget")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("repo %q not found", id)
 	}
 }
 

@@ -283,7 +283,9 @@ func (d *DB) Ping() error {
 // UpsertRepo inserts or updates a repo record.
 func (d *DB) UpsertRepo(r *repo.Repo) error {
 	_, err := d.db.Exec(`INSERT INTO repos (id, name, url, first_seen) VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url`,
+		ON CONFLICT(id) DO UPDATE SET
+			name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE repos.name END,
+			url  = CASE WHEN excluded.url  <> '' THEN excluded.url  ELSE repos.url  END`,
 		r.ID, r.Name, r.URL, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("UpsertRepo: %w", err)

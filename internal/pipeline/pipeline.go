@@ -259,10 +259,21 @@ func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.
 
 // applyRepoResolution persists the resolved repo and copies CWD/branch/model metadata.
 func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo) {
-	if r != nil && s.RepoID == "" {
-		s.RepoID = r.ID
-		if err := p.db.UpsertRepo(r); err != nil {
-			log.Printf("upsert repo error: %v", err)
+	if r != nil {
+		// First resolution for this session.
+		if s.RepoID == "" {
+			s.RepoID = r.ID
+			s.SetRepoFromGit(r.FromGit)
+			if err := p.db.UpsertRepo(r); err != nil {
+				log.Printf("upsert repo error: %v", err)
+			}
+		} else if r.FromGit && !s.RepoFromGit() && r.ID != s.RepoID {
+			// Upgrade an earlier non-git fallback to an authoritative git repo.
+			s.RepoID = r.ID
+			s.SetRepoFromGit(true)
+			if err := p.db.UpsertRepo(r); err != nil {
+				log.Printf("upsert repo error: %v", err)
+			}
 		}
 	}
 
@@ -332,19 +343,44 @@ func (p *Pipeline) resolveParentID(msg *parser.Event, ev watcher.Event) string {
 		return ""
 	}
 
-	// For subagent events: prefer direct UUID lookup.
+	// For subagent events: prefer the in-content sessionId, then direct UUID lookup.
 	if msg.IsSidechain || msg.ParentUUID != "" {
+		// Preferred: the in-content sessionId of a sidechain line is the TRUE
+		// parent session UUID for both task subagents (shape 2) and workflow
+		// agents (shape 3). The watcher keyed this row on the filename stem
+		// (ev.SessionID = agent-<id>), so when they differ, msg.SessionID names
+		// the parent. Guard against self-parenting. This is authoritative and
+		// does not depend on the parent already existing in the store, so a
+		// child arriving before its parent is still linked immediately.
+		if msg.IsSidechain && msg.SessionID != "" && msg.SessionID != ev.SessionID {
+			// Also record a deferred parent→child backlink. The child's own
+			// ParentID is set immediately, but parent.Children is only ever
+			// populated by LinkChild, which fires here (line 166) when the
+			// parent already exists, or via resolvePendingLinks once the parent
+			// arrives. During bootstrap/replay a finished subagent's lines may
+			// all be read BEFORE the parent's top-level line, so without this
+			// entry the parent's Children array would never be backfilled.
+			// resolvePendingLinks' `if s.ParentID == ""` guard keeps this
+			// idempotent with the ParentID already set on the child, and it
+			// deletes the entry once the parent→child edge is wired.
+			p.linkMu.Lock()
+			if _, ok := p.pendingParentLinks[ev.SessionID]; !ok {
+				p.pendingParentLinks[ev.SessionID] = msg.SessionID
+			}
+			p.linkMu.Unlock()
+			return msg.SessionID
+		}
 		if msg.ParentUUID != "" {
 			if _, ok := p.sessions.Get(msg.ParentUUID); ok {
 				return msg.ParentUUID
 			}
 		}
 		// Fall back to path-based inference.
-		if sid := parentSessionIDFromPath(ev.FilePath); sid != "" {
+		if sid := parentSessionIDFromPath(ev.FilePath); sid != "" && sid != ev.SessionID {
 			return sid
 		}
 		// Neither source found a parent — record a deferred link.
-		if msg.ParentUUID != "" {
+		if msg.ParentUUID != "" && msg.ParentUUID != ev.SessionID {
 			p.linkMu.Lock()
 			p.pendingParentLinks[ev.SessionID] = msg.ParentUUID
 			p.linkMu.Unlock()
@@ -511,11 +547,22 @@ func skipDetail(event *parser.Event) bool {
 }
 
 // parentSessionIDFromPath extracts the parent session ID from a subagent JSONL path.
-// Subagent files: .../projects/<hash>/<parent-session-id>/subagents/agent-<id>.jsonl
+// It walks UP the directory tree looking for a "subagents" segment and returns the
+// directory immediately above it. This handles both:
+//
+//	shape 2: .../<parent-session-id>/subagents/agent-<id>.jsonl
+//	shape 3: .../<parent-session-id>/subagents/workflows/wf_<id>/agent-<id>.jsonl
 func parentSessionIDFromPath(filePath string) string {
 	dir := filepath.Dir(filePath)
-	if filepath.Base(dir) == "subagents" {
-		return filepath.Base(filepath.Dir(dir))
+	for dir != "." && dir != string(filepath.Separator) {
+		parent := filepath.Dir(dir)
+		if filepath.Base(dir) == "subagents" {
+			return filepath.Base(parent)
+		}
+		if parent == dir { // reached filesystem root; stop
+			break
+		}
+		dir = parent
 	}
 	return ""
 }

@@ -58,7 +58,14 @@ type Session struct {
 	Version        string           `json:"version,omitempty"`
 	Entrypoint     string           `json:"entrypoint,omitempty"`
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
+	repoFromGit    bool             `json:"-"` // true when RepoID was resolved from git (authoritative); runtime-only, not persisted
 }
+
+// RepoFromGit reports whether the current RepoID came from an authoritative git resolution.
+func (s *Session) RepoFromGit() bool { return s.repoFromGit }
+
+// SetRepoFromGit records repo-resolution provenance.
+func (s *Session) SetRepoFromGit(v bool) { s.repoFromGit = v }
 
 // HasSeenMessageID reports whether the given key has been recorded.
 func (s *Session) HasSeenMessageID(key string) bool {

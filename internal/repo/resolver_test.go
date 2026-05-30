@@ -148,6 +148,75 @@ func TestResolve_ContainerFallback(t *testing.T) {
 	}
 }
 
+func TestResolve_FromGitProvenance(t *testing.T) {
+	// The current working directory is a real git repo, so it must resolve git-backed.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewResolver()
+	got, err := r.Resolve(cwd, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.FromGit {
+		t.Errorf("FromGit = false, want true for git-backed cwd %q (ID=%q)", cwd, got.ID)
+	}
+}
+
+func TestResolve_FromGit_FalseForFallbacks(t *testing.T) {
+	// Non-git temp dir -> basename fallback, FromGit must be false.
+	tmp := t.TempDir()
+	sub := filepath.Join(tmp, "my-project")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewResolver()
+	got, err := r.Resolve(sub, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FromGit {
+		t.Error("FromGit = true, want false for basename fallback")
+	}
+
+	// Container label fallback must also be non-git.
+	ws := filepath.Join(tmp, "workspace")
+	if err := os.Mkdir(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewResolver()
+	gotC, err := r2.Resolve(ws, "docker-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotC.FromGit {
+		t.Error("FromGit = true, want false for container-label fallback")
+	}
+}
+
+func TestCache_PreservesFromGit(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewResolver()
+	resolved, err := r.Resolve(cwd, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := r.Cache()
+	copied, ok := c[cwd]
+	if !ok {
+		t.Fatalf("cwd %q not present in Cache()", cwd)
+	}
+	if copied.FromGit != resolved.FromGit {
+		t.Errorf("Cache() copy FromGit = %v, want %v", copied.FromGit, resolved.FromGit)
+	}
+}
+
 func TestClearCache(t *testing.T) {
 	r := NewResolver()
 	r.LoadCache(map[string]string{

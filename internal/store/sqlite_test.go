@@ -46,6 +46,91 @@ func TestUpsertRepo(t *testing.T) {
 	}
 }
 
+func TestUpsertRepo_DoesNotBlankNameURLOnEmpty(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	const id = "github.com/x/y"
+	full := &repo.Repo{ID: id, Name: "y", URL: "git@github.com:x/y.git"}
+	if err := db.UpsertRepo(full); err != nil {
+		t.Fatalf("UpsertRepo (populated) failed: %v", err)
+	}
+
+	// Re-upsert with empty Name/URL (as a LoadCache cache-hit Repo would produce).
+	if err := db.UpsertRepo(&repo.Repo{ID: id}); err != nil {
+		t.Fatalf("UpsertRepo (empty) failed: %v", err)
+	}
+
+	got := findRepoRow(t, db, id)
+	if got.Name != "y" {
+		t.Errorf("Name = %q, want %q (empty excluded must not blank)", got.Name, "y")
+	}
+	if got.URL != "git@github.com:x/y.git" {
+		t.Errorf("URL = %q, want %q (empty excluded must not blank)", got.URL, "git@github.com:x/y.git")
+	}
+
+	// A non-empty later name DOES overwrite.
+	if err := db.UpsertRepo(&repo.Repo{ID: id, Name: "renamed"}); err != nil {
+		t.Fatalf("UpsertRepo (rename) failed: %v", err)
+	}
+	got = findRepoRow(t, db, id)
+	if got.Name != "renamed" {
+		t.Errorf("Name = %q, want %q (non-empty must overwrite)", got.Name, "renamed")
+	}
+	// URL was empty in the rename upsert, so it must survive.
+	if got.URL != "git@github.com:x/y.git" {
+		t.Errorf("URL = %q, want %q (empty url in rename must not blank)", got.URL, "git@github.com:x/y.git")
+	}
+}
+
+// TestUpsertRepo_RestartReupsertRegression documents the end-to-end restart
+// invariant at the store layer: a fully-populated repo survives a re-upsert that
+// carries empty Name/URL (the shape a LoadCache cache-hit produces after restart).
+func TestUpsertRepo_RestartReupsertRegression(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	const id = "github.com/acme/widget"
+	if err := db.UpsertRepo(&repo.Repo{ID: id, Name: "widget", URL: "https://github.com/acme/widget"}); err != nil {
+		t.Fatalf("seed UpsertRepo failed: %v", err)
+	}
+
+	// Confirm it exists with metadata.
+	before := findRepoRow(t, db, id)
+	if before.Name != "widget" || before.URL != "https://github.com/acme/widget" {
+		t.Fatalf("seed row not as expected: %+v", before)
+	}
+
+	// Simulate the post-restart re-upsert with an empty-metadata cache-hit Repo.
+	if err := db.UpsertRepo(&repo.Repo{ID: id}); err != nil {
+		t.Fatalf("restart re-upsert failed: %v", err)
+	}
+
+	after := findRepoRow(t, db, id)
+	if after.Name != "widget" {
+		t.Errorf("Name = %q, want %q after restart re-upsert", after.Name, "widget")
+	}
+	if after.URL != "https://github.com/acme/widget" {
+		t.Errorf("URL = %q, want %q after restart re-upsert", after.URL, "https://github.com/acme/widget")
+	}
+}
+
+// findRepoRow returns the RepoRow with the given id, failing if not present.
+func findRepoRow(t *testing.T, db *DB, id string) RepoRow {
+	t.Helper()
+	rows, err := db.ListRepos()
+	if err != nil {
+		t.Fatalf("ListRepos failed: %v", err)
+	}
+	for _, r := range rows {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("repo %q not found in ListRepos", id)
+	return RepoRow{}
+}
+
 func TestCwdRepos(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
