@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.1](https://github.com/Zxela/claude-monitor/compare/v3.5.0...v3.5.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* add missing strings import in handlers.go ([#224](https://github.com/Zxela/claude-monitor/issues/224)) ([79e4554](https://github.com/Zxela/claude-monitor/commit/79e45549131658f593a8e5c665707a31d017057b))
+
 ## [3.5.0](https://github.com/Zxela/claude-monitor/compare/v3.4.0...v3.5.0) (2026-05-30)
 
 
