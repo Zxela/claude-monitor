@@ -75,6 +75,88 @@ func TestProjectDirFromPath(t *testing.T) {
 	}
 }
 
+func TestClassifyPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		path, kind, agentID, workflowID string
+	}{
+		// shape 1 normal session
+		{"/home/u/.claude/projects/hash/abc-123.jsonl", kindSession, "", ""},
+		{"/home/u/.claude/projects/hash/abc-123/session.jsonl", kindSession, "", ""},
+		// shape 2 task subagent
+		{"/home/u/.claude/projects/hash/abc-123/subagents/agent-xyz.jsonl", kindSubagent, "agent-xyz", ""},
+		// shape 3 workflow agent
+		{"/home/u/.claude/projects/hash/abc-123/subagents/workflows/wf_def/agent-xyz.jsonl", kindWorkflowAgent, "agent-xyz", "wf_def"},
+		// defensive: agent-* file without a subagents/ ancestor -> subagent, no workflow
+		{"/tmp/agent-loose.jsonl", kindSubagent, "agent-loose", ""},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			k, a, w := classifyPath(tc.path)
+			if k != tc.kind || a != tc.agentID || w != tc.workflowID {
+				t.Errorf("classifyPath(%q) = (%q,%q,%q), want (%q,%q,%q)", tc.path, k, a, w, tc.kind, tc.agentID, tc.workflowID)
+			}
+		})
+	}
+}
+
+func TestWatcher_EmitsWorkflowIdentity(t *testing.T) {
+	// Integration test: a workflow-shaped agent file should propagate
+	// AgentKind/AgentID/WorkflowID onto the Event while SessionID stays the stem.
+	dir := t.TempDir()
+
+	wfDir := filepath.Join(dir, "parent-uuid", "subagents", "workflows", "wf_x")
+	if err := os.MkdirAll(wfDir, 0755); err != nil {
+		t.Fatalf("mkdir wf dir: %v", err)
+	}
+	jsonlPath := filepath.Join(wfDir, "agent-7.jsonl")
+	f, err := os.Create(jsonlPath)
+	if err != nil {
+		t.Fatalf("creating jsonl file: %v", err)
+	}
+	f.Close()
+
+	w := newTestWatcher(t, []string{dir})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	events := w.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	line := `{"type":"user","message":{"role":"user","content":"workflow line"},"sessionId":"parent-uuid","uuid":"uuid-wf1","isSidechain":true,"timestamp":"2024-01-01T00:00:00Z"}`
+	af, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("opening jsonl for append: %v", err)
+	}
+	if _, err := af.WriteString(line + "\n"); err != nil {
+		af.Close()
+		t.Fatalf("writing line: %v", err)
+	}
+	af.Close()
+
+	select {
+	case ev := <-events:
+		if ev.AgentKind != kindWorkflowAgent {
+			t.Errorf("AgentKind: got %q, want %q", ev.AgentKind, kindWorkflowAgent)
+		}
+		if ev.AgentID != "agent-7" {
+			t.Errorf("AgentID: got %q, want agent-7", ev.AgentID)
+		}
+		if ev.WorkflowID != "wf_x" {
+			t.Errorf("WorkflowID: got %q, want wf_x", ev.WorkflowID)
+		}
+		// Keying is unchanged: SessionID is still the file stem.
+		if ev.SessionID != "agent-7" {
+			t.Errorf("SessionID: got %q, want agent-7 (keying unchanged)", ev.SessionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for watcher event")
+	}
+}
+
 func TestExpandHome_ExpandsHomePath(t *testing.T) {
 	t.Parallel()
 	home, err := os.UserHomeDir()

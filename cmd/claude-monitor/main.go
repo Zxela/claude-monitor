@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,9 +35,6 @@ import (
 
 // version is set by -ldflags at build time.
 var version = "dev"
-
-// validContainerName matches safe Docker container names (alphanumeric, dash, underscore, dot).
-var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // writeJSON writes a JSON success response, logging any encoding error.
 func writeJSON(w http.ResponseWriter, v any) {
@@ -259,7 +255,7 @@ const swaggerHTML = `<!DOCTYPE html>
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
 SwaggerUIBundle({
-  url: '/swagger/openapi.yaml',
+  url: '/api/openapi.yaml',
   dom_id: '#swagger-ui',
   presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
   layout: "BaseLayout"
@@ -278,7 +274,8 @@ func main() {
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
-	swaggerEnabled := flag.Bool("swagger", false, "serve Swagger UI at /swagger")
+	swaggerEnabled := flag.Bool("swagger", false, "deprecated: API docs are always served at /api (flag retained for backward compatibility, no effect)")
+	rebuildHistory := flag.Bool("rebuild-history", false, "force the one-time v013 workflow-identity backfill to re-run (ignores its done-marker). Historical JSONL is re-ingested on every startup regardless of this flag.")
 	// Handle --version before any other initialization.
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Printf("claude-monitor %s\n", version)
@@ -317,7 +314,8 @@ Data:
 Examples:
   claude-monitor                                  # Start with defaults (localhost:7700)
   claude-monitor --port 8080 --watch /extra/path  # Custom port + extra watch dir
-  claude-monitor --broadcast --swagger            # All interfaces + Swagger UI
+  claude-monitor --broadcast                      # All interfaces (API docs always at /api)
+  claude-monitor --rebuild-history                # Force the workflow-identity backfill to re-run
 `)
 	}
 
@@ -351,6 +349,30 @@ Examples:
 	historyDB, err := store.Open(filepath.Join(dbDir, "history.db"))
 	if err != nil {
 		log.Fatalf("cannot open database: %v", err)
+	}
+
+	// One-time, idempotent v013 identity backfill: link agent transcripts that
+	// predate Workstream-2 identity stamping (parent_id/workflow_id/agent_id/
+	// agent_kind). Runs synchronously AFTER migrations (inside store.Open) and
+	// BEFORE the watcher's bootstrap scan (fw.Start below), so live ingestion sees
+	// already-linked rows. It is marker-guarded (settings key "backfill_v013_done")
+	// so steady-state startups short-circuit with no walk.
+	//
+	// Re-INGEST of historical JSONL happens on EVERY startup regardless of this
+	// flag: the watcher reads every tracked file from offset 0 during bootstrap
+	// (idempotent — PersistBatch dedups on (session_id, COALESCE(message_id,uuid))
+	// and the pipeline rebuilds dedup state from the DB). --rebuild-history's only
+	// effect is forcing THIS v013 identity backfill to re-run past its done-marker.
+	// Include any --watch dirs so agent transcripts under custom watch paths are
+	// linked too (the done-marker would otherwise permanently skip them).
+	backfillPaths := append(store.DefaultBackfillBasePaths(), []string(extraPaths)...)
+	if res, err := historyDB.RunBackfillV013(backfillPaths, *rebuildHistory); err != nil {
+		// Never Fatalf: a partial/failed backfill must not block the daemon. The
+		// marker stays unset so it retries on the next start.
+		log.Printf("warning: backfill v013 failed (will retry next start): %v", err)
+	} else if res.Scanned > 0 || res.Updated > 0 {
+		log.Printf("backfill v013: scanned=%d updated=%d skipped=%d errors=%d",
+			res.Scanned, res.Updated, res.Skipped, res.Errors)
 	}
 
 	// Load model pricing from DB and initialise the parser's active pricing table.
@@ -572,6 +594,7 @@ Examples:
 	mux.HandleFunc("GET /api/repos", handleRepos(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/stats", handleRepoStats(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/sessions", handleRepoSessions(historyDB))
+	mux.HandleFunc("GET /api/workflows", handleWorkflows(historyDB))
 	mux.HandleFunc("GET /api/search", handleSearch(historyDB))
 	mux.HandleFunc("GET /api/search/full", handleSearchFull(historyDB))
 	mux.HandleFunc("GET /api/search/combined", handleSearchCombined(historyDB))
@@ -583,7 +606,6 @@ Examples:
 	mux.HandleFunc("PUT /api/pricing/{model_prefix}", handlePricingUpdate(historyDB))
 	mux.HandleFunc("GET /api/storage", handleStorage(historyDB))
 	mux.HandleFunc("DELETE /api/cache/repos", handleCacheClear(resolver, historyDB))
-	mux.HandleFunc("POST /api/sessions/{id}/stop", handleSessionStop(sessionStore, &dc))
 	mux.HandleFunc("GET /health", handleHealth(historyDB, fw))
 	mux.HandleFunc("GET /api/version", handleVersion())
 
@@ -592,15 +614,20 @@ Examples:
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	// Swagger UI (opt-in via --swagger flag).
-	if *swaggerEnabled {
-		mux.HandleFunc("GET /swagger/openapi.yaml", handleSwaggerYAML())
-		mux.HandleFunc("GET /swagger", handleSwaggerUI())
-		mux.HandleFunc("GET /swagger/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/swagger", http.StatusMovedPermanently)
-		})
-		log.Println("swagger UI enabled at /swagger")
-	}
+	// API docs — always served. Swagger UI HTML at GET /api, spec at GET /api/openapi.yaml.
+	// `GET /api` is an exact (non-trailing-slash) pattern in Go 1.22 ServeMux, so it does
+	// NOT match /api/sessions, /api/stats, /api/openapi.yaml, etc. — no route conflict.
+	mux.HandleFunc("GET /api", handleSwaggerUI())
+	mux.HandleFunc("GET /api/openapi.yaml", handleSwaggerYAML())
+	// Legacy /swagger paths redirect to /api (the --swagger flag is now a deprecated no-op).
+	mux.HandleFunc("GET /swagger", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("GET /swagger/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api", http.StatusMovedPermanently)
+	})
+	// --swagger is retained for backward compatibility but has no effect; silence unused var.
+	_ = swaggerEnabled
 
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{

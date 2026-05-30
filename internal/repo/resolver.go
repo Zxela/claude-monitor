@@ -59,13 +59,13 @@ func (r *Resolver) resolve(cwd, label string) *Repo {
 	// Try git remote origin
 	if rawURL, err := gitRemoteURL(cwd); err == nil && rawURL != "" {
 		id, name, fullURL := normalizeRemoteURL(rawURL)
-		return &Repo{ID: id, Name: name, URL: fullURL}
+		return &Repo{ID: id, Name: name, URL: fullURL, FromGit: true}
 	}
 
 	// Fallback: git toplevel basename
 	if toplevel, err := gitToplevel(cwd); err == nil && toplevel != "" {
 		base := filepath.Base(toplevel)
-		return &Repo{ID: base, Name: base}
+		return &Repo{ID: base, Name: base, FromGit: true}
 	}
 
 	// Container fallback: label + basename

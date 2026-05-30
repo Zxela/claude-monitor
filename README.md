@@ -70,9 +70,8 @@ open http://localhost:7700
 # Custom port + additional watch paths
 claude-monitor --port 8080 --watch /path/to/.claude/projects
 
-# Enable Swagger UI
-claude-monitor --swagger
-# Then visit http://localhost:7700/swagger
+# API docs (Swagger UI) are always available — no flag needed
+# Visit http://localhost:7700/api
 ```
 
 ## Configuration
@@ -87,7 +86,7 @@ claude-monitor --swagger
 | `--watch` | — | Additional directory to watch (repeatable) |
 | `--docker` | `false` | Auto-discover `.claude/projects` mounts from running Docker containers |
 | `--docker-socket` | `/var/run/docker.sock` | Path to Docker socket |
-| `--swagger` | `false` | Serve Swagger UI at `/swagger` |
+| `--swagger` | `false` | Deprecated no-op (retained for compatibility); API docs are always served at `/api` |
 
 ### Environment Variables
 
@@ -139,7 +138,7 @@ Session history is persisted to a SQLite database at `~/.claude-monitor/history.
 ### Session Monitoring
 
 - **Live session tracking** via fsnotify + polling of `.claude/projects/` JSONL files
-- **Model-specific pricing** for Opus ($15/$75), Sonnet ($3/$15), Haiku ($0.80/$4)
+- **Model-specific pricing** for Opus ($5/$25), Sonnet ($3/$15), Haiku ($1/$5), loaded from SQLite and editable via the pricing API
 - **Real-time status** tracking: thinking, tool_use, waiting, idle
 - **Docker auto-discovery** of `.claude` mounts in running containers
 - **Budget alerts** with configurable threshold and browser notifications
@@ -264,22 +263,22 @@ Docker containers ───┘                    │
 
 ## API
 
-Full OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml). Enable Swagger UI with `--swagger`.
+Full OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml). Interactive Swagger UI is always served at `/api` (spec at `/api/openapi.yaml`); no flag required.
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check (includes `droppedEvents` counter) |
 | `GET /api/version` | Server version |
-| `GET /api/sessions` | List sessions (supports `?active=true`, `?group=activity`, pagination) |
+| `GET /api/sessions` | List sessions (supports `?active=true`, `?group=activity`, `?repo=`, `?workflow=`, pagination) |
 | `GET /api/sessions/{id}` | Single session lookup (live store, then DB fallback) |
 | `GET /api/sessions/{id}/events` | Session events (supports `?pinned`, `?errors`, `?last=N`, pagination) |
-| `GET /api/sessions/{id}/replay` | Replay manifest (all events, up to 10k) |
-| `POST /api/sessions/{id}/stop` | Stop Docker container for a session |
+| `GET /api/sessions/{id}/replay` | Replay manifest (session + its child agents, up to 10k events) |
 | `GET /api/stats` | Aggregated stats with `?window=` (all, today, week, month) |
 | `GET /api/stats/trends` | Trend data with `?window=` (24h, 7d, 30d) and optional `?repo=` |
 | `GET /api/repos` | Repository list with total costs |
 | `GET /api/repos/{id}/stats` | Per-repo aggregate statistics |
 | `GET /api/repos/{id}/sessions` | Paginated sessions for a repo |
+| `GET /api/workflows` | Workflow list with agent count and total cost |
 | `GET /api/search?q=&limit=` | FTS5 full-text search across sessions |
 | `GET /api/search/full?q=&limit=` | Full-content substring search (slower, searches complete text) |
 | `GET /api/settings` | Get all user-configurable settings |
@@ -287,7 +286,8 @@ Full OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml). Enable Swagger UI w
 | `GET /api/storage` | Database storage info (size, event counts) |
 | `DELETE /api/cache/repos` | Clear repo resolver cache |
 | `GET /ws` | WebSocket (live events) |
-| `GET /swagger` | Swagger UI (requires `--swagger`) |
+| `GET /api` | Interactive Swagger UI (always served) |
+| `GET /api/openapi.yaml` | OpenAPI 3 spec (YAML) |
 
 ## Development
 

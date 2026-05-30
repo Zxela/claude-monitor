@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -355,18 +356,65 @@ func TestTrendsEndpoint(t *testing.T) {
 	}
 }
 
-// TestSwaggerEndpoint verifies that /swagger is not served by default (404).
-func TestSwaggerEndpoint(t *testing.T) {
+// TestAPIDocsUI verifies GET /api serves the Swagger UI HTML unconditionally
+// (no --swagger flag needed). The TestMain server runs WITHOUT --swagger, so
+// this also proves the docs are served unconditionally.
+func TestAPIDocsUI(t *testing.T) {
 	t.Parallel()
+	resp, err := http.Get(baseURL + "/api")
+	if err != nil {
+		t.Fatalf("GET /api failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api: expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("GET /api: expected text/html, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "swagger-ui") {
+		t.Errorf("GET /api: body does not look like the Swagger UI page")
+	}
+}
 
-	resp, err := http.Get(baseURL + "/swagger")
+// TestAPIDocsSpec verifies GET /api/openapi.yaml serves the embedded spec as YAML.
+func TestAPIDocsSpec(t *testing.T) {
+	t.Parallel()
+	resp, err := http.Get(baseURL + "/api/openapi.yaml")
+	if err != nil {
+		t.Fatalf("GET /api/openapi.yaml failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/openapi.yaml: expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/yaml") {
+		t.Errorf("GET /api/openapi.yaml: expected text/yaml, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "openapi:") {
+		t.Errorf("GET /api/openapi.yaml: body does not look like an OpenAPI doc")
+	}
+}
+
+// TestSwaggerRedirect verifies the legacy /swagger path 301-redirects to /api.
+// Uses a client with redirects disabled so the 301 is observed directly.
+func TestSwaggerRedirect(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Get(baseURL + "/swagger")
 	if err != nil {
 		t.Fatalf("GET /swagger failed: %v", err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("expected status 404 for /swagger, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusMovedPermanently {
+		t.Fatalf("GET /swagger: expected 301, got %d", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/api" {
+		t.Errorf("GET /swagger: expected Location /api, got %q", loc)
 	}
 }
 
@@ -474,5 +522,44 @@ func TestCacheClear(t *testing.T) {
 	}
 	if !result["ok"] {
 		t.Error("expected ok=true in response")
+	}
+}
+
+// TestWorkflows verifies GET /api/workflows returns 200 and a JSON array
+// (empty on a fresh DB, not null).
+func TestWorkflows(t *testing.T) {
+	t.Parallel()
+	var body []json.RawMessage
+	getJSON(t, "/api/workflows", &body)
+	if body == nil {
+		t.Error("expected non-nil array, got null")
+	}
+}
+
+// TestSessionsWorkflowFilter verifies GET /api/sessions?workflow=... is accepted
+// and returns a JSON array.
+func TestSessionsWorkflowFilter(t *testing.T) {
+	t.Parallel()
+	var body []json.RawMessage
+	getJSON(t, "/api/sessions?workflow=wf_nonexistent", &body)
+	if body == nil {
+		t.Error("expected non-nil array, got null")
+	}
+}
+
+// TestSessionReplay verifies GET /api/sessions/{id}/replay returns 200 with the
+// {sessionId, events} envelope even for an unknown session (empty events, not null).
+func TestSessionReplay(t *testing.T) {
+	t.Parallel()
+	var body struct {
+		SessionID string            `json:"sessionId"`
+		Events    []json.RawMessage `json:"events"`
+	}
+	getJSON(t, "/api/sessions/replay-unknown-id/replay", &body)
+	if body.SessionID != "replay-unknown-id" {
+		t.Errorf("sessionId = %q, want replay-unknown-id", body.SessionID)
+	}
+	if body.Events == nil {
+		t.Error("events should be non-nil array")
 	}
 }

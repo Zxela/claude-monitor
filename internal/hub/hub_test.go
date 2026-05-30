@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -337,6 +338,65 @@ func TestHub_GracefulStopWithConcurrentActivity(t *testing.T) {
 	wg.Wait()
 }
 
+// TestHub_ReadPumpDoesNotLeakAfterStop is a regression test for the readPump
+// goroutine leak: before the fix, the deferred `unregister <- c` blocked forever
+// once Run had returned (Stop stops draining unregister), leaking one readPump
+// goroutine per still-open connection. With the select-on-`stopped` fix the
+// deferred send no longer blocks. We connect real WebSocket clients, abruptly
+// Stop the hub, close the conns, and assert the goroutine count returns to
+// baseline. Not parallel: it samples the process-wide goroutine count.
+func TestHub_ReadPumpDoesNotLeakAfterStop(t *testing.T) {
+	baseline := runtime.NumGoroutine()
+
+	h := NewHub()
+	go h.Run()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWs(h, w, r)
+	}))
+	defer srv.Close()
+
+	const numClients = 5
+	conns := make([]*websocket.Conn, numClients)
+	for i := 0; i < numClients; i++ {
+		wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+		c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("dial %d: %v", i, err)
+		}
+		conns[i] = c
+	}
+
+	// Let all registrations + read/write pumps spin up.
+	time.Sleep(50 * time.Millisecond)
+
+	// Abrupt stop: Run returns WITHOUT draining unregister. This is the path
+	// that previously trapped readPump's deferred unregister send.
+	h.Stop()
+	<-h.stopped
+
+	// Close client connections so readPump's ReadMessage errors and the defer
+	// runs (where the leak used to occur).
+	for _, c := range conns {
+		_ = c.Close()
+	}
+
+	// Poll until the goroutine count settles back near baseline. Allow a small
+	// slop for runtime/test bookkeeping goroutines.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		runtime.GC()
+		n := runtime.NumGoroutine()
+		if n <= baseline+2 {
+			return // no leak
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutine leak: %d goroutines, baseline %d (readPump likely blocked on unregister)", n, baseline)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestHub_StopClosesStoppedChannel(t *testing.T) {
 	t.Parallel()
 	h := NewHub()
@@ -349,5 +409,43 @@ func TestHub_StopClosesStoppedChannel(t *testing.T) {
 		// stopped channel was closed — correct.
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout: stopped channel not closed after Stop()")
+	}
+}
+
+// TestHub_StopSendsCloseGoingAwayFrame pins the documented behavior that an
+// abrupt Stop() still delivers a CloseGoingAway close frame to connected clients
+// (via the writePump's stopped-channel case), guarding the Stop() doc against the
+// drift the review flagged.
+func TestHub_StopSendsCloseGoingAwayFrame(t *testing.T) {
+	t.Parallel()
+	h := NewHub()
+	go h.Run()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWs(h, w, r)
+	}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+
+	// Let the hub register the client before stopping.
+	time.Sleep(50 * time.Millisecond)
+	h.Stop()
+
+	// The next read should observe a CloseGoingAway close frame.
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		if _, _, rerr := c.ReadMessage(); rerr != nil {
+			if websocket.IsCloseError(rerr, websocket.CloseGoingAway) {
+				return // correct: client received the documented close frame
+			}
+			t.Fatalf("expected CloseGoingAway close frame, got %v", rerr)
+		}
+		// Ignore any non-close data frames and keep reading.
 	}
 }

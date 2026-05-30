@@ -214,6 +214,100 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+// TestOpus48Pricing_SeededAndReversible runs the REAL migration registry to head
+// and asserts migration 014 seeds the claude-opus-4-8 model_pricing row at $5/$25
+// (matching Opus 4.5/4.6/4.7), then rolls back 014 and confirms only that row is
+// removed (011's rows survive).
+func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
+	// Uses the real package registry (no swap) so all numbered migrations apply.
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	var input, output, cacheRead, cacheCreate float64
+	err := db.QueryRow(
+		`SELECT input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`,
+	).Scan(&input, &output, &cacheRead, &cacheCreate)
+	if err != nil {
+		t.Fatalf("claude-opus-4-8 row not found after RunUp: %v", err)
+	}
+	if input != 5.0 {
+		t.Errorf("input_per_mtok = %v, want 5", input)
+	}
+	if output != 25.0 {
+		t.Errorf("output_per_mtok = %v, want 25", output)
+	}
+	// Cache rates follow the Opus convention from migration 011: cache read is
+	// 10% of input and 5m cache create is 1.25x input.
+	if cacheRead != 0.50 {
+		t.Errorf("cache_read_per_mtok = %v, want 0.50", cacheRead)
+	}
+	if cacheCreate != 6.25 {
+		t.Errorf("cache_create_per_mtok = %v, want 6.25", cacheCreate)
+	}
+
+	// Roll back migration 014 only.
+	name, err := RunDown(db)
+	if err != nil {
+		t.Fatalf("RunDown: %v", err)
+	}
+	if name != "opus_4_8_pricing" {
+		t.Fatalf("RunDown rolled back %q, want opus_4_8_pricing (014 must be the head)", name)
+	}
+
+	// The opus-4-8 row must be gone.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`).Scan(&n); err != nil {
+		t.Fatalf("count after down: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("claude-opus-4-8 row should be removed after RunDown, found %d", n)
+	}
+
+	// But the rows seeded by migration 011 must remain intact.
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix = 'claude-opus-4-6'`).Scan(&n); err != nil {
+		t.Fatalf("count opus-4-6 after down: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("claude-opus-4-6 (from migration 011) should survive 014 rollback, found %d", n)
+	}
+}
+
+// TestOpus48Pricing_DownPreservesUserEditedRow verifies migration 014's Down is
+// value-gated: if the user has edited the claude-opus-4-8 price (e.g. via the
+// pricing API) away from the seeded values, a rollback must NOT delete it, since
+// Up used INSERT OR IGNORE and never created/owned that edited row.
+func TestOpus48Pricing_DownPreservesUserEditedRow(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	// Simulate a user edit of the price after the migration seeded it.
+	if _, err := db.Exec(
+		`UPDATE model_pricing SET input_per_mtok = 9.0, output_per_mtok = 45.0 WHERE model_prefix = 'claude-opus-4-8'`,
+	); err != nil {
+		t.Fatalf("simulate user edit: %v", err)
+	}
+
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown: %v", err)
+	}
+
+	// The user-edited row must survive the rollback, untouched.
+	var in, out float64
+	err := db.QueryRow(
+		`SELECT input_per_mtok, output_per_mtok FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`,
+	).Scan(&in, &out)
+	if err != nil {
+		t.Fatalf("user-edited claude-opus-4-8 row should survive 014 rollback, but: %v", err)
+	}
+	if in != 9.0 || out != 45.0 {
+		t.Errorf("user edit not preserved: input=%v output=%v, want 9/45", in, out)
+	}
+}
+
 func TestFailedMigration_RollsBack(t *testing.T) {
 	saved := registry
 	defer func() { registry = saved }()
@@ -248,5 +342,89 @@ func TestFailedMigration_RollsBack(t *testing.T) {
 	}
 	if v != 1 {
 		t.Errorf("expected version 1 after failed migration 2, got %d", v)
+	}
+}
+
+// columnExists reports whether a column is present on a table.
+func columnExists(t *testing.T, db *sql.DB, table, col string) bool {
+	t.Helper()
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		t.Fatalf("pragma_table_info(%s): %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		if name == col {
+			return true
+		}
+	}
+	return false
+}
+
+// indexExists reports whether a named index exists.
+func indexExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n); err != nil {
+		t.Fatalf("index lookup: %v", err)
+	}
+	return n > 0
+}
+
+// TestMigration013_DownRoundTrip runs the REAL registry to head, rolls back past
+// migration 013 (workflow columns), asserts the columns + index are dropped, then
+// re-applies to head — verifying 013's Down is correct and reversible. It rolls
+// back to version 12 generically so it stays valid as later migrations stack on 013.
+func TestMigration013_DownRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	for _, col := range []string{"workflow_id", "agent_id", "agent_kind"} {
+		if !columnExists(t, db, "sessions", col) {
+			t.Fatalf("after RunUp: sessions.%s missing", col)
+		}
+	}
+	if !indexExists(t, db, "idx_sessions_workflow") {
+		t.Fatal("after RunUp: idx_sessions_workflow missing")
+	}
+
+	// Roll back everything above migration 12 (013 and anything stacked on it).
+	for {
+		v, err := GetVersion(db)
+		if err != nil {
+			t.Fatalf("GetVersion: %v", err)
+		}
+		if v <= 12 {
+			break
+		}
+		if _, err := RunDown(db); err != nil {
+			t.Fatalf("RunDown from v%d: %v", v, err)
+		}
+	}
+
+	// 013's columns and index must be gone.
+	for _, col := range []string{"workflow_id", "agent_id", "agent_kind"} {
+		if columnExists(t, db, "sessions", col) {
+			t.Errorf("after rollback past 013: sessions.%s should be dropped", col)
+		}
+	}
+	if indexExists(t, db, "idx_sessions_workflow") {
+		t.Error("after rollback past 013: idx_sessions_workflow should be dropped")
+	}
+
+	// Re-apply to head — 013 (and anything above) must cleanly re-create the columns.
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp after rollback: %v", err)
+	}
+	if !columnExists(t, db, "sessions", "workflow_id") {
+		t.Error("after re-RunUp: workflow_id not restored")
+	}
+	if !indexExists(t, db, "idx_sessions_workflow") {
+		t.Error("after re-RunUp: idx_sessions_workflow not restored")
 	}
 }

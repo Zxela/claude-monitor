@@ -15,6 +15,7 @@ interface GraphNode {
   vy: number;
   radius: number;
   color: string;
+  workflowColor?: string;
   label: string;
   session: Session;
 }
@@ -219,6 +220,17 @@ function resizeCanvas(): void {
   if (ctx) ctx.scale(dpr, dpr);
 }
 
+/** Deterministic per-workflow tint so all agents of a workflow share a color. */
+function workflowTint(workflowId: string | undefined): string | undefined {
+  if (!workflowId) return undefined;
+  const palette = ['#7c5cff', '#1f9d8f', '#d98c2b', '#c0567a', '#3a86ff', '#8ab017'];
+  let h = 0;
+  for (let i = 0; i < workflowId.length; i++) {
+    h = (h * 31 + workflowId.charCodeAt(i)) >>> 0;
+  }
+  return palette[h % palette.length];
+}
+
 function rebuildNodes(): void {
   if (!canvas) return;
   const now = Date.now();
@@ -274,6 +286,7 @@ function rebuildNodes(): void {
       vy: old?.vy ?? 0,
       radius,
       color,
+      workflowColor: workflowTint(sess.workflowId),
       label,
       session: sess,
     };
@@ -302,6 +315,7 @@ function updateNodeColors(): void {
     const sess = state.sessions.get(n.id);
     if (!sess) continue;
     n.session = sess;
+    n.workflowColor = workflowTint(sess.workflowId);
     const newColor = !sess.isActive
       ? '#44445a'
       : sess.status === 'thinking'
@@ -367,6 +381,34 @@ function simulate(): void {
     b.vy -= fy;
   }
 
+  // Intra-workflow clustering: weak pull toward each workflow's centroid so
+  // nodes sharing a workflowId drift together. Weaker than edge attraction
+  // (0.005 < 0.01) so parent-child edges still dominate; gated on workflowId so
+  // non-workflow graphs are unaffected and still settle.
+  const workflowGroups = new Map<string, GraphNode[]>();
+  for (const n of nodes) {
+    const wf = n.session.workflowId;
+    if (!wf) continue;
+    const group = workflowGroups.get(wf);
+    if (group) group.push(n);
+    else workflowGroups.set(wf, [n]);
+  }
+  for (const group of workflowGroups.values()) {
+    if (group.length < 2) continue;
+    let gx = 0,
+      gy = 0;
+    for (const n of group) {
+      gx += n.x;
+      gy += n.y;
+    }
+    gx /= group.length;
+    gy /= group.length;
+    for (const n of group) {
+      n.vx += (gx - n.x) * 0.005;
+      n.vy += (gy - n.y) * 0.005;
+    }
+  }
+
   // Center gravity + damping + bounds
   const cx = w / 2,
     cy = h / 2;
@@ -414,6 +456,18 @@ function draw(): void {
 
   // Nodes
   for (const n of nodes) {
+    // Faint workflow halo so members of the same workflow read as a group,
+    // without losing the status fill color below.
+    if (n.workflowColor) {
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = n.workflowColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius + 3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+    }
+
     ctx.globalAlpha = n === hovering ? 1.0 : 0.7;
     ctx.fillStyle = n.color;
     ctx.beginPath();

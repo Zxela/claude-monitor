@@ -57,8 +57,23 @@ type Session struct {
 	TaskDescription string          `json:"taskDescription"`
 	Version        string           `json:"version,omitempty"`
 	Entrypoint     string           `json:"entrypoint,omitempty"`
+	WorkflowID     string           `json:"workflowId,omitempty"` // wf_<id> grouping all agents of one Claude Code workflow run; empty for non-workflow sessions
+	AgentID        string           `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
+	AgentKind      string           `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
+	repoSourceRank int              `json:"-"` // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 }
+
+// RepoSourceRank reports the resolution-authority rank of the current RepoID
+// (see repo.Source* constants). Higher means more authoritative.
+func (s *Session) RepoSourceRank() int { return s.repoSourceRank }
+
+// SetRepoSourceRank records the resolution-authority rank of the current RepoID.
+func (s *Session) SetRepoSourceRank(rank int) { s.repoSourceRank = rank }
+
+// RepoFromGit reports whether the current RepoID came from an authoritative git
+// resolution (git remote or toplevel), as opposed to a non-git fallback.
+func (s *Session) RepoFromGit() bool { return s.repoSourceRank >= 2 }
 
 // HasSeenMessageID reports whether the given key has been recorded.
 func (s *Session) HasSeenMessageID(key string) bool {

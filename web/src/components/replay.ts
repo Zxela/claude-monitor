@@ -10,9 +10,13 @@ let panel: HTMLElement | null = null;
 let feedEl: HTMLElement | null = null;
 let playBtn: HTMLElement | null = null;
 let scrubber: HTMLInputElement | null = null;
+let speedSelect: HTMLSelectElement | null = null;
 let progressEl: HTMLElement | null = null;
-let playTimer: ReturnType<typeof setInterval> | null = null;
+// Self-scheduling setTimeout handle (not setInterval) so each step can use its
+// own computed delay and re-read the speed dropdown. stopPlayback() nulls it.
+let playTimer: ReturnType<typeof setTimeout> | null = null;
 let totalEvents = 0;
+// currentIndex is a COUNT of rendered events (0..totalEvents inclusive).
 let currentIndex = 0;
 let manifestEvents: Event[] = [];
 
@@ -71,12 +75,20 @@ function renderReplayPanel(sessionId: string): void {
   feedEl = panel.querySelector('.replay-feed')!;
   playBtn = panel.querySelector('.replay-play-btn')!;
   scrubber = panel.querySelector('.replay-scrubber')!;
+  speedSelect = panel.querySelector('.replay-speed')!;
   progressEl = panel.querySelector('.replay-progress')!;
 
   panel.querySelector('.replay-close-btn')!.addEventListener('click', close);
   panel.querySelector('.replay-restart-btn')!.addEventListener('click', restart);
   playBtn.addEventListener('click', togglePlay);
   scrubber.addEventListener('input', onScrub);
+  // Changing speed mid-play must take effect immediately: re-arm the loop.
+  speedSelect.addEventListener('change', () => {
+    if (state.replayPlaying) {
+      stopPlayback();
+      startPlayback();
+    }
+  });
 }
 
 async function loadManifest(sessionId: string): Promise<void> {
@@ -85,6 +97,8 @@ async function loadManifest(sessionId: string): Promise<void> {
     const data = await res.json();
     manifestEvents = (data.events ?? []).map((e: unknown) => e as Event);
     totalEvents = manifestEvents.length;
+    // currentIndex is a COUNT (0..totalEvents inclusive), so the slider's max
+    // is totalEvents: dragging fully right means "all N events shown".
     if (scrubber) scrubber.max = String(totalEvents);
     updateProgress();
   } catch (err) {
@@ -114,30 +128,110 @@ export function restart(): void {
   if (playBtn) playBtn.textContent = '▶ PLAY';
 }
 
+/**
+ * Pure: clamp a requested seek count `n` to the renderable range.
+ * `n` is a COUNT (exclusive upper bound): renderUpToCount(len, len) === len so
+ * seeking fully right includes the LAST event (indices 0..len-1). Negative or
+ * over-large values clamp into [0, len]. Exported for unit testing the
+ * off-by-one / inclusive-of-last-event property without a DOM.
+ */
+export function renderUpToCount(n: number, len: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(Math.trunc(n), Math.max(0, len)));
+}
+
+/**
+ * Re-render the feed to show exactly the first `n` events.
+ * `n` is an EXCLUSIVE upper bound (a count): renderUpTo(totalEvents) appends
+ * indices 0..totalEvents-1, so seeking fully right includes the LAST event.
+ */
+function renderUpTo(n: number): void {
+  if (!feedEl) return;
+  const count = renderUpToCount(n, manifestEvents.length);
+  feedEl.innerHTML = '';
+  if (count === 0) {
+    feedEl.innerHTML = '<div class="replay-empty">PRESS PLAY TO BEGIN</div>';
+    return;
+  }
+  for (let i = 0; i < count; i++) {
+    feedEl.appendChild(renderFeedEntry(manifestEvents[i]));
+  }
+  feedEl.scrollTop = feedEl.scrollHeight;
+}
+
 function onScrub(): void {
   if (!scrubber) return;
   stopPlayback();
   currentIndex = parseInt(scrubber.value, 10);
+  // Re-render the feed up to the scrubbed position so dragging is visible.
+  renderUpTo(currentIndex);
   update({ replayPlaying: false });
   if (playBtn) playBtn.textContent = '▶ PLAY';
   updateProgress();
 }
 
+// Pacing bounds (ms) for timestamp-based replay, so a long idle gap between
+// real events does not freeze the replay and rapid bursts stay watchable.
+export const MIN_STEP_DELAY = 30;
+export const MAX_STEP_DELAY = 2000;
+
+/**
+ * Pure: normalise a raw speed selection (string from the dropdown, or any
+ * number) to a positive multiplier; non-positive / non-finite falls back to 1.
+ * Exported for unit testing.
+ */
+export function clampSpeed(raw: string | number | null | undefined): number {
+  const v = typeof raw === 'number' ? raw : parseFloat(raw ?? '1');
+  return Number.isFinite(v) && v > 0 ? v : 1;
+}
+
+function currentSpeed(): number {
+  return clampSpeed(speedSelect?.value);
+}
+
+/**
+ * Pure: delay (ms) before rendering the event at `index`, paced by the real
+ * inter-event timestamp gap divided by `speed` and clamped to
+ * [MIN_STEP_DELAY, MAX_STEP_DELAY]. For the first event (index<=0), an index at
+ * or past the end (index>=len), or a non-finite / non-positive gap, falls back
+ * to max(50, 200/speed). Exported (with timestamps passed in) so the clamp,
+ * divide-by-speed, and fallback branches are testable without module state.
+ */
+export function stepDelayFor(
+  prevTs: number,
+  curTs: number,
+  speed: number,
+  index: number,
+  len: number,
+): number {
+  const fallback = Math.max(50, 200 / speed);
+  if (index <= 0 || index >= len) return fallback;
+  const gap = curTs - prevTs;
+  if (!Number.isFinite(gap) || gap <= 0) return fallback;
+  return Math.min(MAX_STEP_DELAY, Math.max(MIN_STEP_DELAY, gap / speed));
+}
+
+/** Delay before rendering event at `index`, paced by real timestamps / speed. */
+function stepDelay(index: number): number {
+  const speed = currentSpeed();
+  const len = manifestEvents.length;
+  const prev = index > 0 && index <= len ? new Date(manifestEvents[index - 1].timestamp).getTime() : NaN;
+  const cur = index >= 0 && index < len ? new Date(manifestEvents[index].timestamp).getTime() : NaN;
+  return stepDelayFor(prev, cur, speed, index, len);
+}
+
 function startPlayback(): void {
   if (!state.replaySessionId || manifestEvents.length === 0) return;
-  const speed = parseFloat(
-    (container?.querySelector('.replay-speed') as HTMLSelectElement)?.value ?? '1',
-  );
 
-  // Clear placeholder
+  // Clear placeholder when starting from the beginning.
   if (feedEl && currentIndex === 0) {
     feedEl.innerHTML = '';
   }
 
-  // Calculate delay between events based on actual timestamps and speed
-  const baseDelay = Math.max(50, 200 / speed);
-
-  playTimer = setInterval(() => {
+  // Self-scheduling loop: each tick re-reads speed (via stepDelay) and uses
+  // the real inter-event timestamp gap, so changing the dropdown mid-play and
+  // idle gaps are both handled correctly.
+  const tick = (): void => {
     if (currentIndex >= totalEvents) {
       stopPlayback();
       update({ replayPlaying: false });
@@ -152,12 +246,21 @@ function startPlayback(): void {
     currentIndex++;
     if (scrubber) scrubber.value = String(currentIndex);
     updateProgress();
-  }, baseDelay);
+    if (currentIndex < totalEvents) {
+      playTimer = setTimeout(tick, stepDelay(currentIndex));
+    } else {
+      stopPlayback();
+      update({ replayPlaying: false });
+      if (playBtn) playBtn.textContent = '▶ PLAY';
+    }
+  };
+
+  playTimer = setTimeout(tick, stepDelay(currentIndex));
 }
 
 function stopPlayback(): void {
   if (playTimer) {
-    clearInterval(playTimer);
+    clearTimeout(playTimer);
     playTimer = null;
   }
 }
