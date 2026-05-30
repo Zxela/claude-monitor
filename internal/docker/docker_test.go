@@ -19,8 +19,12 @@ import (
 func newTestClient(t *testing.T, mux *http.ServeMux) (*Client, func()) {
 	t.Helper()
 
-	// Use a temp Unix socket so we don't collide with other tests.
-	sockPath := filepath.Join(t.TempDir(), "docker.sock")
+	// Use a short temp Unix socket path. We deliberately avoid t.TempDir()
+	// because it embeds the (long) test name, and on macOS the Unix socket
+	// path is capped at 104 bytes (sun_path); long names overflow it and
+	// net.Listen fails with "bind: invalid argument". A short MkdirTemp dir
+	// keeps the path well under the limit on both macOS and Linux.
+	sockPath := shortSocketPath(t)
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatalf("listen unix: %v", err)
@@ -36,6 +40,20 @@ func newTestClient(t *testing.T, mux *http.ServeMux) (*Client, func()) {
 		ln.Close()
 	}
 	return client, cleanup
+}
+
+// shortSocketPath returns a short, unique Unix socket path that stays within
+// the 104-byte sun_path limit on macOS. The containing dir is removed on
+// cleanup. t.TempDir() cannot be used here because it embeds the test name,
+// which can push the socket path past the limit and fail net.Listen.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "dk")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "d.sock")
 }
 
 // ---------- FindClaudePaths tests ----------
@@ -672,8 +690,8 @@ func TestNewClient_UsesUnixSocket(t *testing.T) {
 	t.Parallel()
 
 	// Verify that NewClient returns a non-nil client.
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "test.sock")
+	// Use a short socket path to stay within the macOS sun_path limit.
+	sockPath := shortSocketPath(t)
 
 	// Create a real socket so the client can connect.
 	ln, err := net.Listen("unix", sockPath)
