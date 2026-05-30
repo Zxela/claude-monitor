@@ -274,6 +274,40 @@ func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
 	}
 }
 
+// TestOpus48Pricing_DownPreservesUserEditedRow verifies migration 014's Down is
+// value-gated: if the user has edited the claude-opus-4-8 price (e.g. via the
+// pricing API) away from the seeded values, a rollback must NOT delete it, since
+// Up used INSERT OR IGNORE and never created/owned that edited row.
+func TestOpus48Pricing_DownPreservesUserEditedRow(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	// Simulate a user edit of the price after the migration seeded it.
+	if _, err := db.Exec(
+		`UPDATE model_pricing SET input_per_mtok = 9.0, output_per_mtok = 45.0 WHERE model_prefix = 'claude-opus-4-8'`,
+	); err != nil {
+		t.Fatalf("simulate user edit: %v", err)
+	}
+
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown: %v", err)
+	}
+
+	// The user-edited row must survive the rollback, untouched.
+	var in, out float64
+	err := db.QueryRow(
+		`SELECT input_per_mtok, output_per_mtok FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`,
+	).Scan(&in, &out)
+	if err != nil {
+		t.Fatalf("user-edited claude-opus-4-8 row should survive 014 rollback, but: %v", err)
+	}
+	if in != 9.0 || out != 45.0 {
+		t.Errorf("user edit not preserved: input=%v output=%v, want 9/45", in, out)
+	}
+}
+
 func TestFailedMigration_RollsBack(t *testing.T) {
 	saved := registry
 	defer func() { registry = saved }()

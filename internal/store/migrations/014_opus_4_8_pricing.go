@@ -17,7 +17,14 @@ func init() {
 			return err
 		},
 		Down: func(tx *sql.Tx) error {
-			_, err := tx.Exec(`DELETE FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`)
+			// Only remove the row if it still holds exactly the values we seeded.
+			// Up used INSERT OR IGNORE (it never overwrote an existing row), so a
+			// price the user edited via the pricing API must survive rollback —
+			// Down must not delete data this migration did not create.
+			_, err := tx.Exec(`DELETE FROM model_pricing
+				WHERE model_prefix = 'claude-opus-4-8'
+				  AND input_per_mtok = 5.0 AND output_per_mtok = 25.0
+				  AND cache_read_per_mtok = 0.50 AND cache_create_per_mtok = 6.25`)
 			return err
 		},
 	})

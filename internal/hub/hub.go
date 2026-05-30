@@ -124,10 +124,13 @@ func (h *Hub) Run() {
 }
 
 // Stop is an abrupt stop intended for tests only: it signals Run to return
-// immediately without closing client send channels, so connected clients do
-// NOT receive a WebSocket close frame. Use GracefulStop in production for a
-// clean shutdown. After Run returns it closes the `stopped` channel, which the
-// readPump deferred unregister selects on so its goroutine cannot leak.
+// immediately WITHOUT the graceful per-client send-channel drain that
+// GracefulStop performs. After Run returns it closes the `stopped` channel; each
+// writePump selects on it, sends a CloseGoingAway frame, and exits, and the
+// readPump deferred unregister also selects on it — so clients still receive a
+// close frame and neither pump goroutine leaks. The difference from GracefulStop
+// is the mechanism (stopped channel vs. closed send channels) and that Stop does
+// not block waiting for Run to finish. Use GracefulStop in production.
 func (h *Hub) Stop() {
 	close(h.done)
 }

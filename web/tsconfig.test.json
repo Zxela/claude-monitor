@@ -1,0 +1,12 @@
+{
+  // Type-checks the test files, which the base tsconfig.json (and the production
+  // `tsc --noEmit` build) deliberately exclude. Run in CI via `npm run typecheck:test`
+  // so a pure type error in a test file is caught rather than silently passing
+  // (vitest strips types via esbuild and never type-checks).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.test.ts"],
+  "exclude": []
+}

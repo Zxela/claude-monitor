@@ -411,3 +411,41 @@ func TestHub_StopClosesStoppedChannel(t *testing.T) {
 		t.Fatal("timeout: stopped channel not closed after Stop()")
 	}
 }
+
+// TestHub_StopSendsCloseGoingAwayFrame pins the documented behavior that an
+// abrupt Stop() still delivers a CloseGoingAway close frame to connected clients
+// (via the writePump's stopped-channel case), guarding the Stop() doc against the
+// drift the review flagged.
+func TestHub_StopSendsCloseGoingAwayFrame(t *testing.T) {
+	t.Parallel()
+	h := NewHub()
+	go h.Run()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWs(h, w, r)
+	}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+
+	// Let the hub register the client before stopping.
+	time.Sleep(50 * time.Millisecond)
+	h.Stop()
+
+	// The next read should observe a CloseGoingAway close frame.
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		if _, _, rerr := c.ReadMessage(); rerr != nil {
+			if websocket.IsCloseError(rerr, websocket.CloseGoingAway) {
+				return // correct: client received the documented close frame
+			}
+			t.Fatalf("expected CloseGoingAway close frame, got %v", rerr)
+		}
+		// Ignore any non-close data frames and keep reading.
+	}
+}

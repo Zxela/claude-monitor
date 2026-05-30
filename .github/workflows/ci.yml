@@ -29,6 +29,9 @@ jobs:
       - name: Frontend type check
         run: cd web && npx tsc --noEmit
 
+      - name: Frontend test type check
+        run: cd web && npm run typecheck:test
+
       - name: Frontend lint
         run: cd web && npm run lint
 
