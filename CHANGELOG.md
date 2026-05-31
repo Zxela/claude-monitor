@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.5.2](https://github.com/Zxela/claude-monitor/compare/v3.5.1...v3.5.2) (2026-05-31)
+
+
+### Bug Fixes
+
+* correct windowed stats accuracy (P0) + UI bug sweep from feature audit ([77da8aa](https://github.com/Zxela/claude-monitor/commit/77da8aa3fc612cfcc8e9e4e160261056508ad672))
+* resolve remaining audit backlog — backfills, search/FTS, history, counts, API ([e9af5e5](https://github.com/Zxela/claude-monitor/commit/e9af5e5e9f4c0e3da9de2501970a506069698530))
+* windowed stats accuracy (P0) + UI bug sweep from automated feature audit ([312172a](https://github.com/Zxela/claude-monitor/commit/312172a2a491ed4ac94c808c354261854db76ab4))
+
 ## [3.5.1](https://github.com/Zxela/claude-monitor/compare/v3.5.0...v3.5.1) (2026-05-30)
 
 
