@@ -56,16 +56,20 @@ func (r *Resolver) Resolve(cwd, label string) (*Repo, error) {
 }
 
 func (r *Resolver) resolve(cwd, label string) *Repo {
-	// Try git remote origin
+	// Try git remote origin. Also capture the working-tree root (toplevel) so
+	// callers can recognise when a later resolution refers to the SAME repo
+	// (used for start-pinned repo_id upgrades). A toplevel lookup failure is
+	// non-fatal — the remote URL still uniquely identifies the repo.
 	if rawURL, err := gitRemoteURL(cwd); err == nil && rawURL != "" {
 		id, name, fullURL := normalizeRemoteURL(rawURL)
-		return &Repo{ID: id, Name: name, URL: fullURL, FromGit: true}
+		toplevel, _ := gitToplevel(cwd)
+		return &Repo{ID: id, Name: name, URL: fullURL, FromGit: true, Toplevel: toplevel}
 	}
 
 	// Fallback: git toplevel basename
 	if toplevel, err := gitToplevel(cwd); err == nil && toplevel != "" {
 		base := filepath.Base(toplevel)
-		return &Repo{ID: base, Name: base, FromGit: true}
+		return &Repo{ID: base, Name: base, FromGit: true, Toplevel: toplevel}
 	}
 
 	// Container fallback: label + basename

@@ -247,9 +247,9 @@ func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
 		t.Errorf("cache_create_per_mtok = %v, want 6.25", cacheCreate)
 	}
 
-	// Roll back the migrations above 014 (016 then 015) so 014 becomes the head,
+	// Roll back the migrations above 014 (newest first) so 014 becomes the head,
 	// then roll back 014 itself.
-	for _, want := range []string{"rebuild_events_fts", "recompute_session_aggregates"} {
+	for _, want := range []string{"reattribute_child_repos", "rebuild_events_fts", "recompute_session_aggregates"} {
 		name, err := RunDown(db)
 		if err != nil {
 			t.Fatalf("RunDown: %v", err)
@@ -354,6 +354,82 @@ func TestFailedMigration_RollsBack(t *testing.T) {
 	}
 	if v != 1 {
 		t.Errorf("expected version 1 after failed migration 2, got %d", v)
+	}
+}
+
+// TestMigration017_ReattributesChildRepos runs the REAL registry to head, then
+// re-applies migration 017 against populated data (by rolling its version back to
+// 16 and running up again) to verify children — including a multi-level chain —
+// are re-pointed at their parent's repo_id, root sessions are left alone, and a
+// second application is a no-op (idempotent).
+func TestMigration017_ReattributesChildRepos(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	// Seed sessions AFTER the initial RunUp (so 017's first pass saw an empty
+	// table). A root in a real repo, a child with a phantom worktree repo, and a
+	// grandchild with its own phantom repo. parent_repo is a sibling root in a
+	// different project that must be untouched.
+	seed := func(id, parentID, repoID string) {
+		t.Helper()
+		if _, err := db.Exec(
+			`INSERT INTO sessions (id, parent_id, repo_id) VALUES (?, ?, ?)`,
+			id, parentID, repoID,
+		); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	seed("root", "", "github.com/acme/widget")
+	seed("child", "root", "agent-deadbeef")       // phantom worktree repo
+	seed("grandchild", "child", "agent-cafef00d") // phantom, one level deeper
+	seed("other-root", "", "github.com/acme/other")
+
+	// Re-apply 017 against the now-populated table: roll its version back to 16
+	// (Down is a no-op, leaving rows intact) then RunUp re-applies just 017.
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown 017: %v", err)
+	}
+	if v, _ := GetVersion(db); v != 16 {
+		t.Fatalf("after RunDown: version = %d, want 16", v)
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp (applies 017): %v", err)
+	}
+
+	repoOf := func(id string) string {
+		t.Helper()
+		var r string
+		if err := db.QueryRow(`SELECT COALESCE(repo_id,'') FROM sessions WHERE id = ?`, id).Scan(&r); err != nil {
+			t.Fatalf("read repo of %s: %v", id, err)
+		}
+		return r
+	}
+
+	if got := repoOf("child"); got != "github.com/acme/widget" {
+		t.Errorf("child repo = %q, want inherited github.com/acme/widget", got)
+	}
+	// Multi-level: grandchild should propagate up to the root project via the fixpoint loop.
+	if got := repoOf("grandchild"); got != "github.com/acme/widget" {
+		t.Errorf("grandchild repo = %q, want propagated github.com/acme/widget", got)
+	}
+	if got := repoOf("root"); got != "github.com/acme/widget" {
+		t.Errorf("root repo = %q, want unchanged github.com/acme/widget", got)
+	}
+	if got := repoOf("other-root"); got != "github.com/acme/other" {
+		t.Errorf("other-root repo = %q, want unchanged github.com/acme/other", got)
+	}
+
+	// Idempotent: rolling back and re-applying again must yield identical results.
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown 017 (2nd): %v", err)
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp 017 (2nd): %v", err)
+	}
+	if got := repoOf("grandchild"); got != "github.com/acme/widget" {
+		t.Errorf("after 2nd apply: grandchild repo = %q, want github.com/acme/widget", got)
 	}
 }
 
