@@ -212,13 +212,18 @@ func handleStats(sessionStore *session.Store, historyDB *store.DB, fw *watcher.W
 
 		now := time.Now()
 		var since time.Time
-		switch r.URL.Query().Get("window") {
+		switch window := r.URL.Query().Get("window"); window {
 		case "today":
 			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		case "week":
 			since = weekStartTime(now)
 		case "month":
 			since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		case "", "all":
+			// lifetime aggregate (since stays zero)
+		default:
+			writeJSONError(w, "window must be today, week, month, or all", http.StatusBadRequest)
+			return
 		}
 
 		agg, err := historyDB.AggregateStats(since)

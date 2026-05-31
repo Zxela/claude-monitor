@@ -40,6 +40,19 @@ function getAllSessions(): Session[] {
   ].filter((s) => !s.parentId); // top-level only
 }
 
+// Duration in seconds, measured startedAt -> lastActive (matching session cards
+// and the History view), not startedAt -> now. Returns null for sessions with a
+// missing/invalid startedAt (e.g. the Go zero-time sentinel "0001-01-01"), which
+// would otherwise render as garbage like "17754383h3m".
+function sessionDurationSecs(s: Session): number | null {
+  if (!s.startedAt) return null;
+  const startMs = new Date(s.startedAt).getTime();
+  if (!Number.isFinite(startMs) || startMs <= 0) return null;
+  const endRaw = s.lastActive ? new Date(s.lastActive).getTime() : Date.now();
+  const endMs = Number.isFinite(endRaw) && endRaw > 0 ? endRaw : Date.now();
+  return Math.max(0, (endMs - startMs) / 1000);
+}
+
 function sortSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => {
     let cmp = 0;
@@ -63,8 +76,9 @@ function sortSessions(sessions: Session[]): Session[] {
         cmp = a.errorCount - b.errorCount;
         break;
       case 'duration': {
-        const dA = a.startedAt ? Date.now() - new Date(a.startedAt).getTime() : 0;
-        const dB = b.startedAt ? Date.now() - new Date(b.startedAt).getTime() : 0;
+        // Invalid/zero-time sessions sort to one consistent end.
+        const dA = sessionDurationSecs(a) ?? -Infinity;
+        const dB = sessionDurationSecs(b) ?? -Infinity;
         cmp = dA - dB;
         break;
       }
@@ -96,7 +110,11 @@ function renderTable(): void {
     return;
   }
 
-  if (!tableEl) {
+  // Recreate the node if it was detached: the feed panel wipes #feed-mount when
+  // other views render into it, leaving a stale tableEl whose parentElement is no
+  // longer `container`. Without this guard the table stays permanently blank
+  // after navigating away and back.
+  if (!tableEl || tableEl.parentElement !== container) {
     tableEl = document.createElement('div');
     tableEl.className = 'table-view';
     container.appendChild(tableEl);
@@ -138,8 +156,8 @@ function renderTable(): void {
     .map((s) => {
       const name = sessionDisplayName(s);
       const totalTokens = s.inputTokens + s.outputTokens;
-      const durationMs = s.startedAt ? Date.now() - new Date(s.startedAt).getTime() : 0;
-      const duration = formatDurationSecs(durationMs / 1000);
+      const durSecs = sessionDurationSecs(s);
+      const duration = durSecs === null ? '—' : formatDurationSecs(durSecs);
       const lastActive = new Date(s.lastActive).toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',

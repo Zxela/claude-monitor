@@ -66,12 +66,15 @@ export function toggle(anchor: HTMLElement): void {
   // Draw donut chart
   const canvas = popover.querySelector<HTMLCanvasElement>('.cb-chart')!;
   const ctx = canvas.getContext('2d')!;
-  const colors: Record<string, string> = {
-    'claude-opus-4-6': COLORS.purple,
-    'claude-sonnet-4-6': COLORS.cyan,
-    'claude-haiku-4-5-20251001': COLORS.green,
-    unknown: COLORS.statusIdle,
-  };
+  // Assign colors deterministically by descending-cost rank so every model gets
+  // a distinct slice. The old static lookup mapped all unrecognized models
+  // (e.g. current opus-4-7/4-8) to the same '#888' gray, making the two largest
+  // slices visually indistinguishable.
+  const PALETTE = [
+    COLORS.purple, COLORS.cyan, COLORS.green, COLORS.orange,
+    COLORS.yellow, COLORS.red, COLORS.user, COLORS.statusIdle,
+  ];
+  const colorFor = (i: number): string => PALETTE[i % PALETTE.length];
   const cx = 60,
     cy = 60,
     r = 45,
@@ -79,9 +82,10 @@ export function toggle(anchor: HTMLElement): void {
   let angle = -Math.PI / 2;
   const legend = popover.querySelector('.cb-legend')!;
 
-  for (const [model, cost] of [...byModel.entries()].sort((a, b) => b[1] - a[1])) {
+  const sorted = [...byModel.entries()].sort((a, b) => b[1] - a[1]);
+  for (const [i, [model, cost]] of sorted.entries()) {
     const slice = totalCost > 0 ? (cost / totalCost) * Math.PI * 2 : 0;
-    const color = colors[model] || '#888';
+    const color = colorFor(i);
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(cx, cy);

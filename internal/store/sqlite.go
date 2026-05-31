@@ -343,11 +343,14 @@ func (d *DB) ClearCwdRepos() error {
 func (d *DB) SaveSession(s *session.Session) error {
 	var endedAt string
 	var startedAt string
+	// Store timestamps in canonical UTC RFC3339 ("…Z") so window-boundary and
+	// bucketing comparisons (which are lexical TEXT compares in SQLite) are valid
+	// regardless of the source time's zone. Production times are already UTC.
 	if !s.LastActive.IsZero() {
-		endedAt = s.LastActive.Format(time.RFC3339)
+		endedAt = s.LastActive.UTC().Format(time.RFC3339)
 	}
 	if !s.StartedAt.IsZero() {
-		startedAt = s.StartedAt.Format(time.RFC3339)
+		startedAt = s.StartedAt.UTC().Format(time.RFC3339)
 	}
 
 	_, err := d.db.Exec(`INSERT INTO sessions
@@ -453,11 +456,13 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 	for _, s := range sessions {
 		var endedAt string
 		var startedAt string
+		// Canonical UTC storage — see SaveSession. Keeps lexical window/bucket
+		// comparisons valid; production times are already UTC.
 		if !s.LastActive.IsZero() {
-			endedAt = s.LastActive.Format(time.RFC3339)
+			endedAt = s.LastActive.UTC().Format(time.RFC3339)
 		}
 		if !s.StartedAt.IsZero() {
-			startedAt = s.StartedAt.Format(time.RFC3339)
+			startedAt = s.StartedAt.UTC().Format(time.RFC3339)
 		}
 
 		if _, err := sessStmt.Exec(
@@ -715,7 +720,11 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	var args []interface{}
 	if !since.IsZero() {
 		where = ` WHERE started_at >= ?`
-		args = append(args, since.Format(time.RFC3339))
+		// started_at is stored as UTC RFC3339 (…Z). Format the boundary in UTC so
+		// the lexical TEXT comparison is correct: a local-offset boundary (…-07:00)
+		// sorts before "…Z" and wrongly pulls late-yesterday-UTC rows into the
+		// window, inflating today/week/month totals. See TestWindowBoundaryUTC.
+		args = append(args, since.UTC().Format(time.RFC3339))
 	}
 
 	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
@@ -805,7 +814,13 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	// windowWhere matches ALL rows in the window (for cost/token SUMs, counted
 	// once). where additionally restricts to top-level sessions (parent_id empty)
 	// for COUNT/AVG/percentile distributions.
-	windowWhere := fmt.Sprintf("started_at >= datetime('now', '%s')", interval)
+	// datetime('now', interval) renders as "YYYY-MM-DD HH:MM:SS" (space-separated,
+	// no T/Z), but started_at is "YYYY-MM-DDTHH:MM:SSZ". A lexical TEXT compare
+	// then diverges at index 10 (' ' 0x20 < 'T' 0x54), so every row on the
+	// boundary's calendar date passes regardless of its hour — turning the rolling
+	// window into a calendar-day cutoff (24h trends over-counted ~51%). Emit the
+	// boundary in matching RFC3339-Z form. See TestTrendWindowBoundaryUTC.
+	windowWhere := fmt.Sprintf("started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", interval)
 	var args []interface{}
 	if repoID != "" {
 		windowWhere += " AND repo_id = ?"
@@ -948,7 +963,8 @@ func (d *DB) trendPercentiles(p *trendParams, buckets []TrendBucket) error {
 // (parent_id empty) via CASE. For shapes 2/3 children share the parent's
 // repo_id (set in pipeline), so repo attribution stays stable.
 func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
-	repoWindowWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s')", p.interval)
+	// Match started_at's RFC3339-Z storage format (see windowWhere above).
+	repoWindowWhere := fmt.Sprintf("s.started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", p.interval)
 	if p.repoID != "" {
 		repoWindowWhere += " AND s.repo_id = ?"
 	}

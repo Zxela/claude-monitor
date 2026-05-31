@@ -74,7 +74,16 @@ export function render(container: HTMLElement): void {
 
   if (keydownHandler) document.removeEventListener('keydown', keydownHandler);
   keydownHandler = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    // Mirror main.ts's guard so 1/2/3 don't hijack typing in a <select>
+    // (repo/budget/replay-speed) or contenteditable, breaking native typeahead.
+    const t = e.target;
+    if (
+      t instanceof HTMLInputElement ||
+      t instanceof HTMLTextAreaElement ||
+      t instanceof HTMLSelectElement ||
+      (t instanceof HTMLElement && t.isContentEditable)
+    )
+      return;
     if (e.key === '1') {
       activeFilter = 'active';
       showAllGroups.clear();

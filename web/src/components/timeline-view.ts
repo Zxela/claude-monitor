@@ -108,7 +108,15 @@ async function loadEvents(sid: string): Promise<void> {
   try {
     const res = await fetch(`/api/sessions/${sid}/replay`);
     const data = await res.json();
-    events = data.events ?? [];
+    // Drop events with zero/invalid timestamps. Synthetic meta-events
+    // (permission-mode, file-history-snapshot, etc.) are emitted with the Go
+    // zero-time "0001-01-01", which parses to ~-6.2e13ms and otherwise poisons
+    // t0/span — making the waterfall an unreadable sliver for ~1/4 of sessions.
+    const raw = (data.events ?? []) as TimelineEvent[];
+    events = raw.filter((e) => {
+      const t = new Date(e.timestamp).getTime();
+      return Number.isFinite(t) && t > 0;
+    });
   } catch (err) {
     console.error('Failed to load timeline events:', err);
   }

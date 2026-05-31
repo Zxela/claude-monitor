@@ -210,6 +210,11 @@ function hide(): void {
 function resizeCanvas(): void {
   if (!canvas || !container) return;
   const dpr = window.devicePixelRatio || 1;
+  // Drop the stale inline px size first so the canvas (a flex item) doesn't pin
+  // the container open and report its old width — otherwise the graph never
+  // reflows on window resize and the node cluster gets clipped off the right.
+  canvas.style.width = '';
+  canvas.style.height = '';
   logicalW = container.clientWidth;
   logicalH = container.clientHeight;
   canvas.width = logicalW * dpr;

@@ -409,7 +409,17 @@ function formatMinutes(min: number): string {
 }
 
 function checkBudget(): void {
-  if (!state.budgetThreshold || !costStatEl || !banner) return;
+  if (!costStatEl || !banner) return;
+
+  // When the budget is cleared, run the same cleanup as the under-budget branch.
+  // Returning early on a falsy threshold (the old guard) left the cost stat red
+  // and the "Budget exceeded" banner stuck on screen after clearing the budget.
+  if (!state.budgetThreshold) {
+    costStatEl.classList.remove('over-budget');
+    banner.className = 'budget-banner hidden';
+    budgetNotificationSent = false;
+    return;
+  }
 
   const total = state.stats?.totalCost ?? 0;
 
