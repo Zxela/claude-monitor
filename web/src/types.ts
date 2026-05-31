@@ -131,6 +131,14 @@ export interface ModelTrend {
   sessions: number;
 }
 
+export interface SessionTrend {
+  sessionId: string;
+  sessionName: string;
+  cost: number;
+  tokens: number;
+  agents: number;
+}
+
 export interface TrendSummary {
   totalCost: number;
   effectiveTokens: number;
@@ -143,6 +151,7 @@ export interface TrendResult {
   buckets: TrendBucket[];
   byRepo: RepoTrend[];
   byModel: ModelTrend[];
+  bySession: SessionTrend[];
   summary: TrendSummary;
 }
 
