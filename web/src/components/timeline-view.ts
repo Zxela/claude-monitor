@@ -53,6 +53,12 @@ let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
 let tooltip: HTMLElement | null = null;
 let events: TimelineEvent[] = [];
+// Set when the replay fetch fails so draw() can show a message instead of a
+// blank canvas.
+let loadError = false;
+// True when the backend reported more events than we loaded (hasMore), so the
+// timeline can note it is showing a partial view.
+let loadTruncated = false;
 
 // View state
 let offsetX = 0;
@@ -102,11 +108,18 @@ export function close(): void {
   ctx = null;
   tooltip = null;
   events = [];
+  loadError = false;
+  loadTruncated = false;
 }
 
 async function loadEvents(sid: string): Promise<void> {
+  loadError = false;
+  loadTruncated = false;
   try {
-    const res = await fetch(`/api/sessions/${sid}/replay`);
+    // Request the full window explicitly (server hard-caps at 10000) instead of
+    // the silent default of 1000 so the waterfall covers as many events as the
+    // backend will serve.
+    const res = await fetch(`/api/sessions/${sid}/replay?limit=10000`);
     const data = await res.json();
     // Drop events with zero/invalid timestamps. Synthetic meta-events
     // (permission-mode, file-history-snapshot, etc.) are emitted with the Go
@@ -117,8 +130,14 @@ async function loadEvents(sid: string): Promise<void> {
       const t = new Date(e.timestamp).getTime();
       return Number.isFinite(t) && t > 0;
     });
+    // The manifest reports the true count (total) and a hasMore flag; record
+    // truncation so draw() can note the timeline is partial.
+    loadTruncated =
+      data.hasMore === true || (typeof data.total === 'number' && data.total > raw.length);
   } catch (err) {
     console.error('Failed to load timeline events:', err);
+    events = [];
+    loadError = true;
   }
 }
 
@@ -317,8 +336,29 @@ export function pickEventAt(
   return null;
 }
 
+function drawCenteredMessage(message: string): void {
+  if (!ctx || !canvas || !container) return;
+  const w = container.clientWidth,
+    h = container.clientHeight;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '13px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(message, w / 2, h / 2);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+}
+
 function draw(): void {
-  if (!ctx || !canvas || !container || events.length === 0) return;
+  if (!ctx || !canvas || !container) return;
+
+  // Surface a failed fetch instead of leaving a blank canvas.
+  if (loadError) {
+    drawCenteredMessage('Failed to load timeline events');
+    return;
+  }
+
   const w = container.clientWidth,
     h = container.clientHeight;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -340,7 +380,18 @@ function draw(): void {
     ctx.fillText(LANE_LABELS[i], 4, topY + i * laneH + 14);
   }
 
-  if (events.length < 2) return;
+  // Degenerate sessions (<2 plottable events) cannot form a waterfall — show a
+  // centered message over the lanes instead of a silent blank canvas.
+  if (events.length < 2) {
+    ctx.fillStyle = '#8888aa';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Not enough events to display a timeline', w / 2, h / 2);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    return;
+  }
 
   const t0 = new Date(events[0].timestamp).getTime();
 
@@ -393,6 +444,16 @@ function draw(): void {
       ctx.textAlign = 'left';
       ctx.fillText(label.slice(0, Math.floor(barW / 6)), x + 3, y + barH / 2 + 3);
     }
+  }
+
+  // Note when the backend truncated the event set so the waterfall is not
+  // mistaken for the complete session.
+  if (loadTruncated) {
+    ctx.fillStyle = '#ddcc44';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('partial — more events not shown', w - 6, h - 6);
+    ctx.textAlign = 'left';
   }
 }
 

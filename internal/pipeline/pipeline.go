@@ -135,17 +135,41 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		if ids, costs, err := p.db.LoadMessageDedup(ev.SessionID); err == nil && len(ids) > 0 {
 			// Also restore session aggregates so totals aren't reset to zero.
 			dbSess, _ := p.db.GetSession(ev.SessionID)
+			// Recompute the cost/token aggregates from the SAME per-message map
+			// just rebuilt from events, rather than copying the stored sessions
+			// columns. The stored values can be stale (e.g. accumulated across
+			// re-bootstraps), which would freeze a divergent total; deriving them
+			// from the dedup map keeps sessions.total_cost provably equal to the
+			// per-message events ground truth. See audit findings on cost drift.
+			var tc float64
+			var ti, to, tr, tcc int64
+			for _, mc := range costs {
+				tc += mc.CostUSD
+				ti += mc.InputTokens
+				to += mc.OutputTokens
+				tr += mc.CacheReadTokens
+				tcc += mc.CacheCreationTokens
+			}
+			// Recompute error_count deterministically from events so the badge
+			// matches the feed and cannot accumulate across re-bootstraps.
+			errCount, errCountErr := p.db.CountSessionErrors(ev.SessionID)
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
 				s.SetDedupState(ids, costs)
+				s.TotalCost = tc
+				s.InputTokens = ti
+				s.OutputTokens = to
+				s.CacheReadTokens = tr
+				s.CacheCreationTokens = tcc
 				if dbSess != nil {
-					s.TotalCost = dbSess.TotalCost
-					s.InputTokens = dbSess.InputTokens
-					s.OutputTokens = dbSess.OutputTokens
-					s.CacheReadTokens = dbSess.CacheReadTokens
-					s.CacheCreationTokens = dbSess.CacheCreationTokens
+					// MessageCount/EventCount are not derivable from the cost map.
 					s.MessageCount = dbSess.MessageCount
 					s.EventCount = dbSess.EventCount
+					// Fall back to the (possibly stale) stored error_count only if
+					// the deterministic recount failed.
 					s.ErrorCount = dbSess.ErrorCount
+				}
+				if errCountErr == nil {
+					s.ErrorCount = errCount
 				}
 			})
 		}
@@ -302,7 +326,11 @@ func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r 
 	if msg.GitBranch != "" {
 		s.GitBranch = msg.GitBranch
 	}
-	if msg.Model != "" {
+	// Ignore the '<synthetic>' placeholder (a 0-token internal Claude Code model
+	// string) so the session keeps its dominant real model. Otherwise real
+	// (e.g. opus) spend gets mislabeled under a fake model in the Model Mix
+	// chart and trends API.
+	if msg.Model != "" && msg.Model != "<synthetic>" {
 		s.Model = msg.Model
 	}
 	if msg.Version != "" && s.Version == "" {
@@ -448,15 +476,23 @@ func (p *Pipeline) applyParentDetection(s *session.Session, msg *parser.Event, e
 
 // applyCostDedup handles error tracking, cost/token dedup, and message counting.
 func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
-	// Error tracking
-	if msg.IsError && msg.MessageID != "" {
-		errKey := "err:" + msg.MessageID
-		if !s.HasSeenMessageID(errKey) {
-			s.MarkMessageIDSeen(errKey)
+	// Error tracking. Dedup on the stable event identity (message_id, else the
+	// per-line uuid) so a re-emitted error line cannot be counted twice and an
+	// empty-message_id error is still deduped on restart/replay.
+	if msg.IsError {
+		errIdentity := msg.MessageID
+		if errIdentity == "" {
+			errIdentity = msg.UUID
+		}
+		if errIdentity != "" {
+			errKey := "err:" + errIdentity
+			if !s.HasSeenMessageID(errKey) {
+				s.MarkMessageIDSeen(errKey)
+				s.ErrorCount++
+			}
+		} else {
 			s.ErrorCount++
 		}
-	} else if msg.IsError {
-		s.ErrorCount++
 	}
 
 	// Cost/token dedup

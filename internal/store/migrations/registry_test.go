@@ -247,13 +247,25 @@ func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
 		t.Errorf("cache_create_per_mtok = %v, want 6.25", cacheCreate)
 	}
 
-	// Roll back migration 014 only.
+	// Roll back the migrations above 014 (016 then 015) so 014 becomes the head,
+	// then roll back 014 itself.
+	for _, want := range []string{"rebuild_events_fts", "recompute_session_aggregates"} {
+		name, err := RunDown(db)
+		if err != nil {
+			t.Fatalf("RunDown: %v", err)
+		}
+		if name != want {
+			t.Fatalf("RunDown rolled back %q, want %q", name, want)
+		}
+	}
+
+	// Roll back migration 014.
 	name, err := RunDown(db)
 	if err != nil {
 		t.Fatalf("RunDown: %v", err)
 	}
 	if name != "opus_4_8_pricing" {
-		t.Fatalf("RunDown rolled back %q, want opus_4_8_pricing (014 must be the head)", name)
+		t.Fatalf("RunDown rolled back %q, want opus_4_8_pricing", name)
 	}
 
 	// The opus-4-8 row must be gone.

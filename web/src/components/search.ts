@@ -171,10 +171,17 @@ function searchPreview(r: Event, query?: string): string {
     }
   }
 
-  // Fallback: if contentPreview is just a bracketed tag, prefer richer fields
+  // Fallback: if contentPreview is just a bracketed tag, prefer the richer
+  // recorded fields. The bracket tag can disagree with the recorded tool_name
+  // (the effective/last tool), so trust name/detail when present rather than
+  // echoing a stale '[tool: X]' label verbatim.
   if (cp.match(/^\[(?:tool|hook|agent):/)) {
     if (name && detail) return `${name}: ${detail}`;
+    if (name) return `[tool: ${name}]`;
     if (detail) return detail;
+    // No reliable tool metadata — drop the specific (possibly wrong) name
+    // rather than mislabel the call.
+    return '[tool]';
   }
   return cp;
 }

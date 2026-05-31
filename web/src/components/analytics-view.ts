@@ -82,9 +82,13 @@ function show(): void {
   repoSelect.className = 'analytics-repo-filter';
   repoSelect.innerHTML = '<option value="">All repos</option>';
   for (const r of repos) {
+    // Hide phantom subagent-worktree repos (id 'agent-<hash>'); they are not
+    // real projects and only pollute the filter. Fall back to id when the
+    // name is empty so no option renders as a blank label.
+    if (r.id.startsWith('agent-')) continue;
     const opt = document.createElement('option');
     opt.value = r.id;
-    opt.textContent = r.name;
+    opt.textContent = r.name || r.id;
     if (currentRepo === r.id) opt.selected = true;
     repoSelect.appendChild(opt);
   }
@@ -103,7 +107,7 @@ function show(): void {
   summary.innerHTML = `
     <div class="analytics-stat">
       <div class="analytics-stat-val green">${s ? '$' + s.totalCost.toFixed(2) : '—'}</div>
-      <div class="analytics-stat-label">TOTAL SPEND</div>
+      <div class="analytics-stat-label">TOTAL SPEND (${currentWindow.toUpperCase()})</div>
     </div>
     <div class="analytics-stat">
       <div class="analytics-stat-val blue">${s ? formatTokens(s.effectiveTokens) : '—'}</div>
@@ -113,9 +117,9 @@ function show(): void {
       <div class="analytics-stat-val orange">${s ? s.cacheHitPct.toFixed(0) + '%' : '—'}</div>
       <div class="analytics-stat-label">CACHE HIT</div>
     </div>
-    <div class="analytics-stat">
+    <div class="analytics-stat" title="Counts top-level sessions only (excludes subagent/workflow rows)">
       <div class="analytics-stat-val purple">${s ? String(s.sessionCount) : '—'}</div>
-      <div class="analytics-stat-label">SESSIONS</div>
+      <div class="analytics-stat-label">TOP-LEVEL SESSIONS</div>
     </div>
   `;
   root.appendChild(summary);
@@ -126,9 +130,17 @@ function show(): void {
   root.appendChild(cardsContainer);
 
   if (trendData) {
-    renderCards(cardsContainer, trendData, getCardState(), (id, expanded) => {
-      setCardState(id, expanded);
-    });
+    if (trendData.buckets.length === 0) {
+      // Zero-data window/repo combo: rendering Chart.js over empty buckets
+      // produces blank plots with a meaningless 0..1 axis and a stray legend.
+      // Show an explicit empty state instead.
+      destroyCards();
+      cardsContainer.innerHTML = '<div class="analytics-empty">No activity in this period</div>';
+    } else {
+      renderCards(cardsContainer, trendData, getCardState(), (id, expanded) => {
+        setCardState(id, expanded);
+      });
+    }
   }
 
   container.appendChild(root);

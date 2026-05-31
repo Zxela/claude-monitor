@@ -25,6 +25,19 @@ let sortCol = 'lastActive';
 let sortAsc = false;
 const collapsedParents = new Set<string>();
 
+// Pagination: HISTORY pages through /api/sessions in PAGE-sized chunks so all
+// sessions are reachable (previously a single 200-row fetch hid the rest).
+const PAGE = 200;
+let offset = 0;
+let reachedEnd = false;
+let loadingMore = false;
+const seenIds = new Set<string>();
+
+// Per-parent tree cost (own + aggregated subagent spend), keyed by parent id.
+// Populated by groupRows() and consumed by the Cost column + its sort so the
+// most expensive session trees rank correctly and match the same-row badge.
+const treeCostMap = new Map<string, number>();
+
 type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
 
 const COLUMNS: Column[] = [
@@ -34,7 +47,7 @@ const COLUMNS: Column[] = [
     cls: 'col-dim',
     fmt: (r) => (r.lastActive ? new Date(r.lastActive).toLocaleString() : ''),
   },
-  { key: 'session', label: 'Session', fmt: sessionIdentifier },
+  { key: 'session', label: 'Session', cls: 'col-session', fmt: sessionIdentifier },
   { key: 'project', label: 'Project', cls: 'col-dim', fmt: projectLabel },
   { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: (r) => `$${r.totalCost.toFixed(2)}` },
   {
@@ -97,6 +110,11 @@ function showLoading(): void {
 function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('view')) {
     if (state.view === 'history') {
+      // Fresh entry: reset pagination so we start from the first page.
+      offset = 0;
+      reachedEnd = false;
+      seenIds.clear();
+      data = [];
       showLoading();
       loadData();
     } else {
@@ -113,20 +131,40 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   // Refresh history when sessions update while viewing history (debounced)
   if (changed.has('sessions') && state.view === 'history') {
     if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
-    historyRefreshTimer = setTimeout(loadData, 5000);
+    historyRefreshTimer = setTimeout(() => loadData(), 5000);
   }
 }
 
-async function loadData(): Promise<void> {
+async function loadData(append = false): Promise<void> {
   if (state.view !== 'history') return; // Guard against stale timer callbacks
+  if (append) {
+    if (reachedEnd || loadingMore) return;
+    loadingMore = true;
+  } else {
+    // First load or refresh: start over from page 0 so new sessions appear.
+    offset = 0;
+    reachedEnd = false;
+    seenIds.clear();
+    data = [];
+  }
   try {
-    const raw = await fetchSessions(200, 0);
-    // Filter out trivial sessions (no cost, no tokens, few messages)
-    data = raw.filter((s) => s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3);
+    const raw = await fetchSessions(PAGE, offset);
     if (state.view !== 'history') return; // Re-check after async
+    if (raw.length < PAGE) reachedEnd = true;
+    offset += PAGE;
+    // Filter out trivial sessions (no cost, no tokens, few messages) and dedupe
+    // by id so an overlapping/refetched page never produces duplicate rows.
+    for (const s of raw) {
+      if (seenIds.has(s.id)) continue;
+      if (!(s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3)) continue;
+      seenIds.add(s.id);
+      data.push(s);
+    }
     show();
   } catch (err) {
     console.error('Failed to load history:', err);
+  } finally {
+    loadingMore = false;
   }
 }
 
@@ -193,6 +231,15 @@ export function groupRows(rows: Session[]): { parent: Session; children: Session
     }
   }
 
+  // Compute each parent's tree cost (own + aggregated subagent spend) before
+  // sorting so the Cost column and its sort can rank trees by total spend.
+  treeCostMap.clear();
+  for (const parent of parents) {
+    const children = childrenByParent.get(parent.id) || [];
+    const childCost = children.reduce((sum, c) => sum + c.totalCost, 0);
+    treeCostMap.set(parent.id, parent.totalCost + childCost);
+  }
+
   const sorted = sortData(parents);
   return sorted.map((parent) => ({
     parent,
@@ -249,6 +296,15 @@ function show(): void {
     toolbar.appendChild(toggleLabel);
   }
 
+  // Loaded-count indicator so users know history continues past the first page.
+  const countEl = document.createElement('span');
+  countEl.style.cssText =
+    'margin-left:auto;color:var(--text-dim);font-family:var(--font-mono);font-size:10px;letter-spacing:0.5px';
+  countEl.textContent = reachedEnd
+    ? `Showing ${data.length} sessions`
+    : `Showing ${data.length} sessions (more available)`;
+  toolbar.appendChild(countEl);
+
   wrapper.appendChild(toolbar);
 
   const table = document.createElement('table');
@@ -297,6 +353,14 @@ function show(): void {
     // Parent row
     const tr = createRow(parent, false);
     if (hasChildren) {
+      const childCost = children.reduce((sum, c) => sum + c.totalCost, 0);
+      // Cost column reflects the whole tree (own + subagents) so the most
+      // expensive trees rank correctly and match the same-row badge.
+      const treeCost = parent.totalCost + childCost;
+      const costCell = tr.children[3] as HTMLElement;
+      costCell.textContent = `$${treeCost.toFixed(2)}`;
+      costCell.title = `$${parent.totalCost.toFixed(2)} own + $${childCost.toFixed(2)} subagents`;
+
       // Add disclosure triangle to the name cell
       const nameCell = tr.children[1] as HTMLElement;
       const triangle = document.createElement('span');
@@ -336,18 +400,23 @@ function show(): void {
       if (isCollapsed) {
         const badge = document.createElement('span');
         badge.className = 'history-subagent-badge';
-        const childCost = children.reduce((sum, c) => sum + c.totalCost, 0);
         badge.textContent = `(${children.length} subagent${children.length > 1 ? 's' : ''}, $${childCost.toFixed(2)})`;
         nameCell.appendChild(badge);
 
         // Per-workflow badges (additive to the subagent badge)
+        const titleLines = [`${children.length} subagent${children.length > 1 ? 's' : ''}, $${childCost.toFixed(2)}`];
         for (const wf of workflows) {
           const wfBadge = document.createElement('span');
           wfBadge.className = 'history-subagent-badge';
           const shortId = wf.id.replace(/^wf_/, '').slice(0, 8);
           wfBadge.textContent = `wf ${shortId} (${wf.count} agent${wf.count > 1 ? 's' : ''}, $${wf.cost.toFixed(2)})`;
           nameCell.appendChild(wfBadge);
+          titleLines.push(`wf ${shortId}: ${wf.count} agent${wf.count > 1 ? 's' : ''} $${wf.cost.toFixed(2)}`);
         }
+        // Recoverable tooltip: reflect the badge breakdown (the badges no longer
+        // clip, but hover still surfaces the full per-workflow figures) instead
+        // of the prompt that createRow() set on the Session cell.
+        nameCell.title = titleLines.join('\n');
       }
     }
     tbody.appendChild(tr);
@@ -376,6 +445,36 @@ function show(): void {
 
   table.appendChild(tbody);
   wrapper.appendChild(table);
+
+  // Incremental loading: a LOAD MORE button plus a scroll sentinel that pages
+  // through the remaining sessions so all of them are reachable.
+  if (!reachedEnd) {
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex;justify-content:center;padding:12px';
+
+    const moreBtn = document.createElement('button');
+    moreBtn.textContent = loadingMore ? 'LOADING...' : 'LOAD MORE';
+    moreBtn.disabled = loadingMore;
+    moreBtn.style.cssText =
+      'padding:6px 16px;background:var(--bg-hover);border:1px solid var(--border);color:var(--cyan);font-family:var(--font-mono);font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:0.5px';
+    moreBtn.addEventListener('click', () => loadData(true));
+    footer.appendChild(moreBtn);
+
+    // Sentinel: auto-load when scrolled into view.
+    const sentinel = document.createElement('div');
+    sentinel.style.cssText = 'height:1px';
+    footer.appendChild(sentinel);
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting) && !loadingMore && !reachedEnd) {
+        io.disconnect();
+        loadData(true);
+      }
+    });
+    io.observe(sentinel);
+
+    wrapper.appendChild(footer);
+  }
+
   container.appendChild(wrapper);
 }
 
@@ -433,7 +532,9 @@ function sortData(rows: Session[]): Session[] {
         break;
       default: {
         const numericAccessors: Record<string, (r: Session) => number> = {
-          totalCost: (r) => r.totalCost,
+          // Parents rank by their tree total (own + subagents); children are
+          // absent from treeCostMap and fall back to their own cost.
+          totalCost: (r) => treeCostMap.get(r.id) ?? r.totalCost,
           duration: (r) =>
             r.startedAt && r.lastActive
               ? (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000

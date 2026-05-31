@@ -18,7 +18,17 @@
 - ✅ TIMELINE zero-timestamp anchor; GRAPH reflow-on-resize; donut distinct colors
 - ✅ stuck "Budget exceeded" banner; `1/2/3` keyboard guard for `<select>`; responsive feed `min-width:0`
 
-**Follow-up (landing on this same branch via a second workflow):** the medium-risk backlog — `total_cost`/`error_count` restart backfill, History pagination + subagent-inclusive cost, FTS index rebuild + multi-word AND search, `<synthetic>` model relabeling, Analytics empty-states/labels, replay manifest `total/hasMore`, remaining API validation + OpenAPI drift.
+**Landed (follow-up commit — verified by full build/test matrix + live probes):**
+- ✅ **P1** `total_cost`/`error_count` re-derived from the events ledger on restart + **migration 015** backfills historical rows (verified: $0 cost on empty-`message_id` events, recomputed sum == deduped ledger)
+- ✅ **P1** FTS external-content desync fixed + **migration 016** rebuilds the index (kills phantom `[tool: Bash]` hits); multi-word search now implicit-AND
+- ✅ **P1** History pagination (pages `/api/sessions`, dedupes by id) + subagent-inclusive cost column/sort
+- ✅ **P1** active-agent count single-source-of-truth (topbar/sidebar), stale-parent bucketing, RECENT badge; PROJECTED TODAY decoupled from the topbar window; burn-rate reconciled
+- ✅ **P2** `<synthetic>` no longer stored as a session model; Analytics empty-state + scoped labels + null-gap charts; donut denominator/legend reconciled
+- ✅ **P2/P3** replay manifest `total`/`hasMore` + limit clamp; `group=activity` 500-row cap removed; repo-id 404; 405-on-wrong-method; `?last=` default; settings range validation; OpenAPI drift reconciled
+
+**Deferred to backlog (need design, not a quick fix):** Analytics trend buckets should group by the viewer's **local** day (server only knows UTC — needs a TZ param or client-side bucketing); full budget-window/topbar-window decoupling (UX redesign); active-count cross-endpoint snapshot race (P3, never user-visible).
+
+> ⚠️ **Data note:** migrations 015/016 were applied to the live `~/.claude-monitor/history.db` during verification (now at `user_version` 16). They are data-only (no schema change) and verified correct/idempotent; they will run automatically for anyone who pulls this branch.
 
 ---
 

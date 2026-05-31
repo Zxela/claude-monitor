@@ -30,11 +30,14 @@ export function toggle(anchor: HTMLElement): void {
     if (model === '<synthetic>' || model === 'unknown') continue; // skip internal placeholders
     byModel.set(model, cost);
   }
+  // Sum only the displayed (non-skipped) models. Using stats.totalCost as the
+  // denominator left an unexplained empty wedge and made the legend dollars
+  // fall short of the center total by the excluded synthetic/unknown cost.
+  const displayedCost = [...byModel.values()].reduce((a, b) => a + b, 0);
 
   const totalInput = stats.inputTokens;
   const totalOutput = stats.outputTokens;
   const totalCache = stats.cacheReadTokens;
-  const totalCost = stats.totalCost;
 
   const allSessions = Array.from(state.sessions.values());
   const top5 = [...allSessions].sort((a, b) => b.totalCost - a.totalCost).slice(0, 5);
@@ -84,7 +87,7 @@ export function toggle(anchor: HTMLElement): void {
 
   const sorted = [...byModel.entries()].sort((a, b) => b[1] - a[1]);
   for (const [i, [model, cost]] of sorted.entries()) {
-    const slice = totalCost > 0 ? (cost / totalCost) * Math.PI * 2 : 0;
+    const slice = displayedCost > 0 ? (cost / displayedCost) * Math.PI * 2 : 0;
     const color = colorFor(i);
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -95,11 +98,11 @@ export function toggle(anchor: HTMLElement): void {
     angle += slice;
 
     const shortName = model.replace('claude-', '').replace('-4-6', '').replace('-4-5-20251001', '');
-    const pct = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(0) : '0';
+    const pct = displayedCost > 0 ? ((cost / displayedCost) * 100).toFixed(0) : '0';
     legend.innerHTML += `<div style="font-size:10px;display:flex;align-items:center;gap:4px;margin:2px 0">
-      <span style="width:8px;height:8px;border-radius:50%;background:${escapeHtml(color)};display:inline-block"></span>
-      <span style="color:var(--text)">${escapeHtml(shortName)}</span>
-      <span style="color:var(--text-dim);margin-left:auto">$${cost.toFixed(0)} (${pct}%)</span>
+      <span style="width:8px;height:8px;border-radius:50%;background:${escapeHtml(color)};display:inline-block;flex-shrink:0"></span>
+      <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${escapeHtml(shortName)}</span>
+      <span style="color:var(--text-dim);margin-left:auto;flex-shrink:0">$${cost.toFixed(0)} (${pct}%)</span>
     </div>`;
   }
   // Cut out inner circle for donut
@@ -111,7 +114,9 @@ export function toggle(anchor: HTMLElement): void {
   ctx.fillStyle = COLORS.text;
   ctx.font = 'bold 12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`$${totalCost.toFixed(0)}`, cx, cy + 4);
+  // Center equals the legend sum (displayed models only) so the donut, legend
+  // dollars, and center total all reconcile and percentages sum to 100%.
+  ctx.fillText(`$${displayedCost.toFixed(0)}`, cx, cy + 4);
 
   // Token bars
   const totalTok = totalInput + totalOutput + totalCache;

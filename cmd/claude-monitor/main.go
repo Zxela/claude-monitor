@@ -53,6 +53,45 @@ func writeJSONError(w http.ResponseWriter, msg string, code int) {
 	}
 }
 
+// guardedMethods is the set of HTTP verbs probed against the mux to discover
+// which method(s) a known API/ws path actually accepts. Order is the Allow
+// header order.
+var guardedMethods = []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete, http.MethodPatch}
+
+// apiMethodGuard wraps the static FileServer so wrong-method requests to known
+// /api or /ws paths return 405 + Allow instead of a bare 404. Non-API paths,
+// and unknown /api paths (no registered route), fall through to the FileServer.
+func apiMethodGuard(mux *http.ServeMux, next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/ws" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Probe each method: if a probe resolves to a concrete registered
+		// pattern (not the catch-all "/"), that method is allowed for this path.
+		var allowed []string
+		for _, m := range guardedMethods {
+			if m == r.Method {
+				continue // the real method already failed to match (we're the catch-all)
+			}
+			probe, _ := http.NewRequest(m, r.URL.Path, nil)
+			if _, pattern := mux.Handler(probe); pattern != "" && pattern != "/" {
+				allowed = append(allowed, m)
+			}
+		}
+
+		if len(allowed) == 0 {
+			// No registered route for this path under any method — genuinely unknown.
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+		writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 //go:embed static
 var staticFiles embed.FS
 
@@ -584,7 +623,14 @@ Examples:
 		// fs.Sub on an embedded FS should never fail.
 		panic(fmt.Sprintf("static embed error: %v", err))
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	fileServer := http.FileServer(http.FS(staticFS))
+	// The catch-all at "/" would otherwise swallow method mismatches that
+	// ServeMux would surface as 405 for known API routes, returning a bare 404.
+	// For /api and /ws paths, probe the mux with each HTTP method to detect a
+	// registered route; if one exists, the verb was wrong, so respond 405 with
+	// an Allow header. Genuinely unknown paths still fall through to 404 (static
+	// FileServer), and non-API paths are served as static/SPA assets unchanged.
+	mux.Handle("/", apiMethodGuard(mux, fileServer))
 
 	mux.HandleFunc("GET /ws", handleWs(h))
 	mux.HandleFunc("GET /api/sessions", handleSessions(sessionStore, historyDB))

@@ -139,6 +139,15 @@
   max-width: 200px;
 }
 
+/* Session column carries the subagent/workflow cost badges; let it breathe so
+   the per-workflow badges wrap onto extra lines instead of being clipped at
+   the shared 200px td clamp. */
+.view-overlay td.col-session {
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+}
+
 .view-overlay tr:hover {
   background: rgba(255, 255, 255, 0.03);
 }
@@ -360,6 +369,9 @@
 
 .cb-legend {
   flex: 1;
+  /* Allow the flex child to shrink below its intrinsic content width so the
+     trailing "(%)" stays inside the popover instead of spilling ~7px past it. */
+  min-width: 0;
 }
 
 .cb-section {

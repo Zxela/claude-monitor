@@ -110,8 +110,16 @@ func handleSessions(sessionStore *session.Store, historyDB *store.DB) http.Handl
 				}
 			}
 
-			// Fill in from DB for sessions not in the live store.
-			if dbRows, err := historyDB.ListSessions(500, 0); err == nil {
+			// Fill in from DB for sessions not in the live store. Page through the
+			// whole table rather than capping at 500 rows, so older buckets are
+			// complete (the previous single 500-row slice silently dropped ~1100+
+			// older sessions from the grouped sidebar).
+			const groupPageSize = 1000
+			for off := 0; ; off += groupPageSize {
+				dbRows, err := historyDB.ListSessions(groupPageSize, off)
+				if err != nil {
+					break
+				}
 				for _, row := range dbRows {
 					if seen[row.ID] {
 						continue
@@ -130,6 +138,9 @@ func handleSessions(sessionStore *session.Store, historyDB *store.DB) http.Handl
 					default:
 						g.Older = append(g.Older, s)
 					}
+				}
+				if len(dbRows) < groupPageSize {
+					break
 				}
 			}
 
@@ -316,6 +327,15 @@ func handleRepos(historyDB *store.DB) http.HandlerFunc {
 func handleRepoStats(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		repoID := r.PathValue("id")
+		exists, err := historyDB.RepoExists(repoID)
+		if err != nil {
+			writeJSONError(w, "failed to get repo stats", http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			writeJSONError(w, "repo not found", http.StatusNotFound)
+			return
+		}
 		agg, err := historyDB.AggregateStatsByRepo(repoID)
 		if err != nil {
 			writeJSONError(w, "failed to get repo stats", http.StatusInternalServerError)
@@ -329,6 +349,15 @@ func handleRepoStats(historyDB *store.DB) http.HandlerFunc {
 func handleRepoSessions(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		repoID := r.PathValue("id")
+		exists, err := historyDB.RepoExists(repoID)
+		if err != nil {
+			writeJSONError(w, "failed to list repo sessions", http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			writeJSONError(w, "repo not found", http.StatusNotFound)
+			return
+		}
 		limit := defaultPageLimit
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
 			limit = n
@@ -496,10 +525,11 @@ func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 			return
 		}
 
-		// ?last=N — most recent N events
-		if lastStr := q.Get("last"); lastStr != "" {
+		// ?last=N — most recent N events. Gate on presence (not a non-empty
+		// value) so a bare ?last= defaults to the documented 50 most-recent.
+		if q.Has("last") {
 			n := defaultPageLimit
-			if v, err := strconv.Atoi(lastStr); err == nil && v > 0 {
+			if v, err := strconv.Atoi(q.Get("last")); err == nil && v > 0 {
 				n = v
 			}
 			events, err := historyDB.ListRecentEvents(id, n)
@@ -724,9 +754,15 @@ func handleSessionReplay(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		q := r.URL.Query()
+		const maxReplayLimit = 10000
 		limit := 1000
-		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 10000 {
+		// Clamp an out-of-range limit to the max instead of silently reverting
+		// to the default, so a client can request the full set.
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
 			limit = n
+			if limit > maxReplayLimit {
+				limit = maxReplayLimit
+			}
 		}
 		offset := 0
 		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
@@ -740,11 +776,18 @@ func handleSessionReplay(historyDB *store.DB) http.HandlerFunc {
 		if events == nil {
 			events = []store.EventRow{}
 		}
+		total, err := historyDB.CountReplayEvents(id)
+		if err != nil {
+			writeJSONError(w, "failed to count events", http.StatusInternalServerError)
+			return
+		}
 		writeJSON(w, map[string]any{
 			"sessionId": id,
 			"events":    events,
 			"limit":     limit,
 			"offset":    offset,
+			"total":     total,
+			"hasMore":   offset+len(events) < total,
 		})
 	}
 }
@@ -789,6 +832,13 @@ func handleSettingsUpdate(historyDB *store.DB) http.HandlerFunc {
 			n, err := strconv.Atoi(body.Value)
 			if err != nil || n < 50 || n > 2000 {
 				writeJSONError(w, "preview_max_length must be an integer between 50 and 2000", http.StatusBadRequest)
+				return
+			}
+		}
+		if key == "retention_hot_days" || key == "retention_warm_days" {
+			n, err := strconv.Atoi(body.Value)
+			if err != nil || n < 1 {
+				writeJSONError(w, key+" must be a positive integer", http.StatusBadRequest)
 				return
 			}
 		}

@@ -588,9 +588,11 @@ func extractContent(raw json.RawMessage) contentInfo {
 			info.toolUseAll = append(info.toolUseAll, toolUseEntry{
 				ID: b.ID, Name: b.Name, IsAgent: b.Name == "Agent",
 			})
-			if info.text == "" {
-				info.text = fmt.Sprintf("[tool: %s]", b.Name)
-			}
+			// Do NOT set the generic "[tool: <name>]" preview here from the FIRST
+			// tool_use block. The post-loop fallback (see end of this function)
+			// derives it from info.toolName — the LAST/effective tool — so the
+			// preview always agrees with the recorded tool_name (audit: a Read/Grep
+			// call must not be labeled "[tool: Bash]").
 			// Store full input JSON as expandable content (always, so users can expand tool calls).
 			if info.fullText == "" && len(b.Input) > 0 {
 				prettyInput, err := json.MarshalIndent(json.RawMessage(b.Input), "", "  ")

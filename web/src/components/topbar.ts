@@ -228,11 +228,9 @@ const WINDOW_LABELS: Record<string, string> = {
 function updateStats(): void {
   const stats = state.stats;
   if (!stats) return;
-  // Count only top-level active sessions (no subagents) to match sidebar
-  const activeTopLevel = Array.from(state.sessions.values()).filter(
-    (s) => s.isActive && !s.parentId,
-  ).length;
-  setVal(statActive, String(activeTopLevel));
+  // Single source of truth: render the authoritative server count (includes
+  // subagents), matching /api/stats, the burn-rate popover, and the feed.
+  setVal(statActive, String(stats.activeSessions));
 
   // Show window label in muted text when a budget is set
   if (statCost) {
