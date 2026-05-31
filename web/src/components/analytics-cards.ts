@@ -17,6 +17,14 @@ function darkTheme(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(DARK_THEME));
 }
 
+// Short, readable axis label for a session bar: the session name/prompt trimmed
+// to one line, falling back to a short id when unnamed.
+function sessionLabel(name: string, id: string): string {
+  const trimmed = (name || '').replace(/\s+/g, ' ').trim();
+  if (trimmed) return trimmed.length > 36 ? trimmed.slice(0, 35) + '…' : trimmed;
+  return id.length > 12 ? id.slice(0, 12) : id;
+}
+
 const CARD_DEFS: CardDef[] = [
   {
     id: 'cost-trend',
@@ -90,9 +98,39 @@ const CARD_DEFS: CardDef[] = [
     },
   },
   {
+    id: 'cost-by-session',
+    title: 'Cost by Session',
+    subtitle: 'horizontal bar · subagents rolled into their session',
+    defaultExpanded: true,
+    render(canvas, data) {
+      const rows = data.bySession ?? [];
+      const labels = rows.map((s) => sessionLabel(s.sessionName, s.sessionId));
+      const values = rows.map((s) => s.cost);
+      const opts = darkTheme() as any;
+      opts.indexAxis = 'y';
+      return new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Cost ($)',
+              data: values,
+              backgroundColor: COLORS.green,
+            },
+          ],
+        },
+        options: opts,
+      });
+    },
+  },
+  {
     id: 'cost-by-repo',
     title: 'Cost by Repo',
-    subtitle: 'horizontal bar',
+    // Project attribution is approximate: a session's entire cost is booked to
+    // the project it started in, so a run spanning multiple projects is not
+    // split. Cost by Session (above) is the exact unit.
+    subtitle: '⚠ approximate — whole-session cost booked to its starting project',
     defaultExpanded: false,
     render(canvas, data) {
       const labels = data.byRepo.map((r) => r.repoName || r.repoId);

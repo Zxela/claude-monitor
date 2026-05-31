@@ -224,6 +224,19 @@ type ModelTrend struct {
 	Sessions int     `json:"sessions"`
 }
 
+// SessionTrend holds the cost/token breakdown for one top-level session, with
+// subagent/workflow child rows rolled up into their root ancestor. This is the
+// honest default unit for cost: cost-by-repo over-attributes a session that
+// spans multiple projects to a single project, whereas cost-by-session keeps a
+// run's spend intact regardless of how many directories it touched.
+type SessionTrend struct {
+	SessionID   string  `json:"sessionId"`
+	SessionName string  `json:"sessionName"`
+	Cost        float64 `json:"cost"`
+	Tokens      int64   `json:"tokens"`
+	Agents      int     `json:"agents"` // rows rolled up (root + descendants)
+}
+
 // TrendSummary holds totals across all buckets.
 type TrendSummary struct {
 	TotalCost       float64 `json:"totalCost"`
@@ -236,9 +249,10 @@ type TrendSummary struct {
 type TrendResult struct {
 	Window  string        `json:"window"`
 	Buckets []TrendBucket `json:"buckets"`
-	ByRepo  []RepoTrend   `json:"byRepo"`
-	ByModel []ModelTrend  `json:"byModel"`
-	Summary TrendSummary  `json:"summary"`
+	ByRepo    []RepoTrend    `json:"byRepo"`
+	ByModel   []ModelTrend   `json:"byModel"`
+	BySession []SessionTrend `json:"bySession"`
+	Summary   TrendSummary   `json:"summary"`
 }
 
 // StorageInfo holds database storage statistics.
@@ -884,6 +898,11 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 		return nil, err
 	}
 
+	bySession, err := d.trendBySession(p)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build summary from buckets
 	var summary TrendSummary
 	var totalEffInput, totalCacheRead int64
@@ -899,11 +918,12 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	}
 
 	return &TrendResult{
-		Window:  window,
-		Buckets: buckets,
-		ByRepo:  byRepo,
-		ByModel: byModel,
-		Summary: summary,
+		Window:    window,
+		Buckets:   buckets,
+		ByRepo:    byRepo,
+		ByModel:   byModel,
+		BySession: bySession,
+		Summary:   summary,
 	}, nil
 }
 
@@ -1067,6 +1087,72 @@ func (d *DB) trendByModel(p *trendParams) ([]ModelTrend, error) {
 		byModel = []ModelTrend{}
 	}
 	return byModel, nil
+}
+
+// trendBySessionLimit caps how many top sessions the cost-by-session breakdown
+// returns (a chart of every session would be unreadable; the long tail is tiny).
+const trendBySessionLimit = 20
+
+// trendBySession rolls cost/tokens up to each top-level (root) session, summing
+// subagent/workflow child rows into their root ancestor via a recursive walk of
+// parent_id. This is the default analytics breakdown: unlike cost-by-repo it does
+// not over-attribute a multi-project run to a single project, since a session's
+// whole tree stays together. Returns the top sessions by cost.
+func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
+	// Match started_at's RFC3339-Z storage format (see windowWhere above).
+	sessWindowWhere := fmt.Sprintf("s.started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", p.interval)
+	if p.repoID != "" {
+		sessWindowWhere += " AND s.repo_id = ?"
+	}
+	// anc maps every session to its root ancestor (the top-level parent_id-empty
+	// row). Rows in the window are then attributed to their root and summed, so a
+	// parent and all its subagents collapse into one bar. Orphans (parent not in
+	// the table) fall back to being their own root via COALESCE.
+	query := fmt.Sprintf(`
+		WITH RECURSIVE anc(id, root) AS (
+			SELECT id, id FROM sessions WHERE parent_id IS NULL OR parent_id = ''
+			UNION ALL
+			SELECT s.id, a.root FROM sessions s JOIN anc a ON s.parent_id = a.id
+		)
+		SELECT COALESCE(a.root, s.id) AS root_id,
+		       COALESCE(rt.session_name, ''),
+		       COALESCE(rt.task_description, ''),
+		       COALESCE(SUM(s.total_cost), 0),
+		       COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens), 0),
+		       COUNT(*)
+		FROM sessions s
+		LEFT JOIN anc a ON a.id = s.id
+		LEFT JOIN sessions rt ON rt.id = COALESCE(a.root, s.id)
+		WHERE %s
+		GROUP BY root_id
+		ORDER BY SUM(s.total_cost) DESC
+		LIMIT %d`, sessWindowWhere, trendBySessionLimit)
+
+	rows, err := d.db.Query(query, p.args...)
+	if err != nil {
+		return nil, fmt.Errorf("trendBySession: %w", err)
+	}
+	defer rows.Close()
+
+	bySession := []SessionTrend{}
+	for rows.Next() {
+		var st SessionTrend
+		var name, task string
+		if err := rows.Scan(&st.SessionID, &name, &task, &st.Cost, &st.Tokens, &st.Agents); err != nil {
+			return nil, fmt.Errorf("trendBySession: scan: %w", err)
+		}
+		// Prefer an explicit session name, then the task/prompt; the frontend
+		// falls back to the id when both are empty.
+		st.SessionName = name
+		if st.SessionName == "" {
+			st.SessionName = task
+		}
+		bySession = append(bySession, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("trendBySession: rows: %w", err)
+	}
+	return bySession, nil
 }
 
 // percentile returns the value at the given percentile (0-1) from a sorted slice.

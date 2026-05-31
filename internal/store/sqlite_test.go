@@ -3104,3 +3104,61 @@ func TestTrendData_24hExcludesOlderSameCalendarDay(t *testing.T) {
 		t.Errorf("totalCost: got %f, want 3.00 (rolling 24h must not include yesterday-00:00 UTC)", result.Summary.TotalCost)
 	}
 }
+
+// TestTrendBySession_RollsUpSubagents verifies the cost-by-session breakdown
+// attributes subagent/workflow child cost to the root session (so a run's whole
+// tree is one bar) rather than splitting it — the honest default unit vs the
+// project-fragmenting cost-by-repo view.
+func TestTrendBySession_RollsUpSubagents(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now().UTC()
+	parent := &session.Session{ID: "root-1", SessionName: "deep dive", TotalCost: 10.0, InputTokens: 100, StartedAt: now.Add(-2 * time.Hour), LastActive: now, Model: "claude-opus-4-8"}
+	c1 := &session.Session{ID: "agent-1", ParentID: "root-1", TotalCost: 3.0, InputTokens: 30, StartedAt: now.Add(-90 * time.Minute), LastActive: now, Model: "claude-opus-4-8"}
+	c2 := &session.Session{ID: "agent-2", ParentID: "root-1", TotalCost: 2.0, InputTokens: 20, StartedAt: now.Add(-80 * time.Minute), LastActive: now, Model: "claude-opus-4-8"}
+	other := &session.Session{ID: "root-2", SessionName: "lint fix", TotalCost: 1.0, InputTokens: 10, StartedAt: now.Add(-1 * time.Hour), LastActive: now, Model: "claude-opus-4-8"}
+	for _, s := range []*session.Session{parent, c1, c2, other} {
+		if err := db.SaveSession(s); err != nil {
+			t.Fatalf("SaveSession(%s): %v", s.ID, err)
+		}
+	}
+
+	res, err := db.TrendData("24h", "")
+	if err != nil {
+		t.Fatalf("TrendData: %v", err)
+	}
+	if len(res.BySession) < 2 {
+		t.Fatalf("BySession: got %d entries, want >=2", len(res.BySession))
+	}
+
+	top := res.BySession[0]
+	if top.SessionID != "root-1" {
+		t.Errorf("top session id: got %q, want root-1", top.SessionID)
+	}
+	if top.Cost != 15.0 {
+		t.Errorf("top session cost: got %f, want 15.00 (10 parent + 3 + 2 subagents)", top.Cost)
+	}
+	if top.Agents != 3 {
+		t.Errorf("top session agents: got %d, want 3 (root + 2 subagents)", top.Agents)
+	}
+	if top.SessionName != "deep dive" {
+		t.Errorf("top session name: got %q, want 'deep dive'", top.SessionName)
+	}
+
+	var foundOther bool
+	for _, s := range res.BySession {
+		if s.SessionID == "root-2" {
+			foundOther = true
+			if s.Cost != 1.0 {
+				t.Errorf("standalone root-2 cost: got %f, want 1.00 (must not absorb other trees)", s.Cost)
+			}
+		}
+		if s.SessionID == "agent-1" || s.SessionID == "agent-2" {
+			t.Errorf("subagent %q should be rolled into its root, not a separate bar", s.SessionID)
+		}
+	}
+	if !foundOther {
+		t.Errorf("standalone session root-2 missing from BySession")
+	}
+}
