@@ -747,11 +747,17 @@ func TestTrendBuckets_DailyGrouping(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	now := time.Now()
+	// Anchor to UTC noon so the two "day 1" sessions provably share one UTC
+	// calendar day (noon ± 1h never crosses midnight) and "day 2" is a distinct
+	// UTC day. Using raw time.Now()±Nh was flaky: during the 23:00–23:59 UTC hour
+	// now-48h and now-47h straddle midnight, yielding 3 buckets instead of 2.
+	nowUTC := time.Now().UTC()
+	day2 := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 12, 0, 0, 0, time.UTC)
+	day1 := day2.AddDate(0, 0, -2)
 	// Two sessions on day 1 (2 days ago), one session on day 2 (today)
-	insertTestSession(t, db, "s1", now.Add(-48*time.Hour), 1.00, 100, 50, 30, 10)
-	insertTestSession(t, db, "s2", now.Add(-47*time.Hour), 2.00, 200, 100, 60, 20)
-	insertTestSession(t, db, "s3", now.Add(-1*time.Hour), 3.00, 300, 150, 90, 30)
+	insertTestSession(t, db, "s1", day1, 1.00, 100, 50, 30, 10)
+	insertTestSession(t, db, "s2", day1.Add(1*time.Hour), 2.00, 200, 100, 60, 20)
+	insertTestSession(t, db, "s3", day2, 3.00, 300, 150, 90, 30)
 
 	result, err := db.TrendData("7d", "")
 	if err != nil {
@@ -3030,3 +3036,71 @@ func TestListReplayEvents_IncludesChildren(t *testing.T) {
 	}
 }
 
+
+// TestAggregateStats_WindowBoundaryUTC is a regression test for the time-window
+// boundary bug: started_at is stored as UTC RFC3339 ("…Z"), but the boundary was
+// formatted with the local offset ("…-07:00"), and SQLite compares the two as
+// TEXT. Because '-' (0x2D) sorts before 'Z' (0x5A), a local-offset boundary
+// wrongly pulled late-yesterday-UTC rows into the today/week/month window. We
+// reproduce it deterministically (independent of the machine's zone) by storing
+// rows at fixed UTC instants and passing `since` in a fixed -07:00 zone.
+func TestAggregateStats_WindowBoundaryUTC(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	boundary := time.Date(2026, 5, 30, 7, 0, 0, 0, time.UTC) // == local midnight in -07:00
+	insertTestSession(t, db, "in", boundary, 3.00, 30, 10, 5, 2)               // exactly at boundary -> included
+	insertTestSession(t, db, "out", boundary.Add(-1*time.Hour), 9.00, 90, 30, 15, 6) // 1h before -> excluded
+
+	// Same instant as `boundary`, but expressed with a -07:00 offset (as the
+	// stats handler does for a local "today"/"week"/"month" start).
+	since := boundary.In(time.FixedZone("PDT", -7*3600))
+
+	agg, err := db.AggregateStats(since)
+	if err != nil {
+		t.Fatalf("AggregateStats failed: %v", err)
+	}
+	if agg.SessionCount != 1 {
+		t.Errorf("SessionCount: got %d, want 1 (the 'out' row 1h before the boundary must be excluded)", agg.SessionCount)
+	}
+	if agg.TotalCost != 3.00 {
+		t.Errorf("TotalCost: got %f, want 3.00 (boundary must be compared in UTC, not by local-offset string)", agg.TotalCost)
+	}
+}
+
+// TestTrendData_24hExcludesOlderSameCalendarDay is a regression test for the
+// trend-window boundary bug: datetime('now', '-1 days') renders space-separated
+// ("YYYY-MM-DD HH:MM:SS"), but started_at is "YYYY-MM-DDTHH:MM:SSZ". A TEXT
+// compare diverges at index 10 (' ' < 'T'), so any row sharing the boundary's
+// calendar date passed regardless of hour — turning the rolling 24h window into
+// a calendar-day cutoff and over-counting. A row at the START of yesterday (UTC)
+// is always >24h old yet shares the cutoff's calendar date, so it must be
+// excluded only when the boundary is compared in matching RFC3339-Z form.
+func TestTrendData_24hExcludesOlderSameCalendarDay(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	nowUTC := time.Now().UTC()
+	if nowUTC.Hour() == 0 && nowUTC.Minute() == 0 {
+		t.Skip("ambiguous within the first UTC minute of the day")
+	}
+	// Yesterday 00:00 UTC: strictly >24h ago (rolling window excludes it), but on
+	// the same UTC calendar date as the (now-24h) cutoff (the buggy comparison
+	// wrongly includes it).
+	yStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC).Add(-24 * time.Hour)
+	inWindow := nowUTC.Add(-1 * time.Hour)
+
+	insertTestSession(t, db, "old-sameday", yStart, 5.00, 50, 20, 10, 4)
+	insertTestSession(t, db, "recent", inWindow, 3.00, 30, 10, 5, 2)
+
+	result, err := db.TrendData("24h", "")
+	if err != nil {
+		t.Fatalf("TrendData(24h) failed: %v", err)
+	}
+	if result.Summary.SessionCount != 1 {
+		t.Errorf("sessionCount: got %d, want 1 (the >24h-old same-calendar-day row must be excluded)", result.Summary.SessionCount)
+	}
+	if result.Summary.TotalCost != 3.00 {
+		t.Errorf("totalCost: got %f, want 3.00 (rolling 24h must not include yesterday-00:00 UTC)", result.Summary.TotalCost)
+	}
+}

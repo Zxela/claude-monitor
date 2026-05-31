@@ -121,8 +121,14 @@ const CARD_DEFS: CardDef[] = [
     subtitle: 'doughnut',
     defaultExpanded: false,
     render(canvas, data) {
-      const labels = data.byModel.map((m) => m.model);
-      const values = data.byModel.map((m) => m.cost);
+      // Drop internal placeholders ('<synthetic>') and unknown/empty models so
+      // real (e.g. opus) spend is not bucketed under a fake model label — and
+      // so this view stays consistent with the cost-breakdown popover.
+      const entries = data.byModel.filter(
+        (m) => m.model && m.model !== '<synthetic>' && m.model !== 'unknown',
+      );
+      const labels = entries.map((m) => m.model);
+      const values = entries.map((m) => m.cost);
       const colors = [
         COLORS.green,
         COLORS.blue,
@@ -193,26 +199,32 @@ const CARD_DEFS: CardDef[] = [
         data: {
           labels,
           datasets: [
+            // Plot null (a line gap) for buckets with no top-level sessions so
+            // the per-session lines do not falsely dive to $0 in hours that
+            // only contain subagent/child spend (sessionCount === 0).
             {
               label: 'Average',
-              data: data.buckets.map((b) => b.avgSessionCost),
+              data: data.buckets.map((b) => (b.sessionCount > 0 ? b.avgSessionCost : null)),
               borderColor: COLORS.blue,
               tension: 0.3,
               pointRadius: 2,
+              spanGaps: false,
             },
             {
               label: 'Median',
-              data: data.buckets.map((b) => b.medianSessionCost),
+              data: data.buckets.map((b) => (b.sessionCount > 0 ? b.medianSessionCost : null)),
               borderColor: COLORS.green,
               tension: 0.3,
               pointRadius: 2,
+              spanGaps: false,
             },
             {
               label: 'P95',
-              data: data.buckets.map((b) => b.p95SessionCost),
+              data: data.buckets.map((b) => (b.sessionCount > 0 ? b.p95SessionCost : null)),
               borderColor: COLORS.red,
               tension: 0.3,
               pointRadius: 2,
+              spanGaps: false,
             },
           ],
         },
@@ -227,7 +239,9 @@ const CARD_DEFS: CardDef[] = [
     defaultExpanded: false,
     render(canvas, data) {
       const labels = data.buckets.map((b) => b.date);
-      const values = data.buckets.map((b) => b.avgSessionTokens);
+      // Plot null (a line gap) for buckets with no top-level sessions so the
+      // line does not falsely dive to 0 in subagent-only hours.
+      const values = data.buckets.map((b) => (b.sessionCount > 0 ? b.avgSessionTokens : null));
       const opts = darkTheme() as any;
       opts.scales.y.ticks = { ...opts.scales.y.ticks, callback: (v: number) => formatTokens(v) };
       return new Chart(canvas, {
@@ -243,6 +257,7 @@ const CARD_DEFS: CardDef[] = [
               fill: true,
               tension: 0.3,
               pointRadius: 2,
+              spanGaps: false,
             },
           ],
         },

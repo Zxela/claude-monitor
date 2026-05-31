@@ -74,7 +74,16 @@ export function render(container: HTMLElement): void {
 
   if (keydownHandler) document.removeEventListener('keydown', keydownHandler);
   keydownHandler = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    // Mirror main.ts's guard so 1/2/3 don't hijack typing in a <select>
+    // (repo/budget/replay-speed) or contenteditable, breaking native typeahead.
+    const t = e.target;
+    if (
+      t instanceof HTMLInputElement ||
+      t instanceof HTMLTextAreaElement ||
+      t instanceof HTMLSelectElement ||
+      (t instanceof HTMLElement && t.isContentEditable)
+    )
+      return;
     if (e.key === '1') {
       activeFilter = 'active';
       showAllGroups.clear();
@@ -166,7 +175,12 @@ function renderList(): void {
   const older: Session[] = [];
 
   for (const sess of localSessions.values()) {
-    if (isSessionActive(sess.lastActive)) {
+    // Bucket as active using the same effective-activity signal the card renders
+    // (the post-transform sess.isActive: server's isActive flag, with stale-parent
+    // /waiting decay already applied above). This keeps the sidebar's active group
+    // in step with the topbar badge / server, instead of a separate 45s wall-clock
+    // check that diverged for waiting parents and 30-45s decaying sessions.
+    if (sess.isActive) {
       active.push(sess);
       continue;
     }
@@ -183,7 +197,9 @@ function renderList(): void {
     const sel = localSessions.get(state.selectedSessionId);
     // Find the parent if this is a subagent
     const target = sel?.parentId ? (localSessions.get(sel.parentId) ?? sel) : sel;
-    if (target && !isSessionActive(target.lastActive)) {
+    // Mirror the active-group test above: an active (incl. waiting) target lives in
+    // the always-visible ACTIVE NOW section, so only time-grouped targets need reveal.
+    if (target && !target.isActive) {
       const ms = new Date(target.lastActive).getTime();
       const groupKey =
         now - ms < 3600_000
@@ -223,7 +239,10 @@ function renderList(): void {
   const topLevelFilter = (s: Session) =>
     !s.parentId && !isTrivial(s) && (!filter || s.cwd === filter || s.sessionName === filter);
   const recentCount =
-    active.length +
+    // Count top-level active sessions only — subagents are inlined under their
+    // parent, never rendered as standalone cards. This matches #fc-active (line
+    // below) and the rendered ACTIVE NOW / RECENT card set.
+    active.filter((s) => !s.parentId).length +
     [...lastHour, ...today].filter(
       (s) => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
     ).length;

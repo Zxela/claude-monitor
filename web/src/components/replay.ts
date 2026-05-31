@@ -19,6 +19,9 @@ let totalEvents = 0;
 // currentIndex is a COUNT of rendered events (0..totalEvents inclusive).
 let currentIndex = 0;
 let manifestEvents: Event[] = [];
+// True when the backend reports more events than we loaded (hasMore), so the
+// progress label can show "N / M+" instead of a false "N / M" completeness.
+let manifestTruncated = false;
 
 export function render(mount: HTMLElement): void {
   container = mount;
@@ -93,10 +96,19 @@ function renderReplayPanel(sessionId: string): void {
 
 async function loadManifest(sessionId: string): Promise<void> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/replay`);
+    // Request the full window explicitly (server hard-caps at 10000) instead of
+    // the silent default of 1000 so the scrubber covers as many events as the
+    // backend will serve.
+    const res = await fetch(`/api/sessions/${sessionId}/replay?limit=10000`);
     const data = await res.json();
     manifestEvents = (data.events ?? []).map((e: unknown) => e as Event);
     totalEvents = manifestEvents.length;
+    // The manifest reports the true count (total) and a hasMore flag; if the
+    // backend truncated, surface it so the progress label does not claim a
+    // false "N / N" completeness.
+    manifestTruncated =
+      data.hasMore === true ||
+      (typeof data.total === 'number' && data.total > manifestEvents.length);
     // currentIndex is a COUNT (0..totalEvents inclusive), so the slider's max
     // is totalEvents: dragging fully right means "all N events shown".
     if (scrubber) scrubber.max = String(totalEvents);
@@ -267,7 +279,9 @@ function stopPlayback(): void {
 
 function updateProgress(): void {
   if (progressEl) {
-    progressEl.textContent = `${currentIndex} / ${totalEvents}`;
+    // Append '+' when the backend reported more events than we loaded so the
+    // scrubber does not claim to cover the whole session.
+    progressEl.textContent = `${currentIndex} / ${totalEvents}${manifestTruncated ? '+' : ''}`;
   }
 }
 

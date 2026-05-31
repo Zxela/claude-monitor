@@ -62,7 +62,12 @@ export function stripInternalTags(text: string): string {
   return s.trim();
 }
 
-const ACTIVE_THRESHOLD_MS = 45_000; // 45s — slightly longer than backend's 30s to prevent flashing
+// Mirror the server's active threshold (session.go activeThreshold = 30s) so the
+// client never has a third, divergent definition of "active". Active-group
+// membership now flows from the server's isActive flag; this helper only powers
+// the defensive stale-to-idle decay of a server-flagged-active session whose
+// lastActive has gone stale (i.e. before the server's next recompute flips it).
+const ACTIVE_THRESHOLD_MS = 30_000; // 30s — matches backend activeThreshold
 
 export function isSessionActive(lastActive: string): boolean {
   if (!lastActive) return false;

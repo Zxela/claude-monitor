@@ -343,11 +343,14 @@ func (d *DB) ClearCwdRepos() error {
 func (d *DB) SaveSession(s *session.Session) error {
 	var endedAt string
 	var startedAt string
+	// Store timestamps in canonical UTC RFC3339 ("…Z") so window-boundary and
+	// bucketing comparisons (which are lexical TEXT compares in SQLite) are valid
+	// regardless of the source time's zone. Production times are already UTC.
 	if !s.LastActive.IsZero() {
-		endedAt = s.LastActive.Format(time.RFC3339)
+		endedAt = s.LastActive.UTC().Format(time.RFC3339)
 	}
 	if !s.StartedAt.IsZero() {
-		startedAt = s.StartedAt.Format(time.RFC3339)
+		startedAt = s.StartedAt.UTC().Format(time.RFC3339)
 	}
 
 	_, err := d.db.Exec(`INSERT INTO sessions
@@ -453,11 +456,13 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 	for _, s := range sessions {
 		var endedAt string
 		var startedAt string
+		// Canonical UTC storage — see SaveSession. Keeps lexical window/bucket
+		// comparisons valid; production times are already UTC.
 		if !s.LastActive.IsZero() {
-			endedAt = s.LastActive.Format(time.RFC3339)
+			endedAt = s.LastActive.UTC().Format(time.RFC3339)
 		}
 		if !s.StartedAt.IsZero() {
-			startedAt = s.StartedAt.Format(time.RFC3339)
+			startedAt = s.StartedAt.UTC().Format(time.RFC3339)
 		}
 
 		if _, err := sessStmt.Exec(
@@ -514,6 +519,20 @@ func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]ses
 		}
 	}
 	return ids, costs, rows.Err()
+}
+
+// CountSessionErrors returns the number of distinct error events for a session,
+// deduped by the stable event identity (message_id, else uuid) so re-emitted
+// error lines are counted once. This is the deterministic source of truth for
+// sessions.error_count, matching what the events feed shows.
+func (d *DB) CountSessionErrors(sessionID string) (int, error) {
+	var n int
+	err := d.db.QueryRow(`SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), uuid))
+		FROM events WHERE session_id = ? AND is_error = 1`, sessionID).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // ListSessions returns sessions ordered by ended_at descending.
@@ -646,7 +665,12 @@ func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 			r.CostByModel[model] = cost
 		}
 	}
-	r.CostByRepo[repoID] = r.TotalCost
+	// Only reflect a repo that actually matched rows, mirroring the model guard
+	// above. An unknown/whitespace id thus returns costByRepo:{} instead of a
+	// phantom zero-cost entry echoing the queried id.
+	if r.SessionCount > 0 {
+		r.CostByRepo[repoID] = r.TotalCost
+	}
 	return r, nil
 }
 
@@ -676,6 +700,22 @@ func (d *DB) ListRepos() ([]RepoRow, error) {
 		result = append(result, r)
 	}
 	return result, rows.Err()
+}
+
+// RepoExists reports whether a repo row with the given id exists. Used by the
+// per-repo endpoints to return 404 for unknown ids (matching the session-by-id
+// endpoint), rather than serving a zeroed 200.
+func (d *DB) RepoExists(id string) (bool, error) {
+	var one int
+	err := d.db.QueryRow(`SELECT 1 FROM repos WHERE id = ? LIMIT 1`, id).Scan(&one)
+	switch err {
+	case nil:
+		return true, nil
+	case sql.ErrNoRows:
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
@@ -715,7 +755,11 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	var args []interface{}
 	if !since.IsZero() {
 		where = ` WHERE started_at >= ?`
-		args = append(args, since.Format(time.RFC3339))
+		// started_at is stored as UTC RFC3339 (…Z). Format the boundary in UTC so
+		// the lexical TEXT comparison is correct: a local-offset boundary (…-07:00)
+		// sorts before "…Z" and wrongly pulls late-yesterday-UTC rows into the
+		// window, inflating today/week/month totals. See TestWindowBoundaryUTC.
+		args = append(args, since.UTC().Format(time.RFC3339))
 	}
 
 	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
@@ -805,7 +849,13 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	// windowWhere matches ALL rows in the window (for cost/token SUMs, counted
 	// once). where additionally restricts to top-level sessions (parent_id empty)
 	// for COUNT/AVG/percentile distributions.
-	windowWhere := fmt.Sprintf("started_at >= datetime('now', '%s')", interval)
+	// datetime('now', interval) renders as "YYYY-MM-DD HH:MM:SS" (space-separated,
+	// no T/Z), but started_at is "YYYY-MM-DDTHH:MM:SSZ". A lexical TEXT compare
+	// then diverges at index 10 (' ' 0x20 < 'T' 0x54), so every row on the
+	// boundary's calendar date passes regardless of its hour — turning the rolling
+	// window into a calendar-day cutoff (24h trends over-counted ~51%). Emit the
+	// boundary in matching RFC3339-Z form. See TestTrendWindowBoundaryUTC.
+	windowWhere := fmt.Sprintf("started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", interval)
 	var args []interface{}
 	if repoID != "" {
 		windowWhere += " AND repo_id = ?"
@@ -948,7 +998,8 @@ func (d *DB) trendPercentiles(p *trendParams, buckets []TrendBucket) error {
 // (parent_id empty) via CASE. For shapes 2/3 children share the parent's
 // repo_id (set in pipeline), so repo attribution stays stable.
 func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
-	repoWindowWhere := fmt.Sprintf("s.started_at >= datetime('now', '%s')", p.interval)
+	// Match started_at's RFC3339-Z storage format (see windowWhere above).
+	repoWindowWhere := fmt.Sprintf("s.started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", p.interval)
 	if p.repoID != "" {
 		repoWindowWhere += " AND s.repo_id = ?"
 	}
@@ -992,7 +1043,7 @@ func (d *DB) trendByModel(p *trendParams) ([]ModelTrend, error) {
 	modelQuery := fmt.Sprintf(`SELECT COALESCE(model,'unknown'), COALESCE(SUM(total_cost),0),
 		COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens),0),
 		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0)
-		FROM sessions WHERE %s AND model != ''
+		FROM sessions WHERE %s AND model != '' AND model != '<synthetic>'
 		GROUP BY model ORDER BY SUM(total_cost) DESC`, p.windowWhere)
 
 	modelRows, err := d.db.Query(modelQuery, p.args...)
@@ -1118,13 +1169,25 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 	}
 	defer contentStmt.Close()
 
-	// FTS5 uses INSERT OR REPLACE to handle both new inserts and updates.
-	ftsStmt, err := tx.Prepare(`INSERT OR REPLACE INTO events_fts(rowid, content_preview, tool_name, tool_detail)
+	// events_fts is an external-content FTS5 table (content=events), so the
+	// index must be kept in sync explicitly. INSERT OR REPLACE does NOT purge an
+	// existing row's old terms (it has no stored content to diff against), which
+	// leaves stale phantom tokens that produce false-positive search matches.
+	// The correct sequence on update is: emit the FTS5 'delete' command with the
+	// row's OLD indexed values, then INSERT the new values.
+	ftsDeleteStmt, err := tx.Prepare(`INSERT INTO events_fts(events_fts, rowid, content_preview, tool_name, tool_detail)
+		VALUES ('delete', ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare fts delete stmt: %w", err)
+	}
+	defer ftsDeleteStmt.Close()
+
+	ftsInsertStmt, err := tx.Prepare(`INSERT INTO events_fts(rowid, content_preview, tool_name, tool_detail)
 		VALUES (?, ?, ?, ?)`)
 	if err != nil {
-		return fmt.Errorf("prepare fts stmt: %w", err)
+		return fmt.Errorf("prepare fts insert stmt: %w", err)
 	}
-	defer ftsStmt.Close()
+	defer ftsInsertStmt.Close()
 
 	// For upserts, LastInsertId is unreliable — look up the actual ID.
 	lookupStmt, err := tx.Prepare(`SELECT id FROM events WHERE session_id = ? AND COALESCE(message_id, uuid) = ?`)
@@ -1132,6 +1195,15 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		return fmt.Errorf("prepare lookup stmt: %w", err)
 	}
 	defer lookupStmt.Close()
+
+	// Fetch the OLD indexed FTS values for an existing row (by dedup key) so we
+	// can purge its stale terms before re-indexing the upserted row.
+	oldFTSStmt, err := tx.Prepare(`SELECT id, COALESCE(content_preview,''), COALESCE(tool_name,''), COALESCE(tool_detail,'')
+		FROM events WHERE session_id = ? AND COALESCE(message_id, uuid) = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare old fts lookup stmt: %w", err)
+	}
+	defer oldFTSStmt.Close()
 
 	for _, ei := range batch.Events {
 		ev := ei.Event
@@ -1144,6 +1216,28 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		if len(ev.ToolUseIDs) > 0 {
 			if b, err := json.Marshal(ev.ToolUseIDs); err == nil {
 				toolUseIDsJSON = string(b)
+			}
+		}
+
+		// Capture the OLD indexed FTS values BEFORE the upsert overwrites them,
+		// so an existing row's stale terms can be purged from events_fts.
+		dedupKey := ev.UUID
+		if ev.MessageID != "" {
+			dedupKey = ev.MessageID
+		}
+		var (
+			oldRowExists                          bool
+			oldRowID                              int64
+			oldPreview, oldToolName, oldToolDetail string
+		)
+		if dedupKey != "" {
+			switch err := oldFTSStmt.QueryRow(ei.SessionID, dedupKey).Scan(&oldRowID, &oldPreview, &oldToolName, &oldToolDetail); err {
+			case nil:
+				oldRowExists = true
+			case sql.ErrNoRows:
+				// new row — nothing to purge
+			default:
+				return fmt.Errorf("lookup old fts values: %w", err)
 			}
 		}
 
@@ -1170,10 +1264,6 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		// ON CONFLICT may fire for any upsert, so LastInsertId is unreliable.
 		// Look up by the dedup key: message_id if present, else uuid.
 		var eventID int64
-		dedupKey := ev.UUID
-		if ev.MessageID != "" {
-			dedupKey = ev.MessageID
-		}
 		if dedupKey != "" {
 			if err := lookupStmt.QueryRow(ei.SessionID, dedupKey).Scan(&eventID); err != nil {
 				return fmt.Errorf("lookup event id: %w", err)
@@ -1192,8 +1282,17 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			}
 		}
 
-		// Update FTS5 index
-		if _, err := ftsStmt.Exec(eventID, ev.ContentText, ev.ToolName, ev.ToolDetail); err != nil {
+		// Update FTS5 index. For an existing row, purge its OLD terms first (the
+		// FTS5 'delete' command requires the previously-indexed values and the
+		// matching rowid), then index the NEW values. For a brand-new row, just
+		// insert. This keeps the external-content index free of stale phantom
+		// tokens that would otherwise yield false-positive search matches.
+		if oldRowExists {
+			if _, err := ftsDeleteStmt.Exec(oldRowID, oldPreview, oldToolName, oldToolDetail); err != nil {
+				return fmt.Errorf("delete stale fts: %w", err)
+			}
+		}
+		if _, err := ftsInsertStmt.Exec(eventID, ev.ContentText, ev.ToolName, ev.ToolDetail); err != nil {
 			return fmt.Errorf("insert fts: %w", err)
 		}
 	}
@@ -1249,6 +1348,22 @@ func (d *DB) ListReplayEvents(sessionID string, limit, offset int) ([]EventRow, 
 	}
 	defer rows.Close()
 	return scanEventRows(rows)
+}
+
+// CountReplayEvents returns the total number of events a replay covers for a
+// session (the session's own events plus its direct children), mirroring the
+// WHERE clause of ListReplayEvents. Used to emit total/hasMore so the UI can
+// detect truncation.
+func (d *DB) CountReplayEvents(sessionID string) (int, error) {
+	var n int
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM events e
+		WHERE e.session_id = ?
+		   OR e.session_id IN (SELECT id FROM sessions WHERE parent_id = ?)`,
+		sessionID, sessionID).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // ListPinnedEvents returns all error and agent events for a session, ordered chronologically.
@@ -1355,15 +1470,40 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 
 // --- Search ---
 
+// buildFTSMatch turns a free-text query into a safe FTS5 MATCH expression by
+// quoting each whitespace-separated term and joining them with spaces (implicit
+// AND). Each term is a double-quoted literal with internal quotes doubled, so
+// FTS5 operators and unbalanced quotes are neutralized and cannot trigger
+// syntax errors. Returns "" when the query has no usable terms.
+func buildFTSMatch(query string) string {
+	tokens := strings.Fields(query)
+	if len(tokens) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		quoted = append(quoted, `"`+strings.ReplaceAll(tok, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, " ")
+}
+
 // SearchFTS searches the FTS5 index for matching events.
 func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	// Wrap in double quotes to treat as a literal phrase, escaping any
-	// internal double quotes. This prevents FTS5 syntax errors from
-	// user-supplied queries (e.g. unbalanced quotes, bare operators).
-	safe := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+	// Tokenize on whitespace and quote each term individually, then join the
+	// quoted terms with a space. FTS5 implicitly ANDs space-separated phrases,
+	// so `session not` becomes `"session" "not"` (matches docs containing both
+	// words anywhere) rather than `"session not"` (adjacent-only). Per-token
+	// quoting preserves the safety property: every term is a quoted literal, so
+	// bare operators and unbalanced quotes cannot cause FTS5 syntax errors.
+	safe := buildFTSMatch(query)
+	if safe == "" {
+		// No usable terms (empty/whitespace-only query) — return no results
+		// rather than issuing an invalid empty MATCH.
+		return []EventRow{}, nil
+	}
 	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
 		'', NULL
 		FROM events_fts fts

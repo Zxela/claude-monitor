@@ -24,3 +24,6 @@ cmd/claude-monitor/static/
 docs/superpowers/
 .remember/
 .codex
+
+# ephemeral UI audit scratch (not committed)
+.cm-audit/

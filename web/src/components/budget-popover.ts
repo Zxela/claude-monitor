@@ -3,6 +3,7 @@ import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { loadSettings, saveSettings, getSettings, notify } from '../notifications';
 import type { StatsWindow } from '../api';
+import { fetchStats } from '../api';
 import { dismiss as dismissCostBreakdown } from './cost-breakdown';
 import {
   getSamples,
@@ -22,6 +23,19 @@ let banner: HTMLElement | null = null;
 let costStatEl: HTMLElement | null = null;
 let rateStatEl: HTMLElement | null = null;
 let budgetNotificationSent = false;
+
+// Today's spend, fetched independently of the topbar window selector. PROJECTED
+// TODAY must extrapolate from today's actual spend, not whatever window the
+// topbar toggle happens to be on (e.g. ALL → projection larger than all-time).
+let todayCost = 0;
+
+function refreshTodayCost(): void {
+  fetchStats('today')
+    .then((s) => {
+      todayCost = s.totalCost;
+    })
+    .catch(() => {});
+}
 
 export function dismiss(): void {
   closePanel();
@@ -61,6 +75,9 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
   }
 
   loadSettings();
+
+  // Prime today's spend so PROJECTED TODAY is correct the moment the panel opens.
+  refreshTodayCost();
 
   const openFromGear = (e: Event) => {
     e.stopPropagation();
@@ -114,8 +131,14 @@ function togglePanel(anchor: HTMLElement): void {
   statEl.style.position = 'relative';
   statEl.appendChild(panel);
 
-  // Refresh dynamic values every 5 seconds (synced with sampling)
-  refreshTimer = setInterval(updatePanelValues, 5000);
+  // Refresh dynamic values every 5 seconds (synced with sampling). Re-fetch
+  // today's spend on the same cadence so PROJECTED TODAY tracks reality
+  // independently of the topbar window selector.
+  refreshTodayCost();
+  refreshTimer = setInterval(() => {
+    refreshTodayCost();
+    updatePanelValues();
+  }, 5000);
 }
 
 function renderPanelContent(): void {
@@ -124,7 +147,8 @@ function renderPanelContent(): void {
   const rate = getCurrentRate();
   const tokenRate = getTokenRate();
   const totalCost = state.stats?.totalCost ?? 0;
-  const projected = getProjectedDailyCost(totalCost);
+  // PROJECTED TODAY extrapolates from today's spend, not the windowed total.
+  const projected = getProjectedDailyCost(todayCost);
   const samples = getSamples();
 
   const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
@@ -289,7 +313,8 @@ function updatePanelValues(): void {
   const rate = getCurrentRate();
   const tokenRate = getTokenRate();
   const totalCost = state.stats?.totalCost ?? 0;
-  const projected = getProjectedDailyCost(totalCost);
+  // PROJECTED TODAY extrapolates from today's spend, not the windowed total.
+  const projected = getProjectedDailyCost(todayCost);
   const samples = getSamples();
 
   // Update burn rate value
@@ -409,7 +434,17 @@ function formatMinutes(min: number): string {
 }
 
 function checkBudget(): void {
-  if (!state.budgetThreshold || !costStatEl || !banner) return;
+  if (!costStatEl || !banner) return;
+
+  // When the budget is cleared, run the same cleanup as the under-budget branch.
+  // Returning early on a falsy threshold (the old guard) left the cost stat red
+  // and the "Budget exceeded" banner stuck on screen after clearing the budget.
+  if (!state.budgetThreshold) {
+    costStatEl.classList.remove('over-budget');
+    banner.className = 'budget-banner hidden';
+    budgetNotificationSent = false;
+    return;
+  }
 
   const total = state.stats?.totalCost ?? 0;
 

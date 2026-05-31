@@ -5,7 +5,15 @@ info:
     REST and WebSocket API for claude-monitor — a daemon that watches Claude Code
     JSONL session files and broadcasts activity over WebSocket.
     Interactive Swagger UI is served at /api and this spec at /api/openapi.yaml.
-  version: "3.4.0"
+
+
+    Routing notes: every route is registered for a single HTTP method, so a
+    request to an existing path with an unsupported method returns
+    `405 Method Not Allowed` (with an `Allow` header) rather than 404. The
+    per-repo endpoints (`/api/repos/{id}/stats`, `/api/repos/{id}/sessions`) do
+    not 404 for an unknown repo id — they return a `200` with zeroed aggregates
+    or an empty array respectively.
+  version: "3.5.1"
 
 servers:
   - url: http://localhost:7700
@@ -96,7 +104,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "v3.4.0"
+                version: "3.5.1"
 
   /api/sessions:
     get:
@@ -284,14 +292,40 @@ paths:
       tags: [replay]
       summary: Replay manifest for a session
       description: >
-        Returns the full ordered list of events for the session from the database
-        (up to 10,000), plus the session ID. The manifest also includes events
-        from the session's direct children (subagents / workflow agents), merged
-        chronologically, so a parent or workflow root replays as a single unified
-        timeline. Suitable for driving a timeline scrubber.
+        Returns an ordered page of events for the session from the database, plus
+        the session ID. The manifest also includes events from the session's direct
+        children (subagents / workflow agents), merged chronologically, so a parent
+        or workflow root replays as a single unified timeline. Suitable for driving
+        a timeline scrubber.
+
+
+        The page is bounded by the `limit`/`offset` query params (default limit
+        1000, max 10000). The response carries `total` (the full event count for
+        the session and its direct children) and `hasMore` (true when the returned
+        page does not reach the end), so a client can detect truncation and page
+        through the remaining events.
       operationId: getSessionReplay
       parameters:
         - $ref: "#/components/parameters/SessionId"
+        - name: limit
+          in: query
+          description: >
+            Maximum number of events to return. Clamped to 1–10000; values outside
+            that range (or non-numeric) fall back to the default of 1000.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 1000
+        - name: offset
+          in: query
+          description: >
+            Number of events to skip for paging. Negative or non-numeric values
+            fall back to the default of 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         "200":
           description: Replay manifest
@@ -472,7 +506,12 @@ paths:
         - name: q
           in: query
           required: true
-          description: Search query string (FTS5 match syntax).
+          description: >
+            Free-text search query. Each whitespace-separated word is matched as a
+            quoted literal term and the terms are combined with implicit AND, so a
+            multi-word query matches documents containing all of the words anywhere
+            (not necessarily adjacent). FTS5 operators (AND/OR/NEAR, column filters,
+            prefix `*`) are NOT interpreted — they are treated as literal text.
           schema:
             type: string
         - name: limit
@@ -552,7 +591,11 @@ paths:
         - name: q
           in: query
           required: true
-          description: Search query string.
+          description: >
+            Free-text search query. The FTS5 leg matches each whitespace-separated
+            word as a quoted literal term combined with implicit AND (words may
+            appear anywhere, not necessarily adjacent); FTS5 operators are not
+            interpreted. The full-content leg performs a substring match.
           schema:
             type: string
         - name: limit
@@ -602,9 +645,20 @@ paths:
       tags: [settings]
       summary: Update a setting
       description: >
-        Sets a single setting by key. Creates the key if it does not exist.
-        Valid keys: `retention_hot_days`, `retention_warm_days`,
-        `preview_max_length` (integer 50–2000; controls content preview truncation length).
+        Sets a single setting by key. Only the three allowlisted keys below are
+        accepted; any other key — including keys that already exist in the database
+        such as `backfill_v013_done` — returns 400 `{"error":"unknown setting key"}`.
+
+
+        Valid keys and validation:
+
+        - `retention_hot_days` — positive integer (≥ 1); otherwise 400.
+
+        - `retention_warm_days` — positive integer (≥ 1); otherwise 400.
+
+        - `preview_max_length` — integer 50–2000 (controls content preview
+          truncation length); otherwise 400
+          `{"error":"preview_max_length must be an integer between 50 and 2000"}`.
       operationId: updateSetting
       parameters:
         - name: key
@@ -843,7 +897,7 @@ components:
         version:
           type: string
           description: Build version string (set via ldflags at compile time).
-          example: "v3.1.1"
+          example: "3.5.1"
 
     Session:
       type: object
@@ -1259,11 +1313,12 @@ components:
     ReplayManifest:
       type: object
       description: >
-        Full ordered event list for a replay timeline. The manifest now includes
-        events from the session AND its direct children (subagents / workflow
-        agents linked via parent_id), merged chronologically, so a parent or
-        workflow root replays as a single unified timeline. The response shape is
-        unchanged.
+        A page of the ordered event list for a replay timeline. The manifest
+        includes events from the session AND its direct children (subagents /
+        workflow agents linked via parent_id), merged chronologically, so a parent
+        or workflow root replays as a single unified timeline. The returned page is
+        bounded by the request's limit/offset; `total` and `hasMore` describe the
+        full set so a client can detect truncation and page through it.
       required: [sessionId, events]
       properties:
         sessionId:
@@ -1273,10 +1328,30 @@ components:
         events:
           type: array
           description: >
-            All events for the session and its direct children, in chronological
-            order (up to 10,000).
+            Events for the session and its direct children, in chronological order,
+            for the requested limit/offset page.
           items:
             $ref: "#/components/schemas/EventRow"
+        limit:
+          type: integer
+          description: Effective limit applied to this page (1–10000).
+          example: 1000
+        offset:
+          type: integer
+          description: Effective offset applied to this page.
+          example: 0
+        total:
+          type: integer
+          description: >
+            Full count of events for the session and its direct children, ignoring
+            limit/offset. Use with `offset` + `events.length` to detect truncation.
+          example: 5071
+        hasMore:
+          type: boolean
+          description: >
+            True when this page does not reach the end of the full set
+            (offset + events.length < total), i.e. more events remain to be paged.
+          example: true
 
     WorkflowRow:
       type: object
@@ -1525,8 +1600,9 @@ components:
         date:
           type: string
           description: >
-            Bucket label. ISO date for daily buckets (2026-03-25), ISO
-            datetime hour for hourly buckets (2026-03-25T14).
+            Bucket label. ISO date for daily buckets (e.g. 2026-03-25); for hourly
+            (24h window) buckets a space-separated UTC datetime truncated to the
+            hour (e.g. 2026-03-25 14:00).
           example: "2026-03-25"
         cost:
           type: number

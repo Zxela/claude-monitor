@@ -32,7 +32,13 @@ function getActiveSessionTotals(): { costRate: number; tokenTotal: number; total
 
 function sample(): void {
   const now = Date.now();
-  const { costRate, tokenTotal, totalCost } = getActiveSessionTotals();
+  const totals = getActiveSessionTotals();
+  const { tokenTotal, totalCost } = totals;
+  // Trace the same server-recomputed cost rate the panel header and topbar use,
+  // so the sparkline never tells a different story. Fall back to the client sum
+  // only when the server stats are not yet available.
+  const apiRate = state.stats?.costRate;
+  const costRate = apiRate != null && apiRate > 0 ? apiRate : totals.costRate;
 
   let tokenRate = 0;
   if (prevTimestamp > 0 && now > prevTimestamp) {
@@ -63,6 +69,12 @@ export function getSamples(): BurnRateSample[] {
 }
 
 export function getCurrentRate(): number {
+  // Single source of truth: prefer the server's freshly-recomputed cost rate
+  // (the same value the topbar $/MIN renders) so the burn-rate panel header,
+  // PROJECTED TODAY, and depletion never diverge from the topbar. Fall back to
+  // the local sampler only when stats are not yet available.
+  const apiRate = state.stats?.costRate;
+  if (apiRate != null && apiRate > 0) return apiRate;
   if (samples.length === 0) return 0;
   return samples[samples.length - 1].costRate;
 }

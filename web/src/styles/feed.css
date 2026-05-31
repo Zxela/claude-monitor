@@ -141,6 +141,10 @@
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+  /* Allow the flex item to shrink below its content width so long tool
+     output/code blocks wrap and scroll instead of forcing horizontal overflow
+     that clips the feed unreadably on narrow (<768px) viewports. */
+  min-width: 0;
 }
 
 .feed-empty {
