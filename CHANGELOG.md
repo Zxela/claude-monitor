@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.6.0](https://github.com/Zxela/claude-monitor/compare/v3.5.2...v3.6.0) (2026-05-31)
+
+
+### Features
+
+* add Cost by Session analytics breakdown; mark Cost by Repo approximate ([93ea169](https://github.com/Zxela/claude-monitor/commit/93ea169a8a61f3c28a1b26e027db56313424a559))
+* Cost by Session analytics (default); mark Cost by Repo approximate ([723c1a8](https://github.com/Zxela/claude-monitor/commit/723c1a8f66716128b4abd98c29b419747327398a))
+
 ## [3.5.2](https://github.com/Zxela/claude-monitor/compare/v3.5.1...v3.5.2) (2026-05-31)
 
 
