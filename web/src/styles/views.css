@@ -102,12 +102,12 @@
 .view-overlay table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 .view-overlay th {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-bold);
   text-transform: uppercase;
   color: var(--text-dim);
   padding: 8px 10px;
@@ -127,7 +127,7 @@
 
 .sort-arrow {
   margin-left: 4px;
-  font-size: 9px;
+  font-size: var(--fs-xs);
 }
 
 .view-overlay td {
@@ -146,6 +146,9 @@
   max-width: none;
   white-space: normal;
   overflow: visible;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+  color: var(--text);
 }
 
 .view-overlay tr:hover {
@@ -157,6 +160,8 @@
 
 .view-overlay .col-cost {
   color: var(--yellow);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-medium);
 }
 .view-overlay .col-rate {
   color: var(--yellow);
@@ -172,7 +177,7 @@
 }
 .view-overlay .col-model {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 .view-overlay .col-dim {
   color: var(--text-dim);
