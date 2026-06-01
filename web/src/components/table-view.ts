@@ -4,7 +4,15 @@ import { state, subscribe, update } from '../state';
 import { sessionDisplayName, formatDurationSecs } from '../utils';
 import '../styles/views.css';
 
-type SortKey = 'name' | 'status' | 'cost' | 'tokens' | 'messages' | 'errors' | 'duration' | 'lastActive';
+type SortKey =
+  | 'name'
+  | 'status'
+  | 'cost'
+  | 'tokens'
+  | 'messages'
+  | 'errors'
+  | 'duration'
+  | 'lastActive';
 type SortDir = 'asc' | 'desc';
 
 let container: HTMLElement | null = null;
@@ -30,14 +38,9 @@ export function render(mount: HTMLElement): void {
 function getAllSessions(): Session[] {
   const g = state.grouped;
   if (!g) return [];
-  return [
-    ...g.active,
-    ...g.lastHour,
-    ...g.today,
-    ...g.yesterday,
-    ...g.thisWeek,
-    ...g.older,
-  ].filter((s) => !s.parentId); // top-level only
+  return [...g.active, ...g.lastHour, ...g.today, ...g.yesterday, ...g.thisWeek, ...g.older].filter(
+    (s) => !s.parentId,
+  ); // top-level only
 }
 
 // Duration in seconds, measured startedAt -> lastActive (matching session cards
@@ -67,7 +70,7 @@ function sortSessions(sessions: Session[]): Session[] {
         cmp = a.totalCost - b.totalCost;
         break;
       case 'tokens':
-        cmp = (a.inputTokens + a.outputTokens) - (b.inputTokens + b.outputTokens);
+        cmp = a.inputTokens + a.outputTokens - (b.inputTokens + b.outputTokens);
         break;
       case 'messages':
         cmp = a.messageCount - b.messageCount;
@@ -146,9 +149,9 @@ function renderTable(): void {
   const headerCells = cols
     .map(
       (c) =>
-        `<th data-sort="${c.key}" style="text-align:${c.align ?? 'left'};cursor:pointer;user-select:none;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:10px;letter-spacing:0.5px;white-space:nowrap">
+        `<th data-sort="${c.key}" style="text-align:${c.align ?? 'left'};cursor:pointer;user-select:none;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:var(--fs-base);font-weight:var(--fw-bold);letter-spacing:var(--tracking-label);white-space:nowrap">
           ${c.label} ${arrowFor(c.key)}
-        </th>`
+        </th>`,
     )
     .join('');
 
@@ -173,25 +176,25 @@ function renderTable(): void {
       const isSelected = state.selectedSessionId === s.id;
 
       return `<tr data-session-id="${s.id}" style="cursor:pointer;background:${isSelected ? 'var(--bg-hover)' : 'transparent'};border-left:${isSelected ? '2px solid var(--cyan)' : '2px solid transparent'}">
-        <td style="padding:5px 10px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</td>
-        <td style="padding:5px 10px;font-size:10px;color:${statusColor}">${statusLabel}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:${s.totalCost > 0.1 ? 'var(--yellow)' : 'var(--text)'}">$${s.totalCost.toFixed(4)}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:var(--text-dim)">${totalTokens.toLocaleString()}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right">${s.messageCount}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:${s.errorCount > 0 ? 'var(--red)' : 'var(--text-dim)'}">${s.errorCount || '—'}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:var(--text-dim)">${duration}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:var(--text-dim)">${lastActive}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-lg);font-weight:var(--fw-medium);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-sm);color:${statusColor}">${statusLabel}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);font-weight:var(--fw-medium);text-align:right;color:${s.totalCost > 0.1 ? 'var(--yellow)' : 'var(--text)'}">$${s.totalCost.toFixed(4)}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${totalTokens.toLocaleString()}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right">${s.messageCount}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:${s.errorCount > 0 ? 'var(--red)' : 'var(--text-dim)'}">${s.errorCount || '—'}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${duration}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${lastActive}</td>
       </tr>`;
     })
     .join('');
 
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border)">
-      <span style="color:var(--cyan);font-size:11px;letter-spacing:1px">TABLE VIEW</span>
-      <span style="color:var(--text-dim);font-size:10px">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
+      <span style="color:var(--cyan);font-size:var(--fs-base);letter-spacing:var(--tracking-label)">TABLE VIEW</span>
+      <span style="color:var(--text-dim);font-size:var(--fs-sm)">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
     </div>
     <div style="overflow:auto;flex:1">
-      <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono,monospace)">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono)">
         <thead>
           <tr>${headerCells}</tr>
         </thead>
@@ -203,8 +206,12 @@ function renderTable(): void {
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
     th.addEventListener('click', () => handleSort(th.dataset.sort as SortKey));
-    th.addEventListener('mouseenter', () => { th.style.color = 'var(--text)'; });
-    th.addEventListener('mouseleave', () => { th.style.color = sortKey === th.dataset.sort ? 'var(--cyan)' : 'var(--text-dim)'; });
+    th.addEventListener('mouseenter', () => {
+      th.style.color = 'var(--text)';
+    });
+    th.addEventListener('mouseleave', () => {
+      th.style.color = sortKey === th.dataset.sort ? 'var(--cyan)' : 'var(--text-dim)';
+    });
   });
 
   // Row click: select session

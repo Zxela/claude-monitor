@@ -12,6 +12,32 @@
   --purple: #bc8cff;
   --orange: #f0883e;
   --font-mono: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* Type scale — collapse the ad-hoc px ladder into a deliberate set of steps.
+     Values match the px literals already in use so adoption is near-zero visual change. */
+  --fs-xs: 9px; /* badges, chevrons, micro labels */
+  --fs-sm: 10px; /* meta rows, timestamps, durations */
+  --fs-base: 11px; /* default UI text / data cells */
+  --fs-md: 12px; /* reading/content tier */
+  --fs-lg: 13px; /* titles, subheadings, emphasis */
+  --fs-xl: 18px; /* large numeric values */
+  --fs-display: 24px; /* hero stat value */
+  --fs-icon: 16px; /* icon / close glyph buttons */
+  /* Compatibility aliases for the legacy --text-* names used across the app
+     (previously referenced but never defined → silently broken). */
+  --text-xs: var(--fs-xs);
+  --text-sm: var(--fs-sm);
+  --text-base: var(--fs-base);
+  --text-md: var(--fs-md);
+  --text-lg: var(--fs-lg);
+  /* Weight scale — use these instead of raw numbers or the `bold` keyword. */
+  --fw-normal: 400;
+  --fw-medium: 600;
+  --fw-bold: 700;
+  /* Tracking + leading */
+  --tracking-label: 1px; /* caps-style labels / column headers */
+  --tracking-wide: 2px; /* brand wordmark */
+  --lh-body: 1.5; /* multi-line body content */
   --color-user: #5588ff;
   --color-assistant: #33dd99;
   --color-tool-use: #ddcc44;

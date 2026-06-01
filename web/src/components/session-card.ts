@@ -197,7 +197,7 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
       ${session.costRate > 0 ? `<span class="cost-rate">$${session.costRate.toFixed(3)}/min</span>` : ''}
       <span class="duration">${timeAgo(session.lastActive)}</span>
       <span class="duration">${formatDuration(session.startedAt, session.lastActive)}</span>
-      ${session.errorCount > 0 ? `<span class="compact-stat-err">${session.errorCount} err</span>` : ''}
+      ${session.errorCount > 0 ? `<span class="session-error-count">${session.errorCount} err</span>` : ''}
     </div>
   `;
 
@@ -217,11 +217,10 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
   });
 
   // Error count click — filter feed to errors only
-  const errEl = el.querySelector('.compact-stat-err');
+  const errEl = el.querySelector('.session-error-count');
   if (errEl) {
     errEl.setAttribute('role', 'button');
     errEl.setAttribute('tabindex', '0');
-    (errEl as HTMLElement).style.cursor = 'pointer';
     const filterErrors = (e: Event) => {
       e.stopPropagation();
       update({
