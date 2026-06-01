@@ -1,10 +1,10 @@
 import type { AppState } from '../state';
-import type { TrendResult, RepoEntry } from '../types';
+import type { TrendResult, RepoEntry, ToolUsage } from '../types';
 import type { TrendWindow } from '../api';
 import { state, subscribe } from '../state';
-import { fetchTrends, fetchRepos } from '../api';
+import { fetchTrends, fetchRepos, fetchToolUsage } from '../api';
 import { formatTokens } from '../utils';
-import { renderCards, destroyCards } from './analytics-cards';
+import { renderCards, renderToolUsageCard, destroyCards } from './analytics-cards';
 import '../styles/analytics.css';
 
 let container: HTMLElement | null = null;
@@ -14,6 +14,7 @@ let currentWindow: TrendWindow =
 let currentRepo: string | undefined;
 let repos: RepoEntry[] = [];
 let trendData: TrendResult | null = null;
+let toolUsage: ToolUsage | null = null;
 let loaded = false;
 let loading = false;
 
@@ -140,6 +141,13 @@ function show(): void {
       renderCards(cardsContainer, trendData, getCardState(), (id, expanded) => {
         setCardState(id, expanded);
       });
+      // Tool & Skill Usage is a non-chart card appended after the chart cards;
+      // renderCards clears the container, so it must be (re)added here each render.
+      const cs = getCardState();
+      const tuExpanded = cs['tool-skill-usage'] !== undefined ? cs['tool-skill-usage'] : true;
+      renderToolUsageCard(cardsContainer, toolUsage, tuExpanded, (expanded) => {
+        setCardState('tool-skill-usage', expanded);
+      });
     }
   }
 
@@ -164,11 +172,13 @@ async function loadData(): Promise<void> {
   }
 
   try {
-    const [trends, repoList] = await Promise.all([
+    const [trends, usage, repoList] = await Promise.all([
       fetchTrends(currentWindow, currentRepo),
+      fetchToolUsage(currentWindow, currentRepo),
       loaded ? Promise.resolve(repos) : fetchRepos(),
     ]);
     trendData = trends;
+    toolUsage = usage;
     repos = repoList;
     loaded = true;
   } catch (err) {

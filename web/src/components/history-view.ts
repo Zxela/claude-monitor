@@ -1,8 +1,8 @@
 // web/src/components/history-view.ts
-import type { Session } from '../types';
+import type { Session, SessionSkills, ToolUsageEntry } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchSessions } from '../api';
+import { fetchSessions, fetchSessionSkills } from '../api';
 import { formatDurationSecs, formatTokens, effectiveInputTokens } from '../utils';
 import '../styles/views.css';
 
@@ -37,6 +37,11 @@ const seenIds = new Set<string>();
 // Populated by groupRows() and consumed by the Cost column + its sort so the
 // most expensive session trees rank correctly and match the same-row badge.
 const treeCostMap = new Map<string, number>();
+
+// Sparse map of sessionID → skills invoked, loaded once. Used to badge the rows
+// whose sessions invoked skills so they stand out in History.
+let sessionSkills: SessionSkills = {};
+let skillsLoaded = false;
 
 type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
 
@@ -146,6 +151,19 @@ async function loadData(append = false): Promise<void> {
     reachedEnd = false;
     seenIds.clear();
     data = [];
+  }
+  // Load the sparse session→skills map once (fire-and-forget): it's small and
+  // all-time, so it badges rows across every page. Re-render when it arrives.
+  if (!append && !skillsLoaded) {
+    skillsLoaded = true;
+    fetchSessionSkills()
+      .then((m) => {
+        sessionSkills = m;
+        if (state.view === 'history') show();
+      })
+      .catch(() => {
+        /* non-fatal: rows simply render without skill badges */
+      });
   }
   try {
     const raw = await fetchSessions(PAGE, offset);
@@ -419,6 +437,14 @@ function show(): void {
         nameCell.title = titleLines.join('\n');
       }
     }
+
+    // Skill badge rolls up own + subagent-tree skills (mirrors the Cost column)
+    // so a COLLAPSED parent still surfaces skills its children invoked — they'd
+    // otherwise vanish with the hidden child rows.
+    addSkillBadge(
+      tr.children[1] as HTMLElement,
+      mergeSkills([sessionSkills[parent.id] ?? [], ...children.map((c) => sessionSkills[c.id] ?? [])]),
+    );
     tbody.appendChild(tr);
 
     // Child rows (if not collapsed)
@@ -438,6 +464,7 @@ function show(): void {
       }
       for (const child of children) {
         const childTr = createRow(child, true);
+        addSkillBadge(childTr.children[1] as HTMLElement, sessionSkills[child.id] ?? []);
         tbody.appendChild(childTr);
       }
     }
@@ -476,6 +503,40 @@ function show(): void {
   }
 
   container.appendChild(wrapper);
+}
+
+// mergeSkills combines several per-session skill lists into one, summing uses
+// and errors per skill name, ordered by uses descending. Used to roll a parent's
+// subagent-tree skills into its row badge.
+function mergeSkills(lists: ToolUsageEntry[][]): ToolUsageEntry[] {
+  const byName = new Map<string, ToolUsageEntry>();
+  for (const list of lists) {
+    for (const s of list) {
+      const cur = byName.get(s.name);
+      if (cur) {
+        cur.uses += s.uses;
+        cur.errors += s.errors;
+      } else {
+        byName.set(s.name, { name: s.name, uses: s.uses, errors: s.errors });
+      }
+    }
+  }
+  return [...byName.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+}
+
+// addSkillBadge appends a fuchsia "✦ N" badge to a row's Session cell when the
+// row (or its subagent tree, for a parent) invoked skills, so skill activity is
+// discoverable from History instead of being buried in the feed.
+function addSkillBadge(nameCell: HTMLElement, skills: ToolUsageEntry[]): void {
+  if (skills.length === 0) return;
+  const total = skills.reduce((sum, s) => sum + s.uses, 0);
+  const badge = document.createElement('span');
+  badge.className = 'history-skill-badge';
+  badge.textContent = `✦ ${total}`;
+  badge.title =
+    'Skills invoked:\n' +
+    skills.map((s) => `${s.name} ×${s.uses}${s.errors ? ` (${s.errors} err)` : ''}`).join('\n');
+  nameCell.appendChild(badge);
 }
 
 function createRow(row: Session, isChild: boolean): HTMLTableRowElement {

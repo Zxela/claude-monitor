@@ -194,3 +194,19 @@ export interface RepoEntry {
   url?: string;
   totalCost: number;
 }
+
+/** One tool or skill with its invocation and error counts. */
+export interface ToolUsageEntry {
+  name: string; // tool name (e.g. "Bash") or skill name (e.g. "commit")
+  uses: number; // number of invocations
+  errors: number; // invocations whose result reported an error
+}
+
+/** Tool/skill usage breakdown for a window/repo scope (GET /api/stats/tools). */
+export interface ToolUsage {
+  tools: ToolUsageEntry[];
+  skills: ToolUsageEntry[];
+}
+
+/** Sparse map of sessionID → skills invoked (GET /api/skills/sessions). */
+export type SessionSkills = Record<string, ToolUsageEntry[]>;

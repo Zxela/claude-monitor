@@ -148,3 +148,78 @@
 .analytics-card-body canvas {
   width: 100% !important;
 }
+
+/* Tool & Skill Usage card — two ranked lists of invocation/error counts. */
+.tool-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.tool-usage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tool-usage-section-title {
+  font-family: monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary, #888);
+  margin-bottom: 2px;
+}
+.tool-usage-empty {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  padding: 2px 0;
+}
+.tool-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: monospace;
+  font-size: 12px;
+}
+.tool-usage-name {
+  flex: 0 0 200px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, #e0e0e0);
+}
+.tool-usage-bar-wrap {
+  flex: 1;
+  min-width: 0;
+  height: 10px;
+  background: var(--bg-secondary, #1e1e3a);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.tool-usage-bar {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  min-width: 2px;
+}
+.tool-usage-count {
+  flex: 0 0 auto;
+  min-width: 42px;
+  text-align: right;
+  color: var(--text-primary, #e0e0e0);
+}
+.tool-usage-err {
+  flex: 0 0 auto;
+  color: #ff6b6b;
+  font-size: 11px;
+  min-width: 48px;
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .tool-usage-name {
+    flex-basis: 120px;
+    max-width: 120px;
+  }
+}

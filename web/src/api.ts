@@ -6,6 +6,8 @@ import type {
   StorageInfo,
   RepoEntry,
   TrendResult,
+  ToolUsage,
+  SessionSkills,
 } from './types';
 
 async function request<T>(url: string): Promise<T> {
@@ -77,6 +79,16 @@ export async function fetchTrends(window: TrendWindow = '7d', repo?: string): Pr
   const params = new URLSearchParams({ window });
   if (repo) params.set('repo', repo);
   return request<TrendResult>(`/api/stats/trends?${params}`);
+}
+
+export async function fetchToolUsage(window: TrendWindow = '7d', repo?: string): Promise<ToolUsage> {
+  const params = new URLSearchParams({ window });
+  if (repo) params.set('repo', repo);
+  return request<ToolUsage>(`/api/stats/tools?${params}`);
+}
+
+export async function fetchSessionSkills(): Promise<SessionSkills> {
+  return request<SessionSkills>(`/api/skills/sessions`);
 }
 
 export async function fetchVersion(): Promise<string> {

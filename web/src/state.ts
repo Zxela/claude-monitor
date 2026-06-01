@@ -78,6 +78,7 @@ export const state: AppState = {
     assistant: true,
     tool_use: true,
     tool_result: true,
+    skill: true,
     agent: true,
     hook: true,
     error: true,
