@@ -1523,6 +1523,82 @@ func TestProcess_ChildInheritsParentRepo(t *testing.T) {
 	}
 }
 
+// TestProcess_ChildTracksParentRepoChange guards the SYNCHRONOUS inheritance path
+// (parent already in the live store when the child event arrives) and, in
+// particular, that Rule 1 is NOT set-once: the child mirrors the parent's CURRENT
+// repo_id on every event. A redundant event must not thrash the pin back to the
+// child's own worktree cwd, and a later same-repo QUALITY upgrade on the parent
+// (toplevel-basename id → git-remote id) must propagate to the child.
+func TestProcess_ChildTracksParentRepoChange(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	resolver := repo.NewResolver()
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	const parentID = "track-parent-session"
+	const childID = "agent-1234567890abcdef" // worktree-style stem
+
+	// Parent starts pinned to a low-authority toplevel-basename id.
+	sessions.Upsert(parentID, func(s *session.Session) {
+		s.RepoID = "widget"
+		s.SetRepoSourceRank(repo.SourceGitToplevel)
+	})
+
+	// A child event from the worktree, naming the parent via in-content sessionId
+	// + isSidechain (resolveParentID shape-2). Distinct message ids avoid dedup.
+	childEvent := func(msgID string) watcher.Event {
+		line := makeJSONL(t, map[string]interface{}{
+			"type":        "assistant",
+			"timestamp":   time.Now().Format(time.RFC3339Nano),
+			"sessionId":   parentID,
+			"isSidechain": true,
+			"cwd":         "/work/.worktrees/agent-1234567890abcdef",
+			"message": map[string]interface{}{
+				"id":          msgID,
+				"role":        "assistant",
+				"content":     "child work",
+				"stop_reason": "end_turn",
+			},
+		})
+		return watcher.Event{SessionID: childID, Line: line}
+	}
+
+	// Event 1: child inherits the parent's current pin synchronously.
+	p.Process(childEvent("track-c1"))
+	child, ok := sessions.Get(childID)
+	if !ok {
+		t.Fatal("child session not found")
+	}
+	if child.RepoID != "widget" {
+		t.Fatalf("after first event: child RepoID = %q, want inherited widget", child.RepoID)
+	}
+	if strings.Contains(child.RepoID, "agent-") {
+		t.Fatalf("child RepoID = %q is a phantom worktree repo; should inherit parent", child.RepoID)
+	}
+
+	// Event 2: parent unchanged → child stays pinned and does NOT thrash back to
+	// its own worktree cwd phantom.
+	p.Process(childEvent("track-c2"))
+	child, _ = sessions.Get(childID)
+	if child.RepoID != "widget" {
+		t.Errorf("after redundant event: child RepoID = %q, want still widget (no thrash)", child.RepoID)
+	}
+
+	// Parent's own pin is upgraded for the SAME checkout (basename → git-remote).
+	sessions.Upsert(parentID, func(s *session.Session) {
+		s.RepoID = "github.com/acme/widget"
+		s.SetRepoSourceRank(repo.SourceGitRemote)
+	})
+
+	// Event 3: child tracks the parent's CURRENT id (Rule 1 is not set-once).
+	p.Process(childEvent("track-c3"))
+	child, _ = sessions.Get(childID)
+	if child.RepoID != "github.com/acme/widget" {
+		t.Errorf("after parent upgrade: child RepoID = %q, want tracked github.com/acme/widget", child.RepoID)
+	}
+}
+
 // TestProcess_ChildInheritsParentRepoFromDB verifies the inheritance falls back to
 // the persisted sessions table when the parent is not in the live store (e.g. the
 // parent was flushed in an earlier run or replayed out of order).
@@ -1649,7 +1725,12 @@ func TestSameRepo(t *testing.T) {
 		want       bool
 	}{
 		{"identical toplevels", "/work/widget", "", mk("/work/widget"), "", true},
-		{"nested toplevel (start subdir)", "/work/mono/pkg", "", mk("/work/mono"), "", true},
+		// Direction guard: a narrower incoming root nested inside the pin is the
+		// same (or a more-specific) checkout and may upgrade; a wider incoming
+		// root that CONTAINS the pin is the enclosing monorepo and must NOT let
+		// the inner pin flip outward.
+		{"incoming nested within pin (narrower) -> same", "/work/mono", "", mk("/work/mono/pkg"), "", true},
+		{"incoming contains pin (outer monorepo) -> different", "/work/mono/pkg", "", mk("/work/mono"), "", false},
 		{"different repos", "/work/alpha", "", mk("/work/beta"), "", false},
 		{"prefix-but-not-path (/repo vs /repo2)", "/work/repo", "", mk("/work/repo2"), "", false},
 		{"incoming has no toplevel", "/work/widget", "", mk(""), "", false},

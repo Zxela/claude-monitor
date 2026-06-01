@@ -381,9 +381,16 @@ func TestMigration017_ReattributesChildRepos(t *testing.T) {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
-	seed("root", "", "github.com/acme/widget")
-	seed("child", "root", "agent-deadbeef")       // phantom worktree repo
+	// Insert in REVERSE depth order (grandchild, then child, then root) so the
+	// child/grandchild rows get LOWER rowids than their parents. SQLite walks an
+	// UPDATE in rowid order reading values written earlier in the same statement,
+	// so this ordering means a single pass advances each chain by only one level —
+	// the grandchild genuinely requires the fixpoint loop's second pass to reach
+	// the root project. (With the natural parent-first order, one pass would
+	// cascade the whole chain and the multi-pass loop would never be exercised.)
 	seed("grandchild", "child", "agent-cafef00d") // phantom, one level deeper
+	seed("child", "root", "agent-deadbeef")       // phantom worktree repo
+	seed("root", "", "github.com/acme/widget")
 	seed("other-root", "", "github.com/acme/other")
 
 	// Re-apply 017 against the now-populated table: roll its version back to 16

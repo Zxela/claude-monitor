@@ -13,12 +13,20 @@ func init() {
 			// across fake projects. Re-point each child at its parent's project.
 			//
 			// Iterate to a fixpoint so multi-level chains (a subagent that spawns its
-			// own subagent) propagate the root project down every level. Each pass
-			// uses the parent's CURRENT repo_id (SQLite evaluates the UPDATE against
-			// pre-statement values), so up to depth passes are needed; the loop stops
-			// as soon as a pass changes nothing. Bounded by maxPasses as a safety net
-			// against any pathological parent cycle (which the write path cannot
-			// create, but defensive code is cheap here).
+			// own subagent) propagate the root project down every level, for any
+			// physical row order.
+			//
+			// Within a SINGLE UPDATE, SQLite walks rows in rowid order and a
+			// correlated subquery reads values written EARLIER in that same statement
+			// — it is NOT a pre-statement snapshot. So when a parent's row precedes
+			// its child's in rowid order, one pass already cascades the entire chain
+			// (the child reads the parent's freshly-written id, the grandchild reads
+			// the child's, and so on). But when a child precedes its parent (rows
+			// inserted or replayed out of depth order), each pass advances a chain by
+			// only one level. The loop runs until a pass changes nothing, which
+			// converges either way. Bounded by maxPasses as a safety net against a
+			// pathological parent cycle (which the write path cannot create, but
+			// defensive code is cheap here).
 			//
 			// Idempotent: once every child equals its parent's repo_id, the first pass
 			// affects zero rows and the loop exits. Re-running the migration is a no-op.
