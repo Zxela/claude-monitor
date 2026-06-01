@@ -1,0 +1,44 @@
+# lefthook git hooks — https://lefthook.dev
+#
+# Enable once per clone:  lefthook install
+# Run manually:           lefthook run pre-commit   /   lefthook run pre-push
+#
+# pre-commit: fast, file-scoped — auto-formats staged frontend files with
+#   Prettier and re-stages them, so every commit lands already formatted.
+# pre-push:   the full validation suite (mirrors CI) — run before code leaves
+#   your machine. Slower, but push is infrequent.
+
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      # Run from the web/ package so Prettier picks up web/.prettierrc and the
+      # locally-installed binary. {staged_files} are passed relative to this root.
+      root: "web/"
+      glob: "*.{ts,tsx,js,mjs,cjs,jsx,css,scss,html}"
+      run: npx prettier --write {staged_files}
+      stage_fixed: true
+
+pre-push:
+  parallel: true
+  commands:
+    # No `root:`/`glob:` here — these run unconditionally on every push (full
+    # validation), not just when web/ files are in the push range.
+    frontend-typecheck:
+      run: cd web && npx tsc --noEmit
+    frontend-test:
+      run: cd web && npm test
+    go-build:
+      run: go build ./...
+    go-vet:
+      run: go vet ./...
+    go-test:
+      # Strip inherited GIT_* vars: `git push` runs this hook with GIT_DIR /
+      # GIT_WORK_TREE exported, which makes git-dependent tests (e.g. the
+      # internal/repo resolver) resolve THIS repo instead of their own temp
+      # dirs and fail spuriously. CI doesn't hit this — it runs go test directly.
+      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_COMMON_DIR go test ./... -count=1
+    go-mod-tidy:
+      # -diff reports needed changes without modifying go.mod/go.sum and exits
+      # non-zero if they aren't tidy (Go 1.23+). Mirrors CI's tidy check.
+      run: go mod tidy -diff
