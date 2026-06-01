@@ -63,6 +63,7 @@ type Session struct {
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
 	repoSourceRank int              `json:"-"` // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 	repoToplevel   string           `json:"-"` // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
+	repoInherited  bool             `json:"-"` // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
 }
 
 // RepoSourceRank reports the resolution-authority rank of the current RepoID
@@ -79,6 +80,16 @@ func (s *Session) RepoToplevel() string { return s.repoToplevel }
 
 // SetRepoToplevel records the git working-tree root of the current RepoID.
 func (s *Session) SetRepoToplevel(toplevel string) { s.repoToplevel = toplevel }
+
+// RepoInherited reports whether RepoID was inherited from this session's parent
+// (a child/subagent that took the parent's project) rather than resolved from
+// its own cwd. The flush path uses this to skip persisting the child's worktree
+// cwd → inherited repo_id in cwd_repos, which would otherwise mis-attribute
+// future unrelated sessions resolving the same directory.
+func (s *Session) RepoInherited() bool { return s.repoInherited }
+
+// SetRepoInherited records whether the current RepoID was inherited from a parent.
+func (s *Session) SetRepoInherited(v bool) { s.repoInherited = v }
 
 // RepoFromGit reports whether the current RepoID came from an authoritative git
 // resolution (git remote or toplevel), as opposed to a non-git fallback.

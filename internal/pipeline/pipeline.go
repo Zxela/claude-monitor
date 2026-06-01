@@ -104,10 +104,15 @@ func (p *Pipeline) resolvePendingLinks() {
 				// (worktree) cwd to a phantom repo because the parent was unknown.
 				// Now that the parent exists, re-point the child at the parent's
 				// project, mirroring applyRepoResolution's rule 1.
-				if parentRepoID != "" && s.RepoID != parentRepoID {
-					s.RepoID = parentRepoID
-					s.SetRepoSourceRank(repo.SourceGitRemote)
-					s.SetRepoToplevel("")
+				if parentRepoID != "" {
+					// The pin is now inherited — flag it so subsequent flushes don't
+					// persist this child's worktree cwd → parent repo in cwd_repos.
+					s.SetRepoInherited(true)
+					if s.RepoID != parentRepoID {
+						s.RepoID = parentRepoID
+						s.SetRepoSourceRank(repo.SourceGitRemote)
+						s.SetRepoToplevel("")
+					}
 				}
 			})
 			p.sessions.LinkChild(parentUUID, childID)
@@ -334,10 +339,21 @@ func (p *Pipeline) applyWorkflowIdentity(s *session.Session, ev watcher.Event) {
 //  3. CWD is set once (session start) and never overwritten — see below.
 func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo, parentRepoID string) {
 	// Rule 1: inherit the parent's project. parentRepoID is non-empty only when
-	// this session has a known parent with a resolved repo_id. Set-once so we
-	// don't thrash if the parent's id later changes; the child stays pinned to
-	// whatever the parent was attributed to at first sight.
+	// this session has a known parent with a resolved repo_id. The child mirrors
+	// the parent's CURRENT repo_id on every event — it is NOT set-once: if the
+	// parent's own pin is later upgraded for the same checkout (e.g. a
+	// toplevel-basename id replaced by the git-remote id), the next child event
+	// re-points the child to follow it. The s.RepoID != parentRepoID guard only
+	// skips a redundant write when they already agree. Start-pin (rule 2) keeps
+	// the parent from flipping to a DIFFERENT repo, so this tracking can only
+	// ever follow a same-repo quality upgrade, never a project switch.
 	if parentRepoID != "" {
+		// Mark the pin as inherited so the flush path skips recording this child's
+		// (worktree) cwd → inherited repo_id in cwd_repos. That cwd belongs to the
+		// child's own working tree, not the parent's project, and persisting the
+		// mapping would mis-attribute future unrelated sessions that resolve the
+		// same directory.
+		s.SetRepoInherited(true)
 		if s.RepoID != parentRepoID {
 			s.RepoID = parentRepoID
 			// Mark as git-remote authority: an inherited id is as trustworthy as
@@ -405,9 +421,13 @@ func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r 
 // evidence, so an ambiguous case keeps the original pinned repo.
 //
 // Evidence, strongest first:
-//   - identical git working-tree roots (the pinned and new resolutions are in
-//     the same checkout), or one toplevel nested within the other (e.g. the
-//     start cwd was a subdir of the new toplevel, or vice versa); or
+//   - both sides git-backed: the incoming working-tree root is the pinned one,
+//     or is NESTED WITHIN it (same-or-narrower). Two resolutions of the same
+//     checkout always share a toplevel — git normalises any subdir to the repo
+//     root — so the headline case is equality. The reverse direction is rejected
+//     on purpose: an incoming toplevel that CONTAINS the pin is a WIDER repo
+//     (e.g. the outer monorepo of a nested inner checkout), and letting an inner
+//     project flip up to its enclosing repo would violate the start-pin.
 //   - the session has no recorded toplevel (its pin came from a non-git fallback,
 //     i.e. git was unavailable at start) but the new resolution's toplevel
 //     contains the session's START cwd. That is the headline upgrade case: the
@@ -422,8 +442,11 @@ func sameRepo(s *session.Session, r *repo.Repo, newCWD string) bool {
 		return false
 	}
 	if top := s.RepoToplevel(); top != "" {
-		// Both sides are git-backed: compare working-tree roots directly.
-		return pathContains(top, r.Toplevel) || pathContains(r.Toplevel, top)
+		// Both sides are git-backed. Same repo only when the incoming root is the
+		// pinned one or nested inside it. A wider incoming root that CONTAINS the
+		// pin (an outer monorepo) is a different, enclosing project — reject it so
+		// the inner pin cannot flip outward.
+		return pathContains(top, r.Toplevel)
 	}
 	// The pin is a non-git fallback (no toplevel). Use the session's start cwd:
 	// if it lives inside the incoming resolution's working tree, this is a

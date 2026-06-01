@@ -491,7 +491,11 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 			return fmt.Errorf("FlushSessions save %s: %w", s.ID, err)
 		}
 
-		if s.CWD != "" && s.RepoID != "" {
+		// Skip inherited child pins: their cwd is the child's own (worktree)
+		// directory, not the parent's project, so recording cwd → inherited
+		// repo_id would mis-attribute future unrelated sessions resolving the
+		// same directory after a restart seeds the resolver cache from this table.
+		if s.CWD != "" && s.RepoID != "" && !s.RepoInherited() {
 			if _, err := cwdStmt.Exec(s.CWD, s.RepoID); err != nil {
 				return fmt.Errorf("FlushSessions cwdRepo %s: %w", s.ID, err)
 			}

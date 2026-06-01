@@ -200,6 +200,44 @@ func TestCwdRepos(t *testing.T) {
 	}
 }
 
+// TestFlushSessions_SkipsCwdRepoForInheritedPins verifies that a child session
+// whose repo_id was inherited from its parent does NOT get its (worktree) cwd
+// recorded in cwd_repos, while a normally-resolved session does. Persisting an
+// inherited child's cwd → repo_id would mis-attribute future unrelated sessions
+// that resolve the same directory once the resolver cache is seeded from this
+// table on restart.
+func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	const repoID = "github.com/acme/widget"
+	if err := db.UpsertRepo(&repo.Repo{ID: repoID, Name: "widget"}); err != nil {
+		t.Fatalf("UpsertRepo: %v", err)
+	}
+
+	// Normally-resolved session: cwd → repo mapping SHOULD be persisted.
+	normal := &session.Session{ID: "normal-sess", CWD: "/work/widget", RepoID: repoID}
+	// Child that inherited its parent's repo: its cwd is the child's own worktree,
+	// not the parent's project, so the mapping must NOT be persisted.
+	child := &session.Session{ID: "child-sess", CWD: "/work/.worktrees/agent-x", RepoID: repoID}
+	child.SetRepoInherited(true)
+
+	if err := db.FlushSessions([]*session.Session{normal, child}); err != nil {
+		t.Fatalf("FlushSessions: %v", err)
+	}
+
+	entries, err := db.LoadCwdRepos()
+	if err != nil {
+		t.Fatalf("LoadCwdRepos: %v", err)
+	}
+	if entries["/work/widget"] != repoID {
+		t.Errorf("normal session cwd mapping = %q, want %q", entries["/work/widget"], repoID)
+	}
+	if got, ok := entries["/work/.worktrees/agent-x"]; ok {
+		t.Errorf("inherited child worktree cwd should not be persisted to cwd_repos; got %q", got)
+	}
+}
+
 func TestSaveSession_InsertAndUpdate(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
