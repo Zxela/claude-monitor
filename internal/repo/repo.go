@@ -10,6 +10,11 @@ type Repo struct {
 	// runtime-only hint used to upgrade an earlier fallback resolution; it is
 	// NOT persisted.
 	FromGit bool
+	// Toplevel is the absolute git working-tree root for this resolution, when
+	// known (empty for non-git fallbacks). It is a runtime-only hint used to
+	// decide whether a later resolution refers to the SAME repository as the
+	// session's pinned one (start-pin upgrade), and is NOT persisted.
+	Toplevel string
 }
 
 // Resolution-authority ranks, used to decide whether a later resolution should

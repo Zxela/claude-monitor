@@ -62,6 +62,7 @@ type Session struct {
 	AgentKind      string           `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
 	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
 	repoSourceRank int              `json:"-"` // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
+	repoToplevel   string           `json:"-"` // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
 }
 
 // RepoSourceRank reports the resolution-authority rank of the current RepoID
@@ -70,6 +71,14 @@ func (s *Session) RepoSourceRank() int { return s.repoSourceRank }
 
 // SetRepoSourceRank records the resolution-authority rank of the current RepoID.
 func (s *Session) SetRepoSourceRank(rank int) { s.repoSourceRank = rank }
+
+// RepoToplevel reports the git working-tree root that the current RepoID was
+// resolved from (empty for non-git fallbacks). Used to decide whether a later
+// resolution refers to the SAME repository as the start-pinned one.
+func (s *Session) RepoToplevel() string { return s.repoToplevel }
+
+// SetRepoToplevel records the git working-tree root of the current RepoID.
+func (s *Session) SetRepoToplevel(toplevel string) { s.repoToplevel = toplevel }
 
 // RepoFromGit reports whether the current RepoID came from an authoritative git
 // resolution (git remote or toplevel), as opposed to a non-git fallback.

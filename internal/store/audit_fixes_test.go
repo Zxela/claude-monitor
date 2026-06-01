@@ -291,14 +291,25 @@ func TestMigration015_RecomputeAggregates(t *testing.T) {
 		t.Fatalf("corrupt session failed: %v", err)
 	}
 
-	// Re-run migration 015 (and 016) by rolling back to <15 then re-applying.
-	if _, err := migrations.RunDown(db.db); err != nil { // 16 -> 15
-		t.Fatalf("RunDown 16 failed: %v", err)
+	// Re-run migration 015 by rolling the version back below 15 (rolling back
+	// every migration stacked on top of it generically, so this stays valid as
+	// later migrations are added) then re-applying to head.
+	rollbackBelow15 := func() {
+		for {
+			v, err := migrations.GetVersion(db.db)
+			if err != nil {
+				t.Fatalf("GetVersion failed: %v", err)
+			}
+			if v < 15 {
+				return
+			}
+			if _, err := migrations.RunDown(db.db); err != nil {
+				t.Fatalf("RunDown from v%d failed: %v", v, err)
+			}
+		}
 	}
-	if _, err := migrations.RunDown(db.db); err != nil { // 15 -> 14
-		t.Fatalf("RunDown 15 failed: %v", err)
-	}
-	if _, err := migrations.RunUp(db.db); err != nil { // re-applies 15 + 16
+	rollbackBelow15()
+	if _, err := migrations.RunUp(db.db); err != nil { // re-applies 15 and everything above
 		t.Fatalf("RunUp failed: %v", err)
 	}
 
@@ -321,12 +332,7 @@ func TestMigration015_RecomputeAggregates(t *testing.T) {
 	}
 
 	// Idempotency: running the recompute SQL again must not change the values.
-	if _, err := migrations.RunDown(db.db); err != nil {
-		t.Fatalf("RunDown(idempotency) failed: %v", err)
-	}
-	if _, err := migrations.RunDown(db.db); err != nil {
-		t.Fatalf("RunDown(idempotency) failed: %v", err)
-	}
+	rollbackBelow15()
 	if _, err := migrations.RunUp(db.db); err != nil {
 		t.Fatalf("RunUp(idempotency) failed: %v", err)
 	}

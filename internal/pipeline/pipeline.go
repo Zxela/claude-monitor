@@ -91,10 +91,23 @@ func (p *Pipeline) resolvePendingLinks() {
 	p.linkMu.Lock()
 	defer p.linkMu.Unlock()
 	for childID, parentUUID := range p.pendingParentLinks {
-		if _, ok := p.sessions.Get(parentUUID); ok {
+		// Get returns a snapshot copy, so reading parent.RepoID here is safe and
+		// avoids re-entering the store lock from inside the Upsert closure below.
+		if parent, ok := p.sessions.Get(parentUUID); ok {
+			parentRepoID := parent.RepoID
 			p.sessions.Upsert(childID, func(s *session.Session) {
 				if s.ParentID == "" {
 					s.ParentID = parentUUID
+				}
+				// Back-fill repo inheritance for the child-before-parent ordering:
+				// when the child arrived first, its initial event resolved its own
+				// (worktree) cwd to a phantom repo because the parent was unknown.
+				// Now that the parent exists, re-point the child at the parent's
+				// project, mirroring applyRepoResolution's rule 1.
+				if parentRepoID != "" && s.RepoID != parentRepoID {
+					s.RepoID = parentRepoID
+					s.SetRepoSourceRank(repo.SourceGitRemote)
+					s.SetRepoToplevel("")
 				}
 			})
 			p.sessions.LinkChild(parentUUID, childID)
@@ -180,9 +193,16 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	// otherwise fall back to path inference. A "" result means defer to later.
 	resolvedParentID := p.resolveParentID(event, ev)
 
+	// Pre-resolve the parent session's repo_id (also outside the Upsert lock to
+	// avoid re-entering the session-store lock). Child sessions inherit their
+	// parent's project so subagents running in git worktrees don't mint phantom
+	// "agent-<hash>" repos from their own worktree cwd. Empty means "unknown
+	// parent" — fall back to normal cwd resolution.
+	parentRepoID := p.lookupParentRepoID(resolvedParentID)
+
 	// Stage 3: Apply Session
 	sess := p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
-		p.applyEvent(s, event, ev, resolvedRepo, resolvedParentID)
+		p.applyEvent(s, event, ev, resolvedRepo, resolvedParentID, parentRepoID)
 	})
 
 	// Link child to parent
@@ -273,8 +293,10 @@ func (p *Pipeline) flushLoop() {
 // applyEvent updates session state from a parsed event.
 // It delegates to focused helpers for each concern.
 // resolvedParentID is the pre-computed parent session ID (may be empty).
-func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo, resolvedParentID string) {
-	p.applyRepoResolution(s, msg, r)
+// parentRepoID is the pre-resolved repo_id of that parent (may be empty); when
+// set, a child session inherits it instead of resolving its own (worktree) cwd.
+func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo, resolvedParentID, parentRepoID string) {
+	p.applyRepoResolution(s, msg, r, parentRepoID)
 	p.applySessionMeta(s, msg, ev)
 	p.applyParentDetection(s, msg, ev, resolvedParentID)
 	p.applyWorkflowIdentity(s, ev)
@@ -297,30 +319,65 @@ func (p *Pipeline) applyWorkflowIdentity(s *session.Session, ev watcher.Event) {
 	}
 }
 
-// applyRepoResolution persists the resolved repo and copies CWD/branch/model metadata.
-func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo) {
-	if r != nil {
+// applyRepoResolution attributes the session's repo_id and copies branch/model
+// metadata. Three rules, in priority order:
+//
+//  1. Parent inheritance: a child session (one with a known parent) inherits the
+//     parent's repo_id verbatim, instead of resolving its own cwd. This stops
+//     subagents running in git worktrees from minting phantom "agent-<hash>"
+//     repos and fragmenting the parent run across fake projects.
+//  2. Start-pin: once a (non-child) session has a repo_id, it stays pinned to
+//     the START project. A later resolution may only upgrade the resolution
+//     QUALITY of the SAME repository (e.g. a toplevel-basename id replaced by the
+//     git-remote id for that same checkout) — never switch to a different repo,
+//     even if that different repo resolved at a higher source rank.
+//  3. CWD is set once (session start) and never overwritten — see below.
+func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo, parentRepoID string) {
+	// Rule 1: inherit the parent's project. parentRepoID is non-empty only when
+	// this session has a known parent with a resolved repo_id. Set-once so we
+	// don't thrash if the parent's id later changes; the child stays pinned to
+	// whatever the parent was attributed to at first sight.
+	if parentRepoID != "" {
+		if s.RepoID != parentRepoID {
+			s.RepoID = parentRepoID
+			// Mark as git-remote authority: an inherited id is as trustworthy as
+			// the parent's and must not be downgraded by the child's own cwd.
+			s.SetRepoSourceRank(repo.SourceGitRemote)
+			s.SetRepoToplevel("")
+		}
+	} else if r != nil {
 		newRank := r.SourceRank()
-		// First resolution for this session.
 		if s.RepoID == "" {
+			// First resolution for this session: pin to the START project.
 			s.RepoID = r.ID
 			s.SetRepoSourceRank(newRank)
+			s.SetRepoToplevel(r.Toplevel)
 			if err := p.db.UpsertRepo(r); err != nil {
 				log.Printf("upsert repo error: %v", err)
 			}
-		} else if r.ID != s.RepoID && newRank > s.RepoSourceRank() {
-			// Upgrade to a strictly more authoritative resolution: a non-git
-			// fallback can be upgraded by a git resolution, and a git toplevel
-			// basename can be upgraded by a git remote origin. Never downgrades.
+		} else if r.ID != s.RepoID && newRank > s.RepoSourceRank() && sameRepo(s, r, msg.CWD) {
+			// Upgrade ONLY when the new, higher-authority resolution refers to the
+			// SAME repository as the pinned one (e.g. the start cwd resolved to a
+			// toplevel basename because the git-remote lookup timed out, and a
+			// later event for the same checkout resolves the remote origin id).
+			// A higher-rank resolution for a DIFFERENT project (e.g. cd'ing into
+			// another repo) is intentionally ignored so the project stays pinned
+			// to where the session started. When in doubt, keep the original.
 			s.RepoID = r.ID
 			s.SetRepoSourceRank(newRank)
+			s.SetRepoToplevel(r.Toplevel)
 			if err := p.db.UpsertRepo(r); err != nil {
 				log.Printf("upsert repo error: %v", err)
 			}
 		}
 	}
 
-	if msg.CWD != "" {
+	// Rule 3: CWD reflects session START, not the latest event. Set it once (the
+	// first event that carries a cwd) and never overwrite it, so a card's shown
+	// directory cannot drift away from the project it's attributed to (e.g. after
+	// a `cd`). Repo resolution above still uses the per-event msg.CWD, so this
+	// does not affect attribution.
+	if msg.CWD != "" && s.CWD == "" {
 		s.CWD = msg.CWD
 	}
 	if msg.GitBranch != "" {
@@ -339,6 +396,53 @@ func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r 
 	if msg.Entrypoint != "" && s.Entrypoint == "" {
 		s.Entrypoint = msg.Entrypoint
 	}
+}
+
+// sameRepo reports whether resolution r refers to the SAME repository the
+// session is already pinned to, so a higher-authority resolution may upgrade the
+// id in place (rather than switch projects). newCWD is the cwd r was resolved
+// from. It is deliberately conservative — it returns true only on positive
+// evidence, so an ambiguous case keeps the original pinned repo.
+//
+// Evidence, strongest first:
+//   - identical git working-tree roots (the pinned and new resolutions are in
+//     the same checkout), or one toplevel nested within the other (e.g. the
+//     start cwd was a subdir of the new toplevel, or vice versa); or
+//   - the session has no recorded toplevel (its pin came from a non-git fallback,
+//     i.e. git was unavailable at start) but the new resolution's toplevel
+//     contains the session's START cwd. That is the headline upgrade case: the
+//     start cwd's git-remote lookup timed out → basename fallback, and a later
+//     event for the SAME directory resolves the real git id.
+//
+// pathContains compares on a trailing separator so "/repo" is not treated as a
+// prefix of "/repo2".
+func sameRepo(s *session.Session, r *repo.Repo, newCWD string) bool {
+	if r.Toplevel == "" {
+		// No git root on the incoming resolution — no positive same-repo evidence.
+		return false
+	}
+	if top := s.RepoToplevel(); top != "" {
+		// Both sides are git-backed: compare working-tree roots directly.
+		return pathContains(top, r.Toplevel) || pathContains(r.Toplevel, top)
+	}
+	// The pin is a non-git fallback (no toplevel). Use the session's start cwd:
+	// if it lives inside the incoming resolution's working tree, this is a
+	// higher-confidence resolution of the SAME directory the session started in.
+	if s.CWD != "" {
+		return pathContains(r.Toplevel, s.CWD)
+	}
+	// Last resort: the cwd this resolution came from is the start cwd (first
+	// event), so a containment check against it is still same-directory evidence.
+	return newCWD != "" && pathContains(r.Toplevel, newCWD)
+}
+
+// pathContains reports whether parent is an ancestor of (or equal to) child,
+// comparing on a trailing separator so "/repo" is not a prefix of "/repo2".
+func pathContains(parent, child string) bool {
+	if parent == child {
+		return true
+	}
+	return strings.HasPrefix(child+string(filepath.Separator), parent+string(filepath.Separator))
 }
 
 // applySessionMeta updates session naming, source file tracking, and task description.
@@ -440,6 +544,25 @@ func (p *Pipeline) resolveParentID(msg *parser.Event, ev watcher.Event) string {
 		return parentSessionIDFromPath(ev.FilePath)
 	}
 
+	return ""
+}
+
+// lookupParentRepoID returns the parent session's repo_id so a child can inherit
+// it, or "" if there is no (known) parent. It checks the live session store
+// first (the common case: parent processed before its subagents) and falls back
+// to the persisted sessions table (e.g. the parent was flushed in an earlier run
+// or is being replayed out of order). MUST be called OUTSIDE the session-store
+// Upsert lock — Get takes the store's RLock and would otherwise deadlock.
+func (p *Pipeline) lookupParentRepoID(parentID string) string {
+	if parentID == "" {
+		return ""
+	}
+	if parent, ok := p.sessions.Get(parentID); ok && parent.RepoID != "" {
+		return parent.RepoID
+	}
+	if row, err := p.db.GetSession(parentID); err == nil && row != nil && row.RepoID != "" {
+		return row.RepoID
+	}
 	return ""
 }
 
