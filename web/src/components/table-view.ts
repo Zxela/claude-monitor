@@ -4,7 +4,15 @@ import { state, subscribe, update } from '../state';
 import { sessionDisplayName, formatDurationSecs } from '../utils';
 import '../styles/views.css';
 
-type SortKey = 'name' | 'status' | 'cost' | 'tokens' | 'messages' | 'errors' | 'duration' | 'lastActive';
+type SortKey =
+  | 'name'
+  | 'status'
+  | 'cost'
+  | 'tokens'
+  | 'messages'
+  | 'errors'
+  | 'duration'
+  | 'lastActive';
 type SortDir = 'asc' | 'desc';
 
 let container: HTMLElement | null = null;
@@ -30,14 +38,9 @@ export function render(mount: HTMLElement): void {
 function getAllSessions(): Session[] {
   const g = state.grouped;
   if (!g) return [];
-  return [
-    ...g.active,
-    ...g.lastHour,
-    ...g.today,
-    ...g.yesterday,
-    ...g.thisWeek,
-    ...g.older,
-  ].filter((s) => !s.parentId); // top-level only
+  return [...g.active, ...g.lastHour, ...g.today, ...g.yesterday, ...g.thisWeek, ...g.older].filter(
+    (s) => !s.parentId,
+  ); // top-level only
 }
 
 // Duration in seconds, measured startedAt -> lastActive (matching session cards
@@ -67,7 +70,7 @@ function sortSessions(sessions: Session[]): Session[] {
         cmp = a.totalCost - b.totalCost;
         break;
       case 'tokens':
-        cmp = (a.inputTokens + a.outputTokens) - (b.inputTokens + b.outputTokens);
+        cmp = a.inputTokens + a.outputTokens - (b.inputTokens + b.outputTokens);
         break;
       case 'messages':
         cmp = a.messageCount - b.messageCount;
@@ -110,13 +113,20 @@ function renderTable(): void {
     return;
   }
 
-  // Recreate the node if it was detached: the feed panel wipes #feed-mount when
-  // other views render into it, leaving a stale tableEl whose parentElement is no
-  // longer `container`. Without this guard the table stays permanently blank
-  // after navigating away and back.
-  if (!tableEl || tableEl.parentElement !== container) {
+  // Take over the shared #feed-mount. Two cases to handle:
+  //  1. Clear-on-show views (feed/graph/history/timeline) wipe #feed-mount when
+  //     they render, leaving a stale tableEl whose parentElement is no longer
+  //     `container` — without recreating it the table stays permanently blank.
+  //  2. Those views also leave their own DOM behind when navigated away from, so
+  //     a stale full-height sibling (e.g. the graph canvas) would otherwise sit
+  //     above the table and push it below the fold. Clear the mount so the table
+  //     is the sole occupant. No-op once the table is already the only child.
+  if (!tableEl) {
     tableEl = document.createElement('div');
     tableEl.className = 'table-view';
+  }
+  if (tableEl.parentElement !== container || container.childElementCount !== 1) {
+    container.innerHTML = '';
     container.appendChild(tableEl);
   }
 
@@ -148,7 +158,7 @@ function renderTable(): void {
       (c) =>
         `<th data-sort="${c.key}" style="text-align:${c.align ?? 'left'};cursor:pointer;user-select:none;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:10px;letter-spacing:0.5px;white-space:nowrap">
           ${c.label} ${arrowFor(c.key)}
-        </th>`
+        </th>`,
     )
     .join('');
 
@@ -203,8 +213,12 @@ function renderTable(): void {
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
     th.addEventListener('click', () => handleSort(th.dataset.sort as SortKey));
-    th.addEventListener('mouseenter', () => { th.style.color = 'var(--text)'; });
-    th.addEventListener('mouseleave', () => { th.style.color = sortKey === th.dataset.sort ? 'var(--cyan)' : 'var(--text-dim)'; });
+    th.addEventListener('mouseenter', () => {
+      th.style.color = 'var(--text)';
+    });
+    th.addEventListener('mouseleave', () => {
+      th.style.color = sortKey === th.dataset.sort ? 'var(--cyan)' : 'var(--text-dim)';
+    });
   });
 
   // Row click: select session

@@ -49,11 +49,15 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 function show(): void {
   if (!container) return;
 
-  // Remove any existing root
-  if (root) {
-    root.remove();
-    root = null;
-  }
+  // Take over the shared #feed-mount. Other views (graph, feed, timeline,
+  // history) leave their DOM behind when navigated away from — they rely on the
+  // next full-clear render to wipe the mount. Clear it here so a stale
+  // full-height sibling (e.g. the graph canvas) can't sit above us and push the
+  // analytics view below the fold. destroyCards() first so Chart.js instances
+  // on canvases we're about to detach are torn down rather than leaked.
+  destroyCards();
+  container.innerHTML = '';
+  root = null;
 
   root = document.createElement('div');
   root.className = 'analytics-view';

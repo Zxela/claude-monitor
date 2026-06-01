@@ -448,7 +448,10 @@
 
 /* Sequence view */
 .sequence-list {
-  padding: 8px 0;
+  /* Top padding clears the absolutely-positioned .graph-mode-toggle (top:8px,
+     ~20px tall) so the first row's right-aligned cost/status isn't hidden
+     beneath it. */
+  padding: 40px 0 8px;
   overflow-y: auto;
   height: 100%;
 }
