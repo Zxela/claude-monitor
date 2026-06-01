@@ -1,6 +1,6 @@
 import { Chart, COLORS, DARK_THEME } from '../chart-config';
-import { formatTokens } from '../utils';
-import type { TrendResult } from '../types';
+import { formatTokens, escapeHtml } from '../utils';
+import type { TrendResult, ToolUsage, ToolUsageEntry } from '../types';
 
 type CardState = Record<string, boolean>;
 type OnToggle = (cardId: string, expanded: boolean) => void;
@@ -418,4 +418,112 @@ export function destroyCards(): void {
     chart.destroy();
   }
   charts.clear();
+}
+
+// SKILL_COLOR matches the feed's skill accent so the surfaces feel related.
+const SKILL_COLOR = '#e879f9';
+const TOOL_COLOR = COLORS.yellow;
+
+/** Render the (non-chart) "Tool & Skill Usage" card: two ranked lists of
+ *  invocation counts with error counts, skills broken out separately. Appended
+ *  after the chart cards by analytics-view; manages its own collapse toggle. */
+export function renderToolUsageCard(
+  container: HTMLElement,
+  usage: ToolUsage | null,
+  expanded: boolean,
+  onToggle: (expanded: boolean) => void,
+): void {
+  const card = document.createElement('div');
+  card.className = 'analytics-card';
+  card.dataset.cardId = 'tool-skill-usage';
+
+  const header = document.createElement('div');
+  header.className = 'analytics-card-header';
+  header.setAttribute('role', 'button');
+  header.setAttribute('tabindex', '0');
+  header.setAttribute('aria-expanded', String(expanded));
+  header.innerHTML = `
+    <span class="analytics-card-toggle">${expanded ? '▼' : '▶'}</span>
+    <span class="analytics-card-title">Tool &amp; Skill Usage</span>
+    <span class="analytics-card-subtitle">invocations &amp; errors</span>
+  `;
+
+  const body = document.createElement('div');
+  body.className = 'analytics-card-body';
+  body.style.display = expanded ? '' : 'none';
+  body.appendChild(buildToolUsageBody(usage));
+
+  card.appendChild(header);
+  card.appendChild(body);
+  container.appendChild(card);
+
+  header.addEventListener('click', () => {
+    const isExpanded = body.style.display !== 'none';
+    body.style.display = isExpanded ? 'none' : '';
+    header.querySelector('.analytics-card-toggle')!.textContent = isExpanded ? '▶' : '▼';
+    header.setAttribute('aria-expanded', String(!isExpanded));
+    onToggle(!isExpanded);
+  });
+  header.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      header.click();
+    }
+  });
+}
+
+function buildToolUsageBody(usage: ToolUsage | null): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'tool-usage';
+  const skills = usage?.skills ?? [];
+  const tools = usage?.tools ?? [];
+  if (skills.length === 0 && tools.length === 0) {
+    wrap.innerHTML = '<div class="analytics-empty">No tool or skill activity in this period</div>';
+    return wrap;
+  }
+  wrap.appendChild(buildUsageSection('Skills', skills, SKILL_COLOR, 'No skills invoked'));
+  wrap.appendChild(buildUsageSection('Tools', tools, TOOL_COLOR, 'No tools used'));
+  return wrap;
+}
+
+function buildUsageSection(
+  title: string,
+  entries: ToolUsageEntry[],
+  color: string,
+  emptyText: string,
+): HTMLElement {
+  const section = document.createElement('div');
+  section.className = 'tool-usage-section';
+
+  const heading = document.createElement('div');
+  heading.className = 'tool-usage-section-title';
+  heading.textContent = `${title} (${entries.length})`;
+  section.appendChild(heading);
+
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'tool-usage-empty';
+    empty.textContent = emptyText;
+    section.appendChild(empty);
+    return section;
+  }
+
+  const max = Math.max(...entries.map((e) => e.uses), 1);
+  for (const e of entries) {
+    const row = document.createElement('div');
+    row.className = 'tool-usage-row';
+    // Floor at 2% so a 1-use bar is still visible.
+    const pct = Math.max(2, Math.round((e.uses / max) * 100));
+    const errBadge =
+      e.errors > 0
+        ? `<span class="tool-usage-err" title="${e.errors} invocation(s) errored">${e.errors} err</span>`
+        : '';
+    row.innerHTML =
+      `<span class="tool-usage-name" title="${escapeHtml(e.name)}">${escapeHtml(e.name)}</span>` +
+      `<span class="tool-usage-bar-wrap"><span class="tool-usage-bar" style="width:${pct}%;background:${color}"></span></span>` +
+      `<span class="tool-usage-count">${e.uses}</span>` +
+      errBadge;
+    section.appendChild(row);
+  }
+  return section;
 }

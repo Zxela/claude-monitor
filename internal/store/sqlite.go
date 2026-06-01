@@ -826,6 +826,122 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	return r, nil
 }
 
+// ToolUsageEntry is one tool or skill with its invocation and error counts.
+type ToolUsageEntry struct {
+	Name   string `json:"name"`   // tool name (e.g. "Bash") or skill name (e.g. "commit")
+	Uses   int    `json:"uses"`   // number of tool_use invocations
+	Errors int    `json:"errors"` // invocations whose tool_result reported an error
+}
+
+// ToolUsageResult is the tool/skill usage breakdown for a window/repo scope.
+// Tools are grouped by tool_name (excluding "Skill"); Skills are the "Skill"
+// tool's invocations grouped by the invoked skill name (tool_detail). Both
+// lists are ordered by Uses descending.
+type ToolUsageResult struct {
+	Tools  []ToolUsageEntry `json:"tools"`
+	Skills []ToolUsageEntry `json:"skills"`
+}
+
+// toolUsageLimit caps each list so a pathological history can't return thousands
+// of distinct tool/skill rows; the long tail is not useful in the breakdown.
+const toolUsageLimit = 50
+
+// ToolUsage returns the tool- and skill-invocation breakdown for sessions whose
+// start falls within the window (since; zero = lifetime) and optional repo.
+//
+// Invocations are counted from tool_use events. Errors are attributed by joining
+// each tool_use to its tool_result via tool_use_id/for_tool_use_id and counting
+// the ones flagged is_error — is_error lives on the result row, never on the
+// tool_use row, so the self-join is required. Scoping is by the OWNING session's
+// started_at/repo_id, matching AggregateStats/TrendData semantics.
+func (d *DB) ToolUsage(since time.Time, repoID string) (*ToolUsageResult, error) {
+	tools, err := d.toolUsageGrouped("u.tool_name", "u.tool_name != '' AND u.tool_name != 'Skill'", since, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("ToolUsage tools: %w", err)
+	}
+	skills, err := d.toolUsageGrouped("u.tool_detail", "u.tool_name = 'Skill' AND COALESCE(u.tool_detail,'') != ''", since, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("ToolUsage skills: %w", err)
+	}
+	return &ToolUsageResult{Tools: tools, Skills: skills}, nil
+}
+
+// toolUsageGrouped runs the shared tool/skill aggregation. keyCol is the GROUP BY
+// key (tool_name for tools, tool_detail for skills); rowFilter selects which
+// tool_use rows to include. since/repoID scope by the owning session.
+func (d *DB) toolUsageGrouped(keyCol, rowFilter string, since time.Time, repoID string) ([]ToolUsageEntry, error) {
+	conds := []string{rowFilter}
+	var args []interface{}
+	if !since.IsZero() {
+		// started_at is UTC RFC3339 (…Z); format the boundary in UTC so the
+		// lexical TEXT comparison is correct (see AggregateStats).
+		conds = append(conds, "s.started_at >= ?")
+		args = append(args, since.UTC().Format(time.RFC3339))
+	}
+	if repoID != "" {
+		conds = append(conds, "s.repo_id = ?")
+		args = append(args, repoID)
+	}
+	// COUNT(DISTINCT u.id): the LEFT JOIN can fan out a tool_use into several
+	// result rows, so dedupe by tool_use event id for both uses and errors.
+	q := `SELECT ` + keyCol + ` AS k,
+		COUNT(DISTINCT u.id) AS uses,
+		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
+		FROM events u
+		JOIN sessions s ON s.id = u.session_id
+		LEFT JOIN events r ON r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
+		WHERE ` + strings.Join(conds, " AND ") + `
+		GROUP BY k
+		ORDER BY uses DESC, k
+		LIMIT ?`
+	args = append(args, toolUsageLimit)
+
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ToolUsageEntry, 0)
+	for rows.Next() {
+		var e ToolUsageEntry
+		if err := rows.Scan(&e.Name, &e.Uses, &e.Errors); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// SessionSkills returns, for every session that invoked at least one skill, the
+// skills it invoked with per-skill use/error counts. Skill invocations are
+// sparse, so the whole map is loaded in one query (no per-session round-trips);
+// History uses it to badge rows. Errors are attributed via the tool_use→
+// tool_result self-join (see ToolUsage).
+func (d *DB) SessionSkills() (map[string][]ToolUsageEntry, error) {
+	rows, err := d.db.Query(`SELECT u.session_id, u.tool_detail,
+		COUNT(DISTINCT u.id) AS uses,
+		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
+		FROM events u
+		LEFT JOIN events r ON r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
+		WHERE u.tool_name = 'Skill' AND COALESCE(u.tool_detail,'') != ''
+		GROUP BY u.session_id, u.tool_detail
+		ORDER BY u.session_id, uses DESC, u.tool_detail`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]ToolUsageEntry)
+	for rows.Next() {
+		var sid string
+		var e ToolUsageEntry
+		if err := rows.Scan(&sid, &e.Name, &e.Uses, &e.Errors); err != nil {
+			return nil, err
+		}
+		out[sid] = append(out[sid], e)
+	}
+	return out, rows.Err()
+}
+
 // trendParams holds the parsed query parameters shared across TrendData helpers.
 //
 // windowWhere = all rows in window (used for cost/token SUMs, so each dollar is

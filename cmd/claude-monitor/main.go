@@ -637,6 +637,8 @@ Examples:
 	mux.HandleFunc("GET /api/sessions/{id}", handleSessionByID(sessionStore, historyDB))
 	mux.HandleFunc("GET /api/stats", handleStats(sessionStore, historyDB, fw))
 	mux.HandleFunc("GET /api/stats/trends", handleStatsTrends(historyDB))
+	mux.HandleFunc("GET /api/stats/tools", handleToolUsage(historyDB))
+	mux.HandleFunc("GET /api/skills/sessions", handleSessionSkills(historyDB))
 	mux.HandleFunc("GET /api/repos", handleRepos(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/stats", handleRepoStats(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/sessions", handleRepoSessions(historyDB))

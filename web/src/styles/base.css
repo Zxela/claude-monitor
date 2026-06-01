@@ -395,6 +395,20 @@ body {
   font-style: italic;
 }
 
+/* Skill badge — fuchsia to match the feed's skill accent, so sessions that
+   invoked skills are spottable at a glance in History. */
+.history-skill-badge {
+  font-size: 10px;
+  color: #e879f9;
+  background: rgba(232, 121, 249, 0.12);
+  border: 1px solid rgba(232, 121, 249, 0.35);
+  border-radius: 3px;
+  padding: 0 5px;
+  margin-left: 8px;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .history-workflow-band {
   background: var(--bg-hover, rgba(255, 255, 255, 0.02));
 }

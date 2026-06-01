@@ -35,6 +35,7 @@ const FILTER_TYPES = [
   'assistant',
   'tool_use',
   'tool_result',
+  'skill',
   'agent',
   'command',
   'hook',

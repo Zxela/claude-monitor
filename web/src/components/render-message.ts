@@ -10,6 +10,7 @@ type MessageType =
   | 'user'
   | 'assistant'
   | 'tool_use'
+  | 'skill'
   | 'tool_result'
   | 'agent'
   | 'hook'
@@ -48,10 +49,16 @@ export function detectType(msg: Event): MessageType {
     return 'command';
   // Agent tool calls show as 'agent' type, not 'tool_use'
   if (msg.isAgent && msg.role === 'assistant') return 'agent';
+  // Skill invocations get their own type so they stand out from ordinary tool
+  // calls — a skill otherwise renders identically to a Bash/Read line and is
+  // easy to miss (its only other signal is the user turn that follows it).
+  if (msg.toolName === 'Skill' && msg.role === 'assistant') return 'skill';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
-  // Fallback: detect agent/tool_use from content preview when fields weren't persisted (streaming race)
+  // Fallback: detect agent/skill/tool_use from content preview when fields weren't persisted (streaming race)
   if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[agent'))
     return 'agent';
+  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[skill:'))
+    return 'skill';
   if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[tool: '))
     return 'tool_use';
   if (msg.forToolUseId) return 'tool_result';
@@ -132,6 +139,18 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
     content = display ? `Agent: ${truncate(display, 80)}` : 'Agent';
     contentClass = 'tool';
     fullContent = rawText || detail;
+  } else if (type === 'skill') {
+    // High-signal: surface the skill name prominently. toolDetail holds the skill
+    // name; fall back to parsing the "[skill: x]" preview (streaming race).
+    let skillName = detail;
+    if (!skillName) {
+      const m = rawText.match(/^\[skill:\s*([^\]]+)\]/);
+      if (m) skillName = m[1].trim();
+    }
+    content = skillName ? `✦ ${skillName}` : '✦ skill';
+    contentClass = 'skill';
+    // Expand reveals the full Skill tool input (skill name + args).
+    fullContent = formatToolExpand('Skill', fullText) || detail || rawText;
   } else if (type === 'tool_use') {
     // Extract tool name from content preview if toolName field is missing (streaming race)
     let name = msg.toolName || '';

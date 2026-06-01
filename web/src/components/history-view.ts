@@ -1,8 +1,8 @@
 // web/src/components/history-view.ts
-import type { Session } from '../types';
+import type { Session, SessionSkills } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
-import { fetchSessions } from '../api';
+import { fetchSessions, fetchSessionSkills } from '../api';
 import { formatDurationSecs, formatTokens, effectiveInputTokens } from '../utils';
 import '../styles/views.css';
 
@@ -37,6 +37,11 @@ const seenIds = new Set<string>();
 // Populated by groupRows() and consumed by the Cost column + its sort so the
 // most expensive session trees rank correctly and match the same-row badge.
 const treeCostMap = new Map<string, number>();
+
+// Sparse map of sessionID → skills invoked, loaded once. Used to badge the rows
+// whose sessions invoked skills so they stand out in History.
+let sessionSkills: SessionSkills = {};
+let skillsLoaded = false;
 
 type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
 
@@ -146,6 +151,19 @@ async function loadData(append = false): Promise<void> {
     reachedEnd = false;
     seenIds.clear();
     data = [];
+  }
+  // Load the sparse session→skills map once (fire-and-forget): it's small and
+  // all-time, so it badges rows across every page. Re-render when it arrives.
+  if (!append && !skillsLoaded) {
+    skillsLoaded = true;
+    fetchSessionSkills()
+      .then((m) => {
+        sessionSkills = m;
+        if (state.view === 'history') show();
+      })
+      .catch(() => {
+        /* non-fatal: rows simply render without skill badges */
+      });
   }
   try {
     const raw = await fetchSessions(PAGE, offset);
@@ -489,6 +507,21 @@ function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
     if (col.key === 'session') td.title = row.taskDescription || '';
     if (col.key === 'project') td.title = row.repoId || row.cwd || '';
     tr.appendChild(td);
+  }
+
+  // Skill badge: this session invoked one or more skills — surface it so skill
+  // runs are discoverable from History (they are otherwise buried in the feed).
+  const skills = sessionSkills[row.id];
+  if (skills && skills.length > 0) {
+    const total = skills.reduce((sum, s) => sum + s.uses, 0);
+    const nameCell = tr.children[1] as HTMLElement;
+    const badge = document.createElement('span');
+    badge.className = 'history-skill-badge';
+    badge.textContent = `✦ ${total}`;
+    badge.title =
+      'Skills invoked:\n' +
+      skills.map((s) => `${s.name} ×${s.uses}${s.errors ? ` (${s.errors} err)` : ''}`).join('\n');
+    nameCell.appendChild(badge);
   }
   tr.setAttribute('tabindex', '0');
   tr.setAttribute('role', 'button');

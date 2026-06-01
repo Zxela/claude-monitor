@@ -308,6 +308,52 @@ func handleStatsTrends(historyDB *store.DB) http.HandlerFunc {
 	}
 }
 
+// handleToolUsage serves GET /api/stats/tools — tool- and skill-invocation
+// counts (with error counts) for the given window and optional repo, scoped by
+// the owning session. Window vocabulary matches /api/stats/trends.
+func handleToolUsage(historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		var since time.Time
+		switch window := r.URL.Query().Get("window"); window {
+		case "24h":
+			since = now.Add(-24 * time.Hour)
+		case "7d":
+			since = now.AddDate(0, 0, -7)
+		case "30d":
+			since = now.AddDate(0, 0, -30)
+		case "", "all":
+			// lifetime aggregate (since stays zero)
+		default:
+			writeJSONError(w, "window must be 24h, 7d, 30d, or all", http.StatusBadRequest)
+			return
+		}
+
+		usage, err := historyDB.ToolUsage(since, r.URL.Query().Get("repo"))
+		if err != nil {
+			log.Printf("tool usage error: %v", err)
+			writeJSONError(w, "failed to compute tool usage", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, usage)
+	}
+}
+
+// handleSessionSkills serves GET /api/skills/sessions — a sparse map of
+// sessionID → skills invoked (with use/error counts), used by History to badge
+// the rows whose sessions invoked skills.
+func handleSessionSkills(historyDB *store.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m, err := historyDB.SessionSkills()
+		if err != nil {
+			log.Printf("session skills error: %v", err)
+			writeJSONError(w, "failed to load session skills", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, m)
+	}
+}
+
 // handleRepos serves GET /api/repos.
 func handleRepos(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
