@@ -163,3 +163,45 @@ func TestToolUsageAndSessionSkills(t *testing.T) {
 		t.Errorf("map should be sparse — only sessions with skills present")
 	}
 }
+
+// TestToolUsage_EmptyToolUseIdNoPhantomErrors guards the self-join: a tool_use
+// with an empty tool_use_id must NOT join to empty-for_tool_use_id result rows
+// (ids are stored as "" not NULL), which would otherwise attribute phantom
+// errors. The use is still counted; only its error attribution is suppressed.
+func TestToolUsage_EmptyToolUseIdNoPhantomErrors(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	if _, err := db.db.Exec(`INSERT INTO sessions (id, started_at) VALUES ('se', '2026-05-31T12:00:00Z')`); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	// A Bash tool_use with NO tool_use_id, and an error result with NO
+	// for_tool_use_id in the same session. The buggy join would match them.
+	if _, err := db.db.Exec(
+		`INSERT INTO events (session_id, message_id, role, tool_name, tool_use_id, timestamp)
+		 VALUES ('se','m1','assistant','Bash','','2026-05-31T12:00:01Z')`); err != nil {
+		t.Fatalf("seed tool_use: %v", err)
+	}
+	if _, err := db.db.Exec(
+		`INSERT INTO events (session_id, message_id, role, for_tool_use_id, is_error, timestamp)
+		 VALUES ('se','m2','user','',1,'2026-05-31T12:00:02Z')`); err != nil {
+		t.Fatalf("seed tool_result: %v", err)
+	}
+
+	res, err := db.ToolUsage(time.Time{}, "")
+	if err != nil {
+		t.Fatalf("ToolUsage: %v", err)
+	}
+	var bash ToolUsageEntry
+	for _, e := range res.Tools {
+		if e.Name == "Bash" {
+			bash = e
+		}
+	}
+	if bash.Uses != 1 {
+		t.Errorf("Bash uses = %d, want 1 (the id-less tool_use is still counted)", bash.Uses)
+	}
+	if bash.Errors != 0 {
+		t.Errorf("Bash errors = %d, want 0 (empty tool_use_id must not match the empty-id error result)", bash.Errors)
+	}
+}

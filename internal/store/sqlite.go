@@ -884,12 +884,15 @@ func (d *DB) toolUsageGrouped(keyCol, rowFilter string, since time.Time, repoID 
 	}
 	// COUNT(DISTINCT u.id): the LEFT JOIN can fan out a tool_use into several
 	// result rows, so dedupe by tool_use event id for both uses and errors.
+	// The `u.tool_use_id != ''` guard is required: ids are stored as "" (never
+	// NULL) when absent, and without it an id-less tool_use would join to every
+	// id-less tool_result in the session and attribute phantom errors.
 	q := `SELECT ` + keyCol + ` AS k,
 		COUNT(DISTINCT u.id) AS uses,
 		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
 		FROM events u
 		JOIN sessions s ON s.id = u.session_id
-		LEFT JOIN events r ON r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
+		LEFT JOIN events r ON u.tool_use_id != '' AND r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
 		WHERE ` + strings.Join(conds, " AND ") + `
 		GROUP BY k
 		ORDER BY uses DESC, k
@@ -922,7 +925,7 @@ func (d *DB) SessionSkills() (map[string][]ToolUsageEntry, error) {
 		COUNT(DISTINCT u.id) AS uses,
 		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
 		FROM events u
-		LEFT JOIN events r ON r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
+		LEFT JOIN events r ON u.tool_use_id != '' AND r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
 		WHERE u.tool_name = 'Skill' AND COALESCE(u.tool_detail,'') != ''
 		GROUP BY u.session_id, u.tool_detail
 		ORDER BY u.session_id, uses DESC, u.tool_detail`)

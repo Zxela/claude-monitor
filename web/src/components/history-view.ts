@@ -1,5 +1,5 @@
 // web/src/components/history-view.ts
-import type { Session, SessionSkills } from '../types';
+import type { Session, SessionSkills, ToolUsageEntry } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions, fetchSessionSkills } from '../api';
@@ -437,6 +437,14 @@ function show(): void {
         nameCell.title = titleLines.join('\n');
       }
     }
+
+    // Skill badge rolls up own + subagent-tree skills (mirrors the Cost column)
+    // so a COLLAPSED parent still surfaces skills its children invoked — they'd
+    // otherwise vanish with the hidden child rows.
+    addSkillBadge(
+      tr.children[1] as HTMLElement,
+      mergeSkills([sessionSkills[parent.id] ?? [], ...children.map((c) => sessionSkills[c.id] ?? [])]),
+    );
     tbody.appendChild(tr);
 
     // Child rows (if not collapsed)
@@ -456,6 +464,7 @@ function show(): void {
       }
       for (const child of children) {
         const childTr = createRow(child, true);
+        addSkillBadge(childTr.children[1] as HTMLElement, sessionSkills[child.id] ?? []);
         tbody.appendChild(childTr);
       }
     }
@@ -496,6 +505,40 @@ function show(): void {
   container.appendChild(wrapper);
 }
 
+// mergeSkills combines several per-session skill lists into one, summing uses
+// and errors per skill name, ordered by uses descending. Used to roll a parent's
+// subagent-tree skills into its row badge.
+function mergeSkills(lists: ToolUsageEntry[][]): ToolUsageEntry[] {
+  const byName = new Map<string, ToolUsageEntry>();
+  for (const list of lists) {
+    for (const s of list) {
+      const cur = byName.get(s.name);
+      if (cur) {
+        cur.uses += s.uses;
+        cur.errors += s.errors;
+      } else {
+        byName.set(s.name, { name: s.name, uses: s.uses, errors: s.errors });
+      }
+    }
+  }
+  return [...byName.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+}
+
+// addSkillBadge appends a fuchsia "✦ N" badge to a row's Session cell when the
+// row (or its subagent tree, for a parent) invoked skills, so skill activity is
+// discoverable from History instead of being buried in the feed.
+function addSkillBadge(nameCell: HTMLElement, skills: ToolUsageEntry[]): void {
+  if (skills.length === 0) return;
+  const total = skills.reduce((sum, s) => sum + s.uses, 0);
+  const badge = document.createElement('span');
+  badge.className = 'history-skill-badge';
+  badge.textContent = `✦ ${total}`;
+  badge.title =
+    'Skills invoked:\n' +
+    skills.map((s) => `${s.name} ×${s.uses}${s.errors ? ` (${s.errors} err)` : ''}`).join('\n');
+  nameCell.appendChild(badge);
+}
+
 function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
   const tr = document.createElement('tr');
   if (isChild) tr.className = 'history-child-row';
@@ -507,21 +550,6 @@ function createRow(row: Session, isChild: boolean): HTMLTableRowElement {
     if (col.key === 'session') td.title = row.taskDescription || '';
     if (col.key === 'project') td.title = row.repoId || row.cwd || '';
     tr.appendChild(td);
-  }
-
-  // Skill badge: this session invoked one or more skills — surface it so skill
-  // runs are discoverable from History (they are otherwise buried in the feed).
-  const skills = sessionSkills[row.id];
-  if (skills && skills.length > 0) {
-    const total = skills.reduce((sum, s) => sum + s.uses, 0);
-    const nameCell = tr.children[1] as HTMLElement;
-    const badge = document.createElement('span');
-    badge.className = 'history-skill-badge';
-    badge.textContent = `✦ ${total}`;
-    badge.title =
-      'Skills invoked:\n' +
-      skills.map((s) => `${s.name} ×${s.uses}${s.errors ? ` (${s.errors} err)` : ''}`).join('\n');
-    nameCell.appendChild(badge);
   }
   tr.setAttribute('tabindex', '0');
   tr.setAttribute('role', 'button');
