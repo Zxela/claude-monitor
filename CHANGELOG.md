@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.7.0](https://github.com/Zxela/claude-monitor/compare/v3.6.1...v3.7.0) (2026-06-01)
+
+
+### Features
+
+* surface skill & tool usage (feed legibility, analytics, history) ([#237](https://github.com/Zxela/claude-monitor/issues/237)) ([423b42d](https://github.com/Zxela/claude-monitor/commit/423b42d2daf279fa2f706ddddd1ee08cc8a8ddfd))
+
+
+### Bug Fixes
+
+* harden repo-attribution follow-ups from [#233](https://github.com/Zxela/claude-monitor/issues/233) review ([#236](https://github.com/Zxela/claude-monitor/issues/236)) ([7bcbeec](https://github.com/Zxela/claude-monitor/commit/7bcbeeca458bc71c8d9810a248acf362c7245a64))
+
 ## [3.6.1](https://github.com/Zxela/claude-monitor/compare/v3.6.0...v3.6.1) (2026-06-01)
 
 
