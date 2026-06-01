@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.6.1](https://github.com/Zxela/claude-monitor/compare/v3.6.0...v3.6.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* harden repo attribution — start-pin, parent inheritance, stable cwd ([#233](https://github.com/Zxela/claude-monitor/issues/233)) ([4605cf5](https://github.com/Zxela/claude-monitor/commit/4605cf52167fc19a5628dbd15f1f47689ba4ee01))
+
 ## [3.6.0](https://github.com/Zxela/claude-monitor/compare/v3.5.2...v3.6.0) (2026-05-31)
 
 
