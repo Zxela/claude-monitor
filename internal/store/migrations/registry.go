@@ -8,6 +8,16 @@ import (
 )
 
 // Migration defines a schema change with Up (apply) and Down (rollback) functions.
+//
+// Convention for Down, especially for data/seed migrations (those that write or
+// correct row VALUES rather than only altering schema):
+//   - Make Down value-gated: revert only the rows whose values this migration set,
+//     identified by the exact value it wrote (e.g. UPDATE ... WHERE col = '<seed>').
+//     Never blindly clear or reset a column on rollback — that would clobber values
+//     a later run, live ingestion, or the user legitimately changed.
+//   - A pure schema migration may use a structural Down (DROP COLUMN / DROP INDEX).
+//   - Every migration's Up→Down→Up round-trip must be covered by a test (see the
+//     migration registry tests); 013 and 014 are the worked examples to copy.
 type Migration struct {
 	Name string
 	Up   func(*sql.Tx) error

@@ -2,6 +2,7 @@ package repo
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -125,6 +126,50 @@ func TestResolve_NonGitFallback(t *testing.T) {
 	}
 	if repo.URL != "" {
 		t.Errorf("got URL %q, want empty", repo.URL)
+	}
+}
+
+func TestResolve_GitToplevelNoRemote(t *testing.T) {
+	// A git repo with NO remote origin must resolve via the git-toplevel-basename
+	// path: FromGit=true, empty URL, SourceRank == SourceGitToplevel, ID == the
+	// working-tree basename. The other git-backed tests all run inside the
+	// claude-monitor checkout, which HAS a remote, so they take the remote-origin
+	// branch and leave this toplevel-only branch otherwise uncovered.
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "local-only-repo")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	r := NewResolver()
+	got, err := r.Resolve(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "local-only-repo" {
+		t.Errorf("ID = %q, want %q (git toplevel basename)", got.ID, "local-only-repo")
+	}
+	if got.Name != "local-only-repo" {
+		t.Errorf("Name = %q, want %q", got.Name, "local-only-repo")
+	}
+	if got.URL != "" {
+		t.Errorf("URL = %q, want empty (no remote origin)", got.URL)
+	}
+	if !got.FromGit {
+		t.Error("FromGit = false, want true for a git toplevel resolution")
+	}
+	if got.SourceRank() != SourceGitToplevel {
+		t.Errorf("SourceRank() = %d, want %d (SourceGitToplevel)", got.SourceRank(), SourceGitToplevel)
+	}
+	if got.Toplevel == "" {
+		t.Error("Toplevel is empty, want the git working-tree root")
 	}
 }
 

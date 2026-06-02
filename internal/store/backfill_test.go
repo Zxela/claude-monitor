@@ -67,6 +67,15 @@ func TestClassifyAgentPath(t *testing.T) {
 			path:     "/proj/parentUUID/subagents/notes.jsonl",
 			wantKind: "",
 		},
+		{
+			// Degenerate empty-id "agent-.jsonl": must classify identically to the
+			// watcher's HasPrefix(stem, "agent-") path (subagent, full stem as id),
+			// not be skipped — the two in-sync code paths must agree.
+			name:        "degenerate empty-id agent file",
+			path:        "/proj/parentUUID/subagents/agent-.jsonl",
+			wantKind:    backfillKindSubagent,
+			wantAgentID: "agent-",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,6 +261,15 @@ func TestRunBackfillV013_Idempotent_NoClobber(t *testing.T) {
 	}
 	if res.Scanned != 1 {
 		t.Errorf("Scanned = %d, want 1 (force=true must walk even with marker set)", res.Scanned)
+	}
+	// The row is already fully populated, so the guarded UPDATE matches no row:
+	// nothing changed, so Updated must be 0 (not over-reported via RowsAffected)
+	// and the unchanged row is counted as Skipped instead.
+	if res.Updated != 0 {
+		t.Errorf("Updated = %d, want 0 (forced re-run over a populated row changes nothing)", res.Updated)
+	}
+	if res.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1 (the unchanged row)", res.Skipped)
 	}
 
 	after, err := db.GetSession("agent-AAA")

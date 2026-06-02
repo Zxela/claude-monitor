@@ -185,6 +185,17 @@ func (p *Pipeline) Process(ev watcher.Event) {
 					// Fall back to the (possibly stale) stored error_count only if
 					// the deterministic recount failed.
 					s.ErrorCount = dbSess.ErrorCount
+					// Restore the identity columns too. The main Upsert below re-stamps
+					// these from the watcher event (set-once), so they are usually
+					// re-derived on this same event — but a first post-restart line that
+					// carries no parent signal (e.g. a lone summary line) would otherwise
+					// broadcast the subagent with an empty ParentID until a later
+					// sidechain line arrives. Copying from the DB row keeps the
+					// in-memory session consistent with persisted state immediately.
+					s.ParentID = dbSess.ParentID
+					s.WorkflowID = dbSess.WorkflowID
+					s.AgentID = dbSess.AgentID
+					s.AgentKind = dbSess.AgentKind
 				}
 				if errCountErr == nil {
 					s.ErrorCount = errCount
@@ -553,10 +564,14 @@ func (p *Pipeline) resolveParentID(msg *parser.Event, ev watcher.Event) string {
 		if sid := parentSessionIDFromPath(ev.FilePath); sid != "" && sid != ev.SessionID {
 			return sid
 		}
-		// Neither source found a parent — record a deferred link.
+		// Neither source found a parent — record a deferred link. Guard on !ok so
+		// this matches the in-content sibling's set-once policy above and never
+		// overwrites an already-recorded pending link for this child.
 		if msg.ParentUUID != "" && msg.ParentUUID != ev.SessionID {
 			p.linkMu.Lock()
-			p.pendingParentLinks[ev.SessionID] = msg.ParentUUID
+			if _, ok := p.pendingParentLinks[ev.SessionID]; !ok {
+				p.pendingParentLinks[ev.SessionID] = msg.ParentUUID
+			}
 			p.linkMu.Unlock()
 		}
 		return ""

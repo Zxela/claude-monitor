@@ -72,4 +72,29 @@ describe('groupRows', () => {
     const childIds = groups[0].children.map((c) => c.id).sort();
     expect(childIds).toEqual(['c', 'gc']);
   });
+
+  it('flattens a 4+-level chain entirely under the top-level ancestor', () => {
+    // gp -> c -> gc -> ggc: the ancestor walk must climb past every intermediate
+    // level, not just one, so all descendants collapse under the single root.
+    const gp = makeSession({ id: 'gp', lastActive: '2024-01-01T09:00:00Z' });
+    const c = makeSession({ id: 'c', parentId: 'gp', lastActive: '2024-01-01T08:00:00Z' });
+    const gc = makeSession({ id: 'gc', parentId: 'c', lastActive: '2024-01-01T07:00:00Z' });
+    const ggc = makeSession({ id: 'ggc', parentId: 'gc', lastActive: '2024-01-01T06:00:00Z' });
+
+    const groups = groupRows([gp, c, gc, ggc]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].parent.id).toBe('gp');
+    expect(groups[0].children.map((x) => x.id).sort()).toEqual(['c', 'gc', 'ggc']);
+  });
+
+  it('terminates on a parentId cycle (depth guard)', () => {
+    // a <-> b form a parentId cycle. The ancestor walk is bounded by the depth
+    // guard, so groupRows must return rather than loop forever. Neither node has a
+    // root parent (each claims an in-set parent), so there are no top-level rows.
+    const a = makeSession({ id: 'a', parentId: 'b', lastActive: '2024-01-01T02:00:00Z' });
+    const b = makeSession({ id: 'b', parentId: 'a', lastActive: '2024-01-01T01:00:00Z' });
+
+    const groups = groupRows([a, b]);
+    expect(groups).toEqual([]);
+  });
 });
