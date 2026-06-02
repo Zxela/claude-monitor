@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.7.1](https://github.com/Zxela/claude-monitor/compare/v3.7.0...v3.7.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* clear low/nit follow-ups from the workflow-logging audit ([#222](https://github.com/Zxela/claude-monitor/issues/222)) ([#240](https://github.com/Zxela/claude-monitor/issues/240)) ([6bcfd6d](https://github.com/Zxela/claude-monitor/commit/6bcfd6d006ece385482b87cb7b6a5749d019ebcd))
+
 ## [3.7.0](https://github.com/Zxela/claude-monitor/compare/v3.6.1...v3.7.0) (2026-06-01)
 
 
