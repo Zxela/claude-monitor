@@ -2,6 +2,7 @@ package store
 
 import (
 	"bufio"
+	"database/sql"
 	"log"
 	"os"
 	"path/filepath"
@@ -17,8 +18,11 @@ import (
 const backfillMarkerKey = "backfill_v013_done"
 
 // agentFileRe matches a Claude Code agent transcript file base name:
-// "agent-<id>.jsonl". The captured group is the bare agent id.
-var agentFileRe = regexp.MustCompile(`^agent-(.+)\.jsonl$`)
+// "agent-<id>.jsonl". The captured group is the bare agent id, allowed to be
+// empty (.*), so the degenerate "agent-.jsonl" matches here exactly as it does
+// for the watcher's strings.HasPrefix(stem, "agent-") classification — the two
+// in-sync code paths must agree on what counts as an agent transcript.
+var agentFileRe = regexp.MustCompile(`^agent-(.*)\.jsonl$`)
 
 // Agent-kind classifications. These mirror the watcher's package-private
 // constants (internal/watcher/watcher.go:39-44) and pipeline path classification;
@@ -156,12 +160,22 @@ func (d *DB) RunBackfillV013(basePaths []string, force bool) (BackfillResult, er
 	// Guarded, additive UPDATE: only fills columns that are currently empty so a
 	// second run (or live ingestion having already populated them) changes nothing.
 	// Depends on migration 013 having added workflow_id/agent_id/agent_kind.
+	//
+	// The WHERE clause matches the row ONLY when at least one column is genuinely
+	// fillable (currently empty AND we have a non-empty value for it). Without this
+	// guard a CASE-only UPDATE still "affects" an already-populated row, so a forced
+	// re-run would report every unchanged row as Updated and log a spurious "linked"
+	// line. Gating on real change makes RowsAffected mean "a column was filled".
 	const updateSQL = `UPDATE sessions SET
-		parent_id  = CASE WHEN COALESCE(parent_id,'')  = '' THEN ? ELSE parent_id  END,
-		workflow_id = CASE WHEN COALESCE(workflow_id,'') = '' THEN ? ELSE workflow_id END,
-		agent_id   = CASE WHEN COALESCE(agent_id,'')   = '' THEN ? ELSE agent_id   END,
-		agent_kind = CASE WHEN COALESCE(agent_kind,'') = '' THEN ? ELSE agent_kind END
-		WHERE id = ?`
+		parent_id  = CASE WHEN COALESCE(parent_id,'')  = '' THEN :parent   ELSE parent_id  END,
+		workflow_id = CASE WHEN COALESCE(workflow_id,'') = '' THEN :workflow ELSE workflow_id END,
+		agent_id   = CASE WHEN COALESCE(agent_id,'')   = '' THEN :agent    ELSE agent_id   END,
+		agent_kind = CASE WHEN COALESCE(agent_kind,'') = '' THEN :kind     ELSE agent_kind END
+		WHERE id = :id
+		  AND ( (COALESCE(parent_id,'')   = '' AND :parent   <> '')
+		     OR (COALESCE(workflow_id,'') = '' AND :workflow <> '')
+		     OR (COALESCE(agent_id,'')    = '' AND :agent    <> '')
+		     OR (COALESCE(agent_kind,'')  = '' AND :kind     <> '') )`
 
 	for _, base := range basePaths {
 		if base == "" {
@@ -208,7 +222,13 @@ func (d *DB) RunBackfillV013(basePaths []string, force bool) (BackfillResult, er
 				parentID = ""
 			}
 
-			result, uerr := d.db.Exec(updateSQL, parentID, workflowID, agentID, kind, id)
+			result, uerr := d.db.Exec(updateSQL,
+				sql.Named("parent", parentID),
+				sql.Named("workflow", workflowID),
+				sql.Named("agent", agentID),
+				sql.Named("kind", kind),
+				sql.Named("id", id),
+			)
 			if uerr != nil {
 				res.Errors++
 				return nil
@@ -218,7 +238,9 @@ func (d *DB) RunBackfillV013(basePaths []string, force bool) (BackfillResult, er
 				res.Updated++
 				log.Printf("backfill: linked %s parent=%s workflow=%s kind=%s", id, parentID, workflowID, kind)
 			} else {
-				// No row with this id (session not ingested yet) — count Skipped.
+				// No column was filled: either no row with this id (session not
+				// ingested yet) or the row's identity columns are already populated
+				// (a forced re-run over a complete row). Either way, nothing changed.
 				res.Skipped++
 			}
 			return nil

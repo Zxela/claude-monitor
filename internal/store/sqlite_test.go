@@ -3074,6 +3074,51 @@ func TestListReplayEvents_IncludesChildren(t *testing.T) {
 	}
 }
 
+// TestListReplayEvents_SameTimestampTiebreak locks in the secondary `e.id ASC`
+// sort: when a parent and child event share an identical timestamp, the merged
+// replay timeline must be deterministic rather than left to the engine's row
+// order. The parent event is persisted first (lower rowid), so it must sort first
+// despite the equal timestamp.
+func TestListReplayEvents_SameTimestampTiebreak(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	base := time.Now().UTC().Truncate(time.Second)
+	if err := db.SaveSession(&session.Session{ID: "p1", StartedAt: base, LastActive: base}); err != nil {
+		t.Fatalf("SaveSession(p1): %v", err)
+	}
+	if err := db.SaveSession(&session.Session{ID: "agent-1", ParentID: "p1", StartedAt: base, LastActive: base}); err != nil {
+		t.Fatalf("SaveSession(agent-1): %v", err)
+	}
+
+	// Both events carry the SAME timestamp; the parent is persisted first so it
+	// receives the lower autoincrement id.
+	batch := &EventBatch{Events: []EventInsert{
+		{SessionID: "p1", Event: &parser.Event{
+			Type: "assistant", Role: "assistant", ContentText: "parent msg",
+			Timestamp: base, UUID: "u-parent",
+		}},
+		{SessionID: "agent-1", Event: &parser.Event{
+			Type: "assistant", Role: "assistant", ContentText: "child msg",
+			Timestamp: base, UUID: "u-child",
+		}},
+	}}
+	if err := db.PersistBatch(batch); err != nil {
+		t.Fatalf("PersistBatch failed: %v", err)
+	}
+
+	replay, err := db.ListReplayEvents("p1", 1000, 0)
+	if err != nil {
+		t.Fatalf("ListReplayEvents failed: %v", err)
+	}
+	if len(replay) != 2 {
+		t.Fatalf("ListReplayEvents returned %d events, want 2", len(replay))
+	}
+	// Equal timestamps -> deterministic e.id ASC order: the parent (inserted first) wins.
+	if replay[0].ContentPreview != "parent msg" || replay[1].ContentPreview != "child msg" {
+		t.Errorf("same-timestamp order not by e.id ASC: [0]=%q [1]=%q", replay[0].ContentPreview, replay[1].ContentPreview)
+	}
+}
 
 // TestAggregateStats_WindowBoundaryUTC is a regression test for the time-window
 // boundary bug: started_at is stored as UTC RFC3339 ("…Z"), but the boundary was

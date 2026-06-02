@@ -166,6 +166,14 @@ func TestParentSessionIDFromPath(t *testing.T) {
 		{"/home/user/.claude/projects/hash/abc-123/subagents/workflows/wf_def/agent-xyz.jsonl", "abc-123"},
 		{"/home/user/.claude/projects/hash/session.jsonl", ""},
 		{"/tmp/test.jsonl", ""},
+		// Nested subagents: the walk returns the FIRST (innermost) "subagents"
+		// parent going up, so a subagent-of-a-subagent attributes to its immediate
+		// agent parent, not the top-level session.
+		{"/home/u/.claude/projects/hash/gp/subagents/agent-x/subagents/agent-y.jsonl", "agent-x"},
+		// Degenerate root: a "subagents" segment directly under filesystem root.
+		// filepath.Dir("/subagents") == "/" so the parent basename is "/" — locked
+		// in to document the boundary (never produced by real Claude Code paths).
+		{"/subagents/agent-y.jsonl", "/"},
 	}
 	for _, tt := range tests {
 		got := parentSessionIDFromPath(tt.path)

@@ -12,6 +12,29 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// waitTracked blocks until the watcher's initial scan has registered path in its
+// states map. Because ensureTracked adds the parent directory's fsnotify watch in
+// the same locked scan pass that populates states, observing the entry guarantees
+// the watch is live — so a subsequent append is certain to be picked up. This
+// replaces a fixed time.Sleep that only probabilistically allowed the initial scan
+// to finish, removing a theoretical flake under heavy CI load.
+func waitTracked(t *testing.T, w *Watcher, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		w.mu.Lock()
+		_, ok := w.states[path]
+		w.mu.Unlock()
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("watcher did not register %q within %s", path, timeout)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // newTestWatcher creates a Watcher with only the given paths (no defaultBasePaths).
 // This isolates tests from real session files on the host machine.
 func newTestWatcher(t *testing.T, paths []string) *Watcher {
@@ -124,7 +147,9 @@ func TestWatcher_EmitsWorkflowIdentity(t *testing.T) {
 	defer cancel()
 
 	events := w.Start(ctx)
-	time.Sleep(100 * time.Millisecond)
+	// Wait until the initial scan registers the file (and its fsnotify watch)
+	// before appending, instead of sleeping a fixed interval.
+	waitTracked(t, w, jsonlPath, 2*time.Second)
 
 	line := `{"type":"user","message":{"role":"user","content":"workflow line"},"sessionId":"parent-uuid","uuid":"uuid-wf1","isSidechain":true,"timestamp":"2024-01-01T00:00:00Z"}`
 	af, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0644)
@@ -214,8 +239,10 @@ func TestWatcher_EmitsEventsForAppendedLines(t *testing.T) {
 
 	events := w.Start(ctx)
 
-	// Give the watcher time to do its initial scan and register the file.
-	time.Sleep(100 * time.Millisecond)
+	// Wait until the initial scan has registered the file (and thus added the
+	// parent-dir fsnotify watch) before appending. Synchronising on observed state
+	// rather than a fixed sleep makes the scan-ordering deterministic.
+	waitTracked(t, w, jsonlPath, 2*time.Second)
 
 	// Append a valid JSONL line to the file.
 	wantLine := `{"type":"user","message":{"role":"user","content":"hello watcher"},"sessionId":"test-session","uuid":"uuid-w1","timestamp":"2024-01-01T00:00:00Z"}`
