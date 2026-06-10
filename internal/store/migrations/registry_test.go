@@ -249,7 +249,7 @@ func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
 
 	// Roll back the migrations above 014 (newest first) so 014 becomes the head,
 	// then roll back 014 itself.
-	for _, want := range []string{"reattribute_child_repos", "rebuild_events_fts", "recompute_session_aggregates"} {
+	for _, want := range []string{"fable_5_pricing", "reattribute_child_repos", "rebuild_events_fts", "recompute_session_aggregates"} {
 		name, err := RunDown(db)
 		if err != nil {
 			t.Fatalf("RunDown: %v", err)
@@ -317,6 +317,99 @@ func TestOpus48Pricing_DownPreservesUserEditedRow(t *testing.T) {
 	}
 	if in != 9.0 || out != 45.0 {
 		t.Errorf("user edit not preserved: input=%v output=%v, want 9/45", in, out)
+	}
+}
+
+// TestFable5Pricing_SeededAndReversible runs the REAL migration registry to head
+// and asserts migration 018 seeds the claude-fable-5 model_pricing row at $10/$50
+// (double the Opus 4.x rate), then rolls back 018 and confirms only that row is
+// removed (earlier seeds survive).
+func TestFable5Pricing_SeededAndReversible(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	var input, output, cacheRead, cacheCreate float64
+	err := db.QueryRow(
+		`SELECT input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing WHERE model_prefix = 'claude-fable-5'`,
+	).Scan(&input, &output, &cacheRead, &cacheCreate)
+	if err != nil {
+		t.Fatalf("claude-fable-5 row not found after RunUp: %v", err)
+	}
+	if input != 10.0 {
+		t.Errorf("input_per_mtok = %v, want 10", input)
+	}
+	if output != 50.0 {
+		t.Errorf("output_per_mtok = %v, want 50", output)
+	}
+	// Cache rates follow the convention from migration 011: cache read is
+	// 10% of input and 5m cache create is 1.25x input.
+	if cacheRead != 1.0 {
+		t.Errorf("cache_read_per_mtok = %v, want 1.0", cacheRead)
+	}
+	if cacheCreate != 12.50 {
+		t.Errorf("cache_create_per_mtok = %v, want 12.50", cacheCreate)
+	}
+
+	// 018 is the head migration; one RunDown rolls it back.
+	name, err := RunDown(db)
+	if err != nil {
+		t.Fatalf("RunDown: %v", err)
+	}
+	if name != "fable_5_pricing" {
+		t.Fatalf("RunDown rolled back %q, want fable_5_pricing", name)
+	}
+
+	// The fable-5 row must be gone.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix = 'claude-fable-5'`).Scan(&n); err != nil {
+		t.Fatalf("count after down: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("claude-fable-5 row should be removed after RunDown, found %d", n)
+	}
+
+	// But rows seeded by earlier migrations must remain intact.
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix = 'claude-opus-4-8'`).Scan(&n); err != nil {
+		t.Fatalf("count opus-4-8 after down: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("claude-opus-4-8 (from migration 014) should survive 018 rollback, found %d", n)
+	}
+}
+
+// TestFable5Pricing_DownPreservesUserEditedRow verifies migration 018's Down is
+// value-gated: if the user has edited the claude-fable-5 price away from the
+// seeded values, a rollback must NOT delete it.
+func TestFable5Pricing_DownPreservesUserEditedRow(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+
+	// Simulate a user edit of the price after the migration seeded it.
+	if _, err := db.Exec(
+		`UPDATE model_pricing SET input_per_mtok = 8.0, output_per_mtok = 40.0 WHERE model_prefix = 'claude-fable-5'`,
+	); err != nil {
+		t.Fatalf("simulate user edit: %v", err)
+	}
+
+	// 018 is the head migration; one RunDown rolls it back.
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown: %v", err)
+	}
+
+	// The user-edited row must survive the rollback, untouched.
+	var in, out float64
+	err := db.QueryRow(
+		`SELECT input_per_mtok, output_per_mtok FROM model_pricing WHERE model_prefix = 'claude-fable-5'`,
+	).Scan(&in, &out)
+	if err != nil {
+		t.Fatalf("user-edited claude-fable-5 row should survive 018 rollback, but: %v", err)
+	}
+	if in != 8.0 || out != 40.0 {
+		t.Errorf("user edit not preserved: input=%v output=%v, want 8/40", in, out)
 	}
 }
 
@@ -393,13 +486,27 @@ func TestMigration017_ReattributesChildRepos(t *testing.T) {
 	seed("root", "", "github.com/acme/widget")
 	seed("other-root", "", "github.com/acme/other")
 
-	// Re-apply 017 against the now-populated table: roll its version back to 16
-	// (Down is a no-op, leaving rows intact) then RunUp re-applies just 017.
-	if _, err := RunDown(db); err != nil {
-		t.Fatalf("RunDown 017: %v", err)
+	// Re-apply 017 against the now-populated table: roll the version back to 16
+	// (017's Down is a no-op, leaving rows intact; later migrations stacked on
+	// top roll back too) then RunUp re-applies 017 and everything above it.
+	rollbackTo16 := func() {
+		t.Helper()
+		for {
+			v, err := GetVersion(db)
+			if err != nil {
+				t.Fatalf("GetVersion: %v", err)
+			}
+			if v <= 16 {
+				break
+			}
+			if _, err := RunDown(db); err != nil {
+				t.Fatalf("RunDown from v%d: %v", v, err)
+			}
+		}
 	}
+	rollbackTo16()
 	if v, _ := GetVersion(db); v != 16 {
-		t.Fatalf("after RunDown: version = %d, want 16", v)
+		t.Fatalf("after rollback: version = %d, want 16", v)
 	}
 	if _, err := RunUp(db); err != nil {
 		t.Fatalf("re-RunUp (applies 017): %v", err)
@@ -429,9 +536,7 @@ func TestMigration017_ReattributesChildRepos(t *testing.T) {
 	}
 
 	// Idempotent: rolling back and re-applying again must yield identical results.
-	if _, err := RunDown(db); err != nil {
-		t.Fatalf("RunDown 017 (2nd): %v", err)
-	}
+	rollbackTo16()
 	if _, err := RunUp(db); err != nil {
 		t.Fatalf("re-RunUp 017 (2nd): %v", err)
 	}

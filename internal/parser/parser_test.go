@@ -505,6 +505,8 @@ func TestComputeCost_ByModel(t *testing.T) {
 		model    string
 		wantCost float64
 	}{
+		{"fable", "claude-fable-5", 10.0 + 50.0 + 1.0 + 12.50},
+		{"fable 1m suffix", "claude-fable-5[1m]", 10.0 + 50.0 + 1.0 + 12.50},
 		{"opus", "claude-opus-4-6", 5.0 + 25.0 + 0.50 + 6.25},
 		{"sonnet", "claude-sonnet-4-6", 3.0 + 15.0 + 0.30 + 3.75},
 		{"haiku", "claude-haiku-4-5", 1.0 + 5.0 + 0.10 + 1.25},
