@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.2](https://github.com/Zxela/claude-monitor/compare/v3.8.1...v3.8.2) (2026-06-12)
+
+
+### Bug Fixes
+
+* preserve history scroll across re-renders so paging doesn't jump to top ([#250](https://github.com/Zxela/claude-monitor/issues/250)) ([6fdcb9d](https://github.com/Zxela/claude-monitor/commit/6fdcb9d9d5ff3e3f9c6869f7a0fe4bbfad5e940f))
+
 ## [3.8.1](https://github.com/Zxela/claude-monitor/compare/v3.8.0...v3.8.1) (2026-06-12)
 
 
