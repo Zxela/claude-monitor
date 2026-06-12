@@ -150,7 +150,13 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		// Rebuild dedup state from DB if this session was previously persisted.
 		// After a restart, in-memory dedup maps are empty, which would cause
 		// duplicate events to double-count costs, messages, and errors.
-		if ids, costs, err := p.db.LoadMessageDedup(ev.SessionID); err == nil && len(ids) > 0 {
+		// Gate on the session existing in the DB (not on len(ids) > 0): a
+		// session whose only persisted events are errors has no message-id'd
+		// rows, but its err: dedup keys and error_count still need rebuilding
+		// or replay re-inflates the count on every restart.
+		ids, costs, dedupErr := p.db.LoadMessageDedup(ev.SessionID)
+		dbSess, _ := p.db.GetSession(ev.SessionID)
+		if dedupErr == nil && (len(ids) > 0 || dbSess != nil) {
 			// Seed the "err:" dedup keys from persisted error events. Without
 			// them, bootstrap replay of the JSONL re-fires ErrorCount++ for every
 			// historical error line on top of the recounted baseline below —
@@ -160,8 +166,6 @@ func (p *Pipeline) Process(ev watcher.Event) {
 					ids["err:"+id] = true
 				}
 			}
-			// Also restore session aggregates so totals aren't reset to zero.
-			dbSess, _ := p.db.GetSession(ev.SessionID)
 			// Recompute the cost/token aggregates from the SAME per-message map
 			// just rebuilt from events, rather than copying the stored sessions
 			// columns. The stored values can be stale (e.g. accumulated across

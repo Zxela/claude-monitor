@@ -1845,3 +1845,57 @@ func TestProcess_RebuildErrorDedupFromDB(t *testing.T) {
 		t.Errorf("ErrorCount after new error = %d, want 2", sess2.ErrorCount)
 	}
 }
+
+// TestProcess_RebuildErrorDedupFromDB_ErrorsOnlySession covers the shape the
+// first fix missed: a session whose ONLY persisted events are errors (e.g. an
+// agent that crashed before its first costed turn) has no message-id'd rows,
+// so the rebuild must be gated on the DB session row, not on the message
+// dedup map being non-empty.
+func TestProcess_RebuildErrorDedupFromDB_ErrorsOnlySession(t *testing.T) {
+	db := openTestDB(t)
+	resolver := repo.NewResolver()
+	const sid = "err-only-rebuild-test"
+	ts := time.Now()
+
+	errorLine := makeJSONL(t, map[string]interface{}{
+		"type":      "user",
+		"uuid":      "uuid-only-err",
+		"timestamp": ts.Format(time.RFC3339Nano),
+		"sessionId": sid,
+		"message": map[string]interface{}{
+			"role": "user",
+			"content": []map[string]interface{}{
+				{
+					"type":        "tool_result",
+					"tool_use_id": "toolu_only",
+					"is_error":    true,
+					"content":     "Error: crashed before first turn",
+				},
+			},
+		},
+	})
+
+	sessions1 := session.NewStore()
+	p1 := New(sessions1, db, resolver, nil)
+	p1.Process(watcher.Event{SessionID: sid, Line: errorLine, Bootstrap: true})
+	p1.Stop()
+
+	sess1, _ := sessions1.Get(sid)
+	if sess1 == nil || sess1.ErrorCount != 1 {
+		t.Fatalf("phase 1 ErrorCount = %v, want 1", sess1)
+	}
+
+	// Restart and replay the same line.
+	sessions2 := session.NewStore()
+	p2 := New(sessions2, db, resolver, nil)
+	defer p2.Stop()
+	p2.Process(watcher.Event{SessionID: sid, Line: errorLine, Bootstrap: true})
+
+	sess2, ok := sessions2.Get(sid)
+	if !ok {
+		t.Fatal("session not found after replay")
+	}
+	if sess2.ErrorCount != 1 {
+		t.Errorf("ErrorCount after replay = %d, want 1 (errors-only session must rebuild err: keys)", sess2.ErrorCount)
+	}
+}
