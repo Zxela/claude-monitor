@@ -19,7 +19,9 @@ func init() {
 			// the planner cannot prove the join's u.tool_use_id != '' guard
 			// implies r.for_tool_use_id != '' through the equality, so it would
 			// ignore the index entirely.
-			_, err := tx.Exec(`CREATE INDEX idx_events_result_lookup
+			// IF NOT EXISTS: tolerate databases where the index was applied
+			// out-of-band (e.g. as a manual hotfix) so startup doesn't wedge.
+			_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_events_result_lookup
 				ON events(for_tool_use_id, session_id, is_error)`)
 			return err
 		},

@@ -263,26 +263,8 @@ func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
 		t.Errorf("cache_create_per_mtok = %v, want 6.25", cacheCreate)
 	}
 
-	// Roll back the migrations above 014 (newest first) so 014 becomes the head,
-	// then roll back 014 itself.
-	for _, want := range []string{"tool_result_join_index", "fable_5_pricing", "reattribute_child_repos", "rebuild_events_fts", "recompute_session_aggregates"} {
-		name, err := RunDown(db)
-		if err != nil {
-			t.Fatalf("RunDown: %v", err)
-		}
-		if name != want {
-			t.Fatalf("RunDown rolled back %q, want %q", name, want)
-		}
-	}
-
-	// Roll back migration 014.
-	name, err := RunDown(db)
-	if err != nil {
-		t.Fatalf("RunDown: %v", err)
-	}
-	if name != "opus_4_8_pricing" {
-		t.Fatalf("RunDown rolled back %q, want opus_4_8_pricing", name)
-	}
+	// Roll back through head until 014 itself is rolled back.
+	rollDownTo(t, db, "opus_4_8_pricing")
 
 	// The opus-4-8 row must be gone.
 	var n int
@@ -319,9 +301,10 @@ func TestOpus48Pricing_DownPreservesUserEditedRow(t *testing.T) {
 		t.Fatalf("simulate user edit: %v", err)
 	}
 
-	if _, err := RunDown(db); err != nil {
-		t.Fatalf("RunDown: %v", err)
-	}
+	// Roll back through head until 014 itself is rolled back. (A single bare
+	// RunDown here only rolled back whatever the head migration was, so this
+	// test was vacuous — 014's Down never actually ran.)
+	rollDownTo(t, db, "opus_4_8_pricing")
 
 	// The user-edited row must survive the rollback, untouched.
 	var in, out float64
