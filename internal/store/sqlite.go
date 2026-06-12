@@ -265,18 +265,24 @@ type StorageInfo struct {
 
 // DB wraps a sql.DB connection to the SQLite database.
 type DB struct {
-	db *sql.DB
+	db  *sql.DB // writes: single connection so concurrent writers queue instead of erroring
+	rdb *sql.DB // reads: concurrent read-only pool so queries don't queue behind writes
 }
+
+// readPoolSize bounds concurrent read connections. The history page fires a
+// handful of API queries per load; a small pool covers that without holding
+// many file handles open.
+const readPoolSize = 4
 
 // Open opens a SQLite database at the given path and runs pending migrations.
 func Open(path string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	sqlDB, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
-	// SQLite only supports one writer at a time. Limit the pool to one
+	// SQLite only supports one writer at a time. Limit this pool to one
 	// connection to avoid "database is locked" errors from concurrent writes
-	// across goroutines (pipeline flush, retention compaction, HTTP handlers).
+	// across goroutines (pipeline flush, retention compaction).
 	sqlDB.SetMaxOpenConns(1)
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		sqlDB.Close()
@@ -286,12 +292,26 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, err
 	}
-	return &DB{db: sqlDB}, nil
+	// WAL mode supports any number of readers concurrent with the single
+	// writer. Reads go through a separate read-only pool so API queries are
+	// not serialized behind long-running ingest or retention transactions.
+	rdb, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	if err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	rdb.SetMaxOpenConns(readPoolSize)
+	rdb.SetMaxIdleConns(readPoolSize)
+	return &DB{db: sqlDB, rdb: rdb}, nil
 }
 
-// Close closes the underlying database connection.
+// Close closes the underlying database connections.
 func (d *DB) Close() error {
-	return d.db.Close()
+	rErr := d.rdb.Close()
+	if err := d.db.Close(); err != nil {
+		return err
+	}
+	return rErr
 }
 
 // Ping verifies the database connection is alive.
@@ -326,7 +346,7 @@ func (d *DB) UpsertCwdRepo(cwd, repoID string) error {
 
 // LoadCwdRepos returns all persisted cwd → repo_id mappings.
 func (d *DB) LoadCwdRepos() (map[string]string, error) {
-	rows, err := d.db.Query(`SELECT cwd, repo_id FROM cwd_repos`)
+	rows, err := d.rdb.Query(`SELECT cwd, repo_id FROM cwd_repos`)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +532,7 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 // LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
 // This is used to rebuild in-memory dedup state after a restart, preventing double-counting.
 func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]session.MessageCosts, error) {
-	rows, err := d.db.Query(`
+	rows, err := d.rdb.Query(`
 		SELECT message_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
 		FROM events
 		WHERE session_id = ? AND message_id IS NOT NULL AND message_id != ''
@@ -545,7 +565,7 @@ func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]ses
 // sessions.error_count, matching what the events feed shows.
 func (d *DB) CountSessionErrors(sessionID string) (int, error) {
 	var n int
-	err := d.db.QueryRow(`SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), uuid))
+	err := d.rdb.QueryRow(`SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), uuid))
 		FROM events WHERE session_id = ? AND is_error = 1`, sessionID).Scan(&n)
 	if err != nil {
 		return 0, err
@@ -561,7 +581,7 @@ func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+	rows, err := d.rdb.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions ORDER BY ended_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -572,7 +592,7 @@ func (d *DB) ListSessions(limit, offset int) ([]SessionRow, error) {
 
 // GetSession returns a single session by ID.
 func (d *DB) GetSession(id string) (*SessionRow, error) {
-	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+	rows, err := d.rdb.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
@@ -593,7 +613,7 @@ func (d *DB) ListSessionsByRepo(repoID string, limit, offset int) ([]SessionRow,
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+	rows, err := d.rdb.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions WHERE repo_id = ? ORDER BY ended_at DESC LIMIT ? OFFSET ?`, repoID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -610,7 +630,7 @@ func (d *DB) ListSessionsByWorkflow(workflowID string, limit, offset int) ([]Ses
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := d.db.Query(`SELECT `+sessionSelectCols+`
+	rows, err := d.rdb.Query(`SELECT `+sessionSelectCols+`
 		FROM sessions WHERE workflow_id = ? ORDER BY ended_at DESC LIMIT ? OFFSET ?`, workflowID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -634,7 +654,7 @@ type WorkflowRow struct {
 // workflow_id is nullable (migration 013 adds it as plain TEXT, no DEFAULT ''),
 // so the non-empty filter uses COALESCE(workflow_id,'') <> ''.
 func (d *DB) ListWorkflows() ([]WorkflowRow, error) {
-	rows, err := d.db.Query(`SELECT workflow_id, COUNT(*), COALESCE(SUM(total_cost),0), COALESCE(MAX(ended_at),'')
+	rows, err := d.rdb.Query(`SELECT workflow_id, COUNT(*), COALESCE(SUM(total_cost),0), COALESCE(MAX(ended_at),'')
 		FROM sessions WHERE COALESCE(workflow_id,'') <> '' GROUP BY workflow_id ORDER BY MAX(ended_at) DESC`)
 	if err != nil {
 		return nil, err
@@ -657,7 +677,7 @@ func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 		CostByModel: make(map[string]float64),
 		CostByRepo:  make(map[string]float64),
 	}
-	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
+	err := d.rdb.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
 		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
 		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
 		FROM sessions WHERE repo_id = ?`, repoID).Scan(
@@ -667,7 +687,7 @@ func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	modelRows, err := d.db.Query(`SELECT COALESCE(model,''), SUM(total_cost)
+	modelRows, err := d.rdb.Query(`SELECT COALESCE(model,''), SUM(total_cost)
 		FROM sessions WHERE repo_id = ? GROUP BY model`, repoID)
 	if err != nil {
 		return nil, err
@@ -701,7 +721,7 @@ type RepoRow struct {
 }
 
 func (d *DB) ListRepos() ([]RepoRow, error) {
-	rows, err := d.db.Query(`SELECT r.id, r.name, COALESCE(r.url,''),
+	rows, err := d.rdb.Query(`SELECT r.id, r.name, COALESCE(r.url,''),
 		COALESCE(SUM(s.total_cost), 0)
 		FROM repos r LEFT JOIN sessions s ON s.repo_id = r.id
 		GROUP BY r.id ORDER BY COALESCE(SUM(s.total_cost),0) DESC`)
@@ -725,7 +745,7 @@ func (d *DB) ListRepos() ([]RepoRow, error) {
 // endpoint), rather than serving a zeroed 200.
 func (d *DB) RepoExists(id string) (bool, error) {
 	var one int
-	err := d.db.QueryRow(`SELECT 1 FROM repos WHERE id = ? LIMIT 1`, id).Scan(&one)
+	err := d.rdb.QueryRow(`SELECT 1 FROM repos WHERE id = ? LIMIT 1`, id).Scan(&one)
 	switch err {
 	case nil:
 		return true, nil
@@ -780,7 +800,7 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 		args = append(args, since.UTC().Format(time.RFC3339))
 	}
 
-	err := d.db.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
+	err := d.rdb.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
 		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
 		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
 		FROM sessions`+where, args...).Scan(
@@ -792,7 +812,7 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	}
 
 	// Cost by model
-	modelRows, err := d.db.Query(`SELECT COALESCE(model,''), SUM(total_cost)
+	modelRows, err := d.rdb.Query(`SELECT COALESCE(model,''), SUM(total_cost)
 		FROM sessions`+where+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err
@@ -810,7 +830,7 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	}
 
 	// Cost by repo
-	repoRows, err := d.db.Query(`SELECT COALESCE(repo_id,''), SUM(total_cost)
+	repoRows, err := d.rdb.Query(`SELECT COALESCE(repo_id,''), SUM(total_cost)
 		FROM sessions`+where+` GROUP BY repo_id`, args...)
 	if err != nil {
 		return nil, err
@@ -903,7 +923,7 @@ func (d *DB) toolUsageGrouped(keyCol, rowFilter string, since time.Time, repoID 
 		LIMIT ?`
 	args = append(args, toolUsageLimit)
 
-	rows, err := d.db.Query(q, args...)
+	rows, err := d.rdb.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -925,7 +945,7 @@ func (d *DB) toolUsageGrouped(keyCol, rowFilter string, since time.Time, repoID 
 // History uses it to badge rows. Errors are attributed via the tool_use→
 // tool_result self-join (see ToolUsage).
 func (d *DB) SessionSkills() (map[string][]ToolUsageEntry, error) {
-	rows, err := d.db.Query(`SELECT u.session_id, u.tool_detail,
+	rows, err := d.rdb.Query(`SELECT u.session_id, u.tool_detail,
 		COUNT(DISTINCT u.id) AS uses,
 		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
 		FROM events u
@@ -1066,7 +1086,7 @@ func (d *DB) trendBuckets(p *trendParams) ([]TrendBucket, error) {
 		FROM sessions WHERE %s
 		GROUP BY bucket ORDER BY bucket`, p.dateFmt, p.windowWhere)
 
-	rows, err := d.db.Query(bucketQuery, p.args...)
+	rows, err := d.rdb.Query(bucketQuery, p.args...)
 	if err != nil {
 		return nil, fmt.Errorf("trendBuckets: %w", err)
 	}
@@ -1104,7 +1124,7 @@ func (d *DB) trendPercentiles(p *trendParams, buckets []TrendBucket) error {
 		FROM sessions WHERE %s
 		ORDER BY bucket, total_cost`, p.dateFmt, p.where)
 
-	percRows, err := d.db.Query(percQuery, p.args...)
+	percRows, err := d.rdb.Query(percQuery, p.args...)
 	if err != nil {
 		return fmt.Errorf("trendPercentiles: %w", err)
 	}
@@ -1153,7 +1173,7 @@ func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
 		WHERE %s AND s.repo_id != ''
 		GROUP BY r.id ORDER BY SUM(s.total_cost) DESC`, repoWindowWhere)
 
-	repoRows, err := d.db.Query(repoQuery, p.args...)
+	repoRows, err := d.rdb.Query(repoQuery, p.args...)
 	if err != nil {
 		return nil, fmt.Errorf("trendByRepo: %w", err)
 	}
@@ -1189,7 +1209,7 @@ func (d *DB) trendByModel(p *trendParams) ([]ModelTrend, error) {
 		FROM sessions WHERE %s AND model != '' AND model != '<synthetic>'
 		GROUP BY model ORDER BY SUM(total_cost) DESC`, p.windowWhere)
 
-	modelRows, err := d.db.Query(modelQuery, p.args...)
+	modelRows, err := d.rdb.Query(modelQuery, p.args...)
 	if err != nil {
 		return nil, fmt.Errorf("trendByModel: %w", err)
 	}
@@ -1251,7 +1271,7 @@ func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
 		ORDER BY SUM(s.total_cost) DESC
 		LIMIT %d`, sessWindowWhere, trendBySessionLimit)
 
-	rows, err := d.db.Query(query, p.args...)
+	rows, err := d.rdb.Query(query, p.args...)
 	if err != nil {
 		return nil, fmt.Errorf("trendBySession: %w", err)
 	}
@@ -1514,7 +1534,7 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
@@ -1545,7 +1565,7 @@ func (d *DB) ListReplayEvents(sessionID string, limit, offset int) ([]EventRow, 
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
@@ -1565,7 +1585,7 @@ func (d *DB) ListReplayEvents(sessionID string, limit, offset int) ([]EventRow, 
 // detect truncation.
 func (d *DB) CountReplayEvents(sessionID string) (int, error) {
 	var n int
-	err := d.db.QueryRow(`SELECT COUNT(*) FROM events e
+	err := d.rdb.QueryRow(`SELECT COUNT(*) FROM events e
 		WHERE e.session_id = ?
 		   OR e.session_id IN (SELECT id FROM sessions WHERE parent_id = ?)`,
 		sessionID, sessionID).Scan(&n)
@@ -1578,7 +1598,7 @@ func (d *DB) CountReplayEvents(sessionID string) (int, error) {
 // ListPinnedEvents returns all error and agent events for a session, ordered chronologically.
 // These are "pinned" because they should always be visible regardless of the recent-events window.
 func (d *DB) ListPinnedEvents(sessionID string) ([]EventRow, error) {
-	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ? AND (e.is_error = 1 OR e.is_agent = 1 OR e.content_preview LIKE '[agent%')
@@ -1595,7 +1615,7 @@ func (d *DB) ListRecentEvents(sessionID string, n int) ([]EventRow, error) {
 	if n <= 0 {
 		n = 50
 	}
-	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,''), ec.compressed
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
@@ -1713,7 +1733,7 @@ func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 		// rather than issuing an invalid empty MATCH.
 		return []EventRow{}, nil
 	}
-	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
 		'', NULL
 		FROM events_fts fts
 		JOIN events e ON e.id = fts.rowid
@@ -1734,7 +1754,7 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 	}
 	// Escape LIKE wildcards to prevent injection of % and _ characters.
 	escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(query)
-	rows, err := d.db.Query(`SELECT `+eventSelectCols+`,
+	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
 		COALESCE(ec.content,''), ec.compressed
 		FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
@@ -1760,7 +1780,7 @@ type ModelPricing struct {
 
 // AllModelPricing returns all rows from the model_pricing table as a map keyed by model_prefix.
 func (d *DB) AllModelPricing() (map[string]ModelPricing, error) {
-	rows, err := d.db.Query(`SELECT model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing`)
+	rows, err := d.rdb.Query(`SELECT model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing`)
 	if err != nil {
 		return nil, err
 	}
@@ -1799,7 +1819,7 @@ func (d *DB) UpsertModelPricing(prefix string, p ModelPricing) error {
 // GetSetting returns a setting value by key.
 func (d *DB) GetSetting(key string) (string, error) {
 	var value string
-	err := d.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	err := d.rdb.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
 	if err != nil {
 		return value, fmt.Errorf("GetSetting(%s): %w", key, err)
 	}
@@ -1818,7 +1838,7 @@ func (d *DB) SetSetting(key, value string) error {
 
 // AllSettings returns all settings as a map.
 func (d *DB) AllSettings() (map[string]string, error) {
-	rows, err := d.db.Query(`SELECT key, value FROM settings`)
+	rows, err := d.rdb.Query(`SELECT key, value FROM settings`)
 	if err != nil {
 		return nil, err
 	}
@@ -1854,7 +1874,7 @@ func decompressContent(data []byte) (string, error) {
 func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -hotDays).Format(time.RFC3339)
 
-	rows, err := d.db.Query(`SELECT ec.event_id, ec.content FROM event_content ec
+	rows, err := d.rdb.Query(`SELECT ec.event_id, ec.content FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE ec.tier = 'hot' AND ec.content IS NOT NULL AND e.timestamp < ?`, cutoff)
 	if err != nil {
@@ -1937,18 +1957,18 @@ func (d *DB) StorageInfo() (*StorageInfo, error) {
 	info := &StorageInfo{}
 
 	// Total DB size via page_count * page_size
-	if err := d.db.QueryRow(`SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&info.TotalSizeBytes); err != nil {
+	if err := d.rdb.QueryRow(`SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&info.TotalSizeBytes); err != nil {
 		// Fallback: just count events
 		info.TotalSizeBytes = 0
 	}
 
-	if err := d.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&info.EventCount); err != nil {
+	if err := d.rdb.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&info.EventCount); err != nil {
 		return nil, fmt.Errorf("count events: %w", err)
 	}
-	if err := d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes); err != nil {
+	if err := d.rdb.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes); err != nil {
 		return nil, fmt.Errorf("hot content size: %w", err)
 	}
-	if err := d.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes); err != nil {
+	if err := d.rdb.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes); err != nil {
 		return nil, fmt.Errorf("warm content size: %w", err)
 	}
 
