@@ -19,6 +19,22 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// rollDownTo rolls back migrations one at a time until the named migration has
+// been rolled back, so tests targeting a specific migration's Down don't break
+// every time a new head migration is added.
+func rollDownTo(t *testing.T, db *sql.DB, name string) {
+	t.Helper()
+	for {
+		got, err := RunDown(db)
+		if err != nil {
+			t.Fatalf("RunDown: %v", err)
+		}
+		if got == name {
+			return
+		}
+	}
+}
+
 func TestGetVersion_FreshDB(t *testing.T) {
 	db := openTestDB(t)
 	v, err := GetVersion(db)
@@ -249,7 +265,7 @@ func TestOpus48Pricing_SeededAndReversible(t *testing.T) {
 
 	// Roll back the migrations above 014 (newest first) so 014 becomes the head,
 	// then roll back 014 itself.
-	for _, want := range []string{"fable_5_pricing", "reattribute_child_repos", "rebuild_events_fts", "recompute_session_aggregates"} {
+	for _, want := range []string{"tool_result_join_index", "fable_5_pricing", "reattribute_child_repos", "rebuild_events_fts", "recompute_session_aggregates"} {
 		name, err := RunDown(db)
 		if err != nil {
 			t.Fatalf("RunDown: %v", err)
@@ -352,14 +368,8 @@ func TestFable5Pricing_SeededAndReversible(t *testing.T) {
 		t.Errorf("cache_create_per_mtok = %v, want 12.50", cacheCreate)
 	}
 
-	// 018 is the head migration; one RunDown rolls it back.
-	name, err := RunDown(db)
-	if err != nil {
-		t.Fatalf("RunDown: %v", err)
-	}
-	if name != "fable_5_pricing" {
-		t.Fatalf("RunDown rolled back %q, want fable_5_pricing", name)
-	}
+	// Roll back through head until 018 itself is rolled back.
+	rollDownTo(t, db, "fable_5_pricing")
 
 	// The fable-5 row must be gone.
 	var n int
@@ -395,10 +405,8 @@ func TestFable5Pricing_DownPreservesUserEditedRow(t *testing.T) {
 		t.Fatalf("simulate user edit: %v", err)
 	}
 
-	// 018 is the head migration; one RunDown rolls it back.
-	if _, err := RunDown(db); err != nil {
-		t.Fatalf("RunDown: %v", err)
-	}
+	// Roll back through head until 018 itself is rolled back.
+	rollDownTo(t, db, "fable_5_pricing")
 
 	// The user-edited row must survive the rollback, untouched.
 	var in, out float64
@@ -626,5 +634,31 @@ func TestMigration013_DownRoundTrip(t *testing.T) {
 	}
 	if !indexExists(t, db, "idx_sessions_workflow") {
 		t.Error("after re-RunUp: idx_sessions_workflow not restored")
+	}
+}
+
+// TestToolResultJoinIndex_UpDown verifies migration 019 creates the covering
+// index used by the ToolUsage/SessionSkills tool_use→tool_result self-join,
+// and that rolling it back removes it.
+func TestToolResultJoinIndex_UpDown(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	if !indexExists(t, db, "idx_events_result_lookup") {
+		t.Fatal("idx_events_result_lookup missing after RunUp")
+	}
+
+	rollDownTo(t, db, "tool_result_join_index")
+	if indexExists(t, db, "idx_events_result_lookup") {
+		t.Error("idx_events_result_lookup should be dropped after RunDown")
+	}
+
+	// Re-apply to head — must cleanly re-create the index.
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+	if !indexExists(t, db, "idx_events_result_lookup") {
+		t.Error("idx_events_result_lookup not restored after re-RunUp")
 	}
 }
