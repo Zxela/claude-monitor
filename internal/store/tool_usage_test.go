@@ -164,6 +164,73 @@ func TestToolUsageAndSessionSkills(t *testing.T) {
 	}
 }
 
+// TestToolUsage_CrossSessionErrorAttribution verifies error attribution when a
+// tool_result lands in a different session than its tool_use — a workflow
+// agent's result is recorded in the child session while the tool_use sits in
+// the parent. The join matches on tool_use_id alone (toolu_ ids are globally
+// unique), so the error must still be counted.
+func TestToolUsage_CrossSessionErrorAttribution(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	if _, err := db.db.Exec(`INSERT INTO sessions (id, started_at) VALUES ('wf-parent', '2026-05-31T12:00:00Z')`); err != nil {
+		t.Fatalf("seed parent session: %v", err)
+	}
+	if _, err := db.db.Exec(`INSERT INTO sessions (id, parent_id, started_at) VALUES ('wf-child', 'wf-parent', '2026-05-31T12:00:00Z')`); err != nil {
+		t.Fatalf("seed child session: %v", err)
+	}
+	// tool_use in the parent, error result in the child.
+	if _, err := db.db.Exec(
+		`INSERT INTO events (session_id, message_id, role, tool_name, tool_use_id, timestamp)
+		 VALUES ('wf-parent','m1','assistant','Bash','toolu_x1','2026-05-31T12:00:01Z')`); err != nil {
+		t.Fatalf("seed tool_use: %v", err)
+	}
+	if _, err := db.db.Exec(
+		`INSERT INTO events (session_id, message_id, role, for_tool_use_id, is_error, timestamp)
+		 VALUES ('wf-child','m2','user','toolu_x1',1,'2026-05-31T12:00:02Z')`); err != nil {
+		t.Fatalf("seed tool_result: %v", err)
+	}
+	// Same shape for a skill so SessionSkills is covered too.
+	if _, err := db.db.Exec(
+		`INSERT INTO events (session_id, message_id, role, tool_name, tool_detail, tool_use_id, timestamp)
+		 VALUES ('wf-parent','m3','assistant','Skill','commit','toolu_x2','2026-05-31T12:00:03Z')`); err != nil {
+		t.Fatalf("seed skill tool_use: %v", err)
+	}
+	if _, err := db.db.Exec(
+		`INSERT INTO events (session_id, message_id, role, for_tool_use_id, is_error, timestamp)
+		 VALUES ('wf-child','m4','user','toolu_x2',1,'2026-05-31T12:00:04Z')`); err != nil {
+		t.Fatalf("seed skill tool_result: %v", err)
+	}
+
+	res, err := db.ToolUsage(time.Time{}, "")
+	if err != nil {
+		t.Fatalf("ToolUsage: %v", err)
+	}
+	var bash ToolUsageEntry
+	for _, e := range res.Tools {
+		if e.Name == "Bash" {
+			bash = e
+		}
+	}
+	if bash.Uses != 1 || bash.Errors != 1 {
+		t.Errorf("Bash = %+v, want uses=1 errors=1 (error result in child session must be attributed)", bash)
+	}
+
+	m, err := db.SessionSkills()
+	if err != nil {
+		t.Fatalf("SessionSkills: %v", err)
+	}
+	var commit ToolUsageEntry
+	for _, e := range m["wf-parent"] {
+		if e.Name == "commit" {
+			commit = e
+		}
+	}
+	if commit.Uses != 1 || commit.Errors != 1 {
+		t.Errorf("wf-parent commit = %+v, want uses=1 errors=1 (cross-session skill error)", commit)
+	}
+}
+
 // TestToolUsage_EmptyToolUseIdNoPhantomErrors guards the self-join: a tool_use
 // with an empty tool_use_id must NOT join to empty-for_tool_use_id result rows
 // (ids are stored as "" not NULL), which would otherwise attribute phantom

@@ -181,6 +181,12 @@ type EventRow struct {
 }
 
 // AggregateResult holds aggregate statistics across sessions.
+//
+// SessionCount counts top-level sessions only (parent_id empty); AgentCount
+// counts workflow/subagent child rows. The split keeps the displayed
+// "Sessions" number consistent with TrendData while still surfacing agent
+// activity. Cost and tokens remain summed across ALL rows (each dollar
+// counted once where it was incurred).
 type AggregateResult struct {
 	TotalCost           float64            `json:"totalCost"`
 	InputTokens         int64              `json:"inputTokens"`
@@ -188,6 +194,7 @@ type AggregateResult struct {
 	CacheReadTokens     int64              `json:"cacheReadTokens"`
 	CacheCreationTokens int64              `json:"cacheCreationTokens"`
 	SessionCount        int                `json:"sessionCount"`
+	AgentCount          int                `json:"agentCount"`
 	CostByModel         map[string]float64 `json:"costByModel"`
 	CostByRepo          map[string]float64 `json:"costByRepo"`
 }
@@ -201,6 +208,7 @@ type TrendBucket struct {
 	CacheReadTokens     int64   `json:"cacheReadTokens"`
 	CacheCreationTokens int64   `json:"cacheCreationTokens"`
 	SessionCount        int     `json:"sessionCount"`
+	AgentCount          int     `json:"agentCount"`
 	CacheHitPct         float64 `json:"cacheHitPct"`
 	AvgSessionCost      float64 `json:"avgSessionCost"`
 	MedianSessionCost   float64 `json:"medianSessionCost"`
@@ -245,6 +253,7 @@ type TrendSummary struct {
 	EffectiveTokens int64   `json:"effectiveTokens"`
 	CacheHitPct     float64 `json:"cacheHitPct"`
 	SessionCount    int     `json:"sessionCount"`
+	AgentCount      int     `json:"agentCount"`
 }
 
 // TrendResult holds the complete trend analysis response.
@@ -715,10 +724,12 @@ func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 	}
 	err := d.rdb.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
 		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
-		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
+		COALESCE(SUM(cache_creation_tokens),0),
+		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN parent_id IS NOT NULL AND parent_id != '' THEN 1 ELSE 0 END),0)
 		FROM sessions WHERE repo_id = ?`, repoID).Scan(
 		&r.TotalCost, &r.InputTokens, &r.OutputTokens,
-		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount,
+		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount, &r.AgentCount,
 	)
 	if err != nil {
 		return nil, err
@@ -741,8 +752,9 @@ func (d *DB) AggregateStatsByRepo(repoID string) (*AggregateResult, error) {
 	}
 	// Only reflect a repo that actually matched rows, mirroring the model guard
 	// above. An unknown/whitespace id thus returns costByRepo:{} instead of a
-	// phantom zero-cost entry echoing the queried id.
-	if r.SessionCount > 0 {
+	// phantom zero-cost entry echoing the queried id. Agent rows count as a
+	// match: a repo whose only rows are subagent children still has real spend.
+	if r.SessionCount+r.AgentCount > 0 {
 		r.CostByRepo[repoID] = r.TotalCost
 	}
 	return r, nil
@@ -813,12 +825,12 @@ func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 	return result, rows.Err()
 }
 
-// AggregateStats returns lifetime aggregate statistics across ALL session rows
-// (parents and their workflow/subagent children). Cost and tokens are summed
-// exactly once because each row carries only its own spend. SessionCount here
-// counts every row (a workflow's agents are individual rows); contrast TrendData,
-// whose SessionCount counts only top-level sessions (parent_id empty) while still
-// summing cost/tokens across all rows. Both definitions count each dollar once.
+// AggregateStats returns aggregate statistics across ALL session rows (parents
+// and their workflow/subagent children). Cost and tokens are summed exactly
+// once because each row carries only its own spend. SessionCount counts
+// top-level sessions only and AgentCount the child rows — the same split
+// TrendData uses, so /api/stats and /api/stats/trends report the same
+// "Sessions" number for the same window.
 func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 	r := &AggregateResult{
 		CostByModel: make(map[string]float64),
@@ -838,10 +850,12 @@ func (d *DB) AggregateStats(since time.Time) (*AggregateResult, error) {
 
 	err := d.rdb.QueryRow(`SELECT COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0),
 		COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
-		COALESCE(SUM(cache_creation_tokens),0), COUNT(*)
+		COALESCE(SUM(cache_creation_tokens),0),
+		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN parent_id IS NOT NULL AND parent_id != '' THEN 1 ELSE 0 END),0)
 		FROM sessions`+where, args...).Scan(
 		&r.TotalCost, &r.InputTokens, &r.OutputTokens,
-		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount,
+		&r.CacheReadTokens, &r.CacheCreationTokens, &r.SessionCount, &r.AgentCount,
 	)
 	if err != nil {
 		return nil, err
@@ -946,13 +960,17 @@ func (d *DB) toolUsageGrouped(keyCol, rowFilter string, since time.Time, repoID 
 	// result rows, so dedupe by tool_use event id for both uses and errors.
 	// The `u.tool_use_id != ''` guard is required: ids are stored as "" (never
 	// NULL) when absent, and without it an id-less tool_use would join to every
-	// id-less tool_result in the session and attribute phantom errors.
+	// id-less tool_result and attribute phantom errors.
+	// The join deliberately ignores session_id: a workflow agent's tool_result
+	// can land in a child session while the tool_use sits in the parent, and a
+	// same-session constraint silently dropped those errors. toolu_ ids are
+	// globally unique, so the id alone matches exactly one invocation.
 	q := `SELECT ` + keyCol + ` AS k,
 		COUNT(DISTINCT u.id) AS uses,
 		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
 		FROM events u
 		JOIN sessions s ON s.id = u.session_id
-		LEFT JOIN events r ON u.tool_use_id != '' AND r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
+		LEFT JOIN events r ON u.tool_use_id != '' AND r.for_tool_use_id = u.tool_use_id
 		WHERE ` + strings.Join(conds, " AND ") + `
 		GROUP BY k
 		ORDER BY uses DESC, k
@@ -985,7 +1003,7 @@ func (d *DB) SessionSkills() (map[string][]ToolUsageEntry, error) {
 		COUNT(DISTINCT u.id) AS uses,
 		COUNT(DISTINCT CASE WHEN r.is_error = 1 THEN u.id END) AS errs
 		FROM events u
-		LEFT JOIN events r ON u.tool_use_id != '' AND r.for_tool_use_id = u.tool_use_id AND r.session_id = u.session_id
+		LEFT JOIN events r ON u.tool_use_id != '' AND r.for_tool_use_id = u.tool_use_id
 		WHERE u.tool_name = 'Skill' AND COALESCE(u.tool_detail,'') != ''
 		GROUP BY u.session_id, u.tool_detail
 		ORDER BY u.session_id, uses DESC, u.tool_detail`)
@@ -1011,52 +1029,53 @@ func (d *DB) SessionSkills() (map[string][]ToolUsageEntry, error) {
 // counted exactly once where it was incurred — including workflow/subagent child rows).
 // where = top-level sessions only (windowWhere + parent_id empty); used for the
 // COUNT/AVG/percentile distributions, which describe top-level sessions.
+// sinceArg is the single window boundary (bound as args[0]) shared by every
+// subquery, so all of them see exactly the same cutoff instant.
 type trendParams struct {
 	dateFmt     string
-	interval    string
+	sinceArg    string
 	windowWhere string
 	where       string
 	args        []interface{}
 	repoID      string
 }
 
-// TrendData returns time-bucketed analytics for the given window and optional repo filter.
-// window must be "24h", "7d", or "30d". repoID may be empty for all repos.
+// TrendData returns time-bucketed analytics for the given window and optional
+// repo filter. window accepts both vocabularies with the definitions shared by
+// every stats endpoint (see WindowStart): rolling "24h"/"7d"/"30d" and calendar
+// "today"/"week"/"month". "24h" and "today" bucket hourly, the rest daily.
+// repoID may be empty for all repos.
 func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 	var dateFmt string
-	var interval string
 	switch window {
-	case "24h":
+	case "24h", "today":
 		dateFmt = "%Y-%m-%d %H:00"
-		interval = "-1 days"
-	case "7d":
+	case "7d", "30d", "week", "month":
 		dateFmt = "%Y-%m-%d"
-		interval = "-7 days"
-	case "30d":
-		dateFmt = "%Y-%m-%d"
-		interval = "-30 days"
 	default:
+		// Includes "all": an unbounded window has no sensible bucket count.
 		return nil, fmt.Errorf("invalid window: %s", window)
 	}
+	since, _ := WindowStart(window, time.Now())
 
 	// windowWhere matches ALL rows in the window (for cost/token SUMs, counted
 	// once). where additionally restricts to top-level sessions (parent_id empty)
 	// for COUNT/AVG/percentile distributions.
-	// datetime('now', interval) renders as "YYYY-MM-DD HH:MM:SS" (space-separated,
-	// no T/Z), but started_at is "YYYY-MM-DDTHH:MM:SSZ". A lexical TEXT compare
-	// then diverges at index 10 (' ' 0x20 < 'T' 0x54), so every row on the
-	// boundary's calendar date passes regardless of its hour — turning the rolling
-	// window into a calendar-day cutoff (24h trends over-counted ~51%). Emit the
-	// boundary in matching RFC3339-Z form. See TestTrendWindowBoundaryUTC.
-	windowWhere := fmt.Sprintf("started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", interval)
-	var args []interface{}
+	// The boundary is computed once in Go and bound as a parameter in every
+	// subquery: started_at is TEXT "YYYY-MM-DDTHH:MM:SSZ", so the bound value
+	// must be UTC RFC3339 for the lexical compare to be correct (an earlier
+	// inline datetime('now') rendered without T/Z and turned the rolling window
+	// into a calendar-day cutoff — see TestTrendData_24hExcludesOlderSameCalendarDay).
+	sinceArg := since.UTC().Format(time.RFC3339)
+	windowWhere := "started_at >= ?"
+	args := []interface{}{sinceArg}
 	if repoID != "" {
 		windowWhere += " AND repo_id = ?"
 		args = append(args, repoID)
 	}
 	where := windowWhere + " AND (parent_id IS NULL OR parent_id = '')"
 
-	p := &trendParams{dateFmt: dateFmt, interval: interval, windowWhere: windowWhere, where: where, args: args, repoID: repoID}
+	p := &trendParams{dateFmt: dateFmt, sinceArg: sinceArg, windowWhere: windowWhere, where: where, args: args, repoID: repoID}
 
 	buckets, err := d.trendBuckets(p)
 	if err != nil {
@@ -1089,6 +1108,7 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 		summary.TotalCost += b.Cost
 		summary.EffectiveTokens += b.InputTokens + b.OutputTokens + b.CacheReadTokens + b.CacheCreationTokens
 		summary.SessionCount += b.SessionCount
+		summary.AgentCount += b.AgentCount
 		totalEffInput += b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
 		totalCacheRead += b.CacheReadTokens
 	}
@@ -1111,12 +1131,14 @@ func (d *DB) TrendData(window string, repoID string) (*TrendResult, error) {
 // Cost and tokens are summed over ALL rows in the window (p.windowWhere) so each
 // dollar is counted exactly once, including workflow/subagent child rows. The
 // SessionCount and AvgSessionCost are computed via CASE over top-level sessions
-// only (parent_id empty), keeping those distributions about top-level sessions.
+// only (parent_id empty), keeping those distributions about top-level sessions;
+// AgentCount is the complementary child-row count.
 func (d *DB) trendBuckets(p *trendParams) ([]TrendBucket, error) {
 	bucketQuery := fmt.Sprintf(`SELECT strftime('%s', started_at) AS bucket,
 		COALESCE(SUM(total_cost),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
 		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN parent_id IS NOT NULL AND parent_id != '' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN total_cost ELSE 0 END)
 			/ NULLIF(SUM(CASE WHEN parent_id IS NULL OR parent_id = '' THEN 1 ELSE 0 END),0),0)
 		FROM sessions WHERE %s
@@ -1132,7 +1154,7 @@ func (d *DB) trendBuckets(p *trendParams) ([]TrendBucket, error) {
 	for rows.Next() {
 		var b TrendBucket
 		if err := rows.Scan(&b.Date, &b.Cost, &b.InputTokens, &b.OutputTokens,
-			&b.CacheReadTokens, &b.CacheCreationTokens, &b.SessionCount, &b.AvgSessionCost); err != nil {
+			&b.CacheReadTokens, &b.CacheCreationTokens, &b.SessionCount, &b.AgentCount, &b.AvgSessionCost); err != nil {
 			return nil, fmt.Errorf("trendBuckets: scan: %w", err)
 		}
 		effInput := b.InputTokens + b.CacheReadTokens + b.CacheCreationTokens
@@ -1197,8 +1219,8 @@ func (d *DB) trendPercentiles(p *trendParams, buckets []TrendBucket) error {
 // (parent_id empty) via CASE. For shapes 2/3 children share the parent's
 // repo_id (set in pipeline), so repo attribution stays stable.
 func (d *DB) trendByRepo(p *trendParams) ([]RepoTrend, error) {
-	// Match started_at's RFC3339-Z storage format (see windowWhere above).
-	repoWindowWhere := fmt.Sprintf("s.started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", p.interval)
+	// Same boundary parameter as every other trend subquery (p.args[0]).
+	repoWindowWhere := "s.started_at >= ?"
 	if p.repoID != "" {
 		repoWindowWhere += " AND s.repo_id = ?"
 	}
@@ -1278,8 +1300,8 @@ const trendBySessionLimit = 20
 // not over-attribute a multi-project run to a single project, since a session's
 // whole tree stays together. Returns the top sessions by cost.
 func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
-	// Match started_at's RFC3339-Z storage format (see windowWhere above).
-	sessWindowWhere := fmt.Sprintf("s.started_at >= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', datetime('now', '%s'))", p.interval)
+	// Same boundary parameter as every other trend subquery (p.args[0]).
+	sessWindowWhere := "s.started_at >= ?"
 	if p.repoID != "" {
 		sessWindowWhere += " AND s.repo_id = ?"
 	}

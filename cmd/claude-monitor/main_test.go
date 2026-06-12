@@ -272,7 +272,7 @@ func TestStats(t *testing.T) {
 	for _, key := range []string{
 		"totalCost", "inputTokens", "outputTokens",
 		"cacheReadTokens", "cacheCreationTokens",
-		"sessionCount", "activeSessions", "cacheHitPct",
+		"sessionCount", "agentCount", "activeSessions", "cacheHitPct",
 		"costRate", "costByModel", "costByRepo",
 		"droppedEvents",
 	} {
@@ -288,10 +288,12 @@ func TestStats(t *testing.T) {
 }
 
 // TestStatsWindows verifies each window parameter is accepted (no 400/500).
+// Stats endpoints accept both vocabularies — calendar (today/week/month) and
+// rolling (24h/7d/30d) — with shared definitions (store.WindowStart).
 func TestStatsWindows(t *testing.T) {
 	t.Parallel()
 
-	for _, window := range []string{"all", "today", "week", "month", ""} {
+	for _, window := range []string{"all", "today", "week", "month", "24h", "7d", "30d", ""} {
 		path := "/api/stats"
 		if window != "" {
 			path += "?window=" + window
@@ -353,6 +355,33 @@ func TestTrendsEndpoint(t *testing.T) {
 	}
 	if result.Buckets == nil {
 		t.Error("buckets should not be nil")
+	}
+}
+
+// TestTrendsEndpointWindows verifies trends accepts both window vocabularies
+// and rejects unknown tokens and "all" (an unbounded chart has no bucket count).
+func TestTrendsEndpointWindows(t *testing.T) {
+	t.Parallel()
+
+	for _, window := range []string{"24h", "7d", "30d", "today", "week", "month"} {
+		resp, err := http.Get(baseURL + "/api/stats/trends?window=" + window)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("window=%q: status = %d, want 200", window, resp.StatusCode)
+		}
+	}
+	for _, window := range []string{"all", "99d"} {
+		resp, err := http.Get(baseURL + "/api/stats/trends?window=" + window)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("window=%q: status = %d, want 400", window, resp.StatusCode)
+		}
 	}
 }
 
