@@ -645,3 +645,114 @@ func TestToolResultJoinIndex_UpDown(t *testing.T) {
 		t.Error("idx_events_result_lookup not restored after re-RunUp")
 	}
 }
+
+// TestFixOpus48Pricing_CorrectsBadRowAndRecomputes verifies migration 020:
+// a claude-opus-4-8 pricing row at the known-bad 3x rates ($15/$75) is
+// corrected to $5/$25, affected event costs are recomputed from tokens, and
+// session aggregates (including restart-inflated error_count) are re-synced
+// with the events ledger.
+func TestFixOpus48Pricing_CorrectsBadRowAndRecomputes(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "fix_opus_4_8_pricing") // version now 19
+
+	// Recreate the bad state: 3x pricing row, an event costed at the inflated
+	// rate, an error event, and a session row with inflated aggregates
+	// (cost at 3x, error_count doubled by restart replay).
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`UPDATE model_pricing SET input_per_mtok=15.0, output_per_mtok=75.0,
+		cache_read_per_mtok=1.5, cache_create_per_mtok=18.75 WHERE model_prefix='claude-opus-4-8'`)
+	mustExec(`INSERT INTO sessions (id, model, total_cost, input_tokens, error_count)
+		VALUES ('s-020', 'claude-opus-4-8', 15.0, 1000000, 2)`)
+	mustExec(`INSERT INTO events (session_id, uuid, message_id, model, cost_usd, input_tokens, timestamp)
+		VALUES ('s-020', 'u1', 'm1', 'claude-opus-4-8', 15.0, 1000000, '2026-06-01T00:00:00Z')`)
+	mustExec(`INSERT INTO events (session_id, uuid, message_id, is_error, timestamp)
+		VALUES ('s-020', 'u2', '', 1, '2026-06-01T00:00:01Z')`)
+
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+
+	var in, out, cr, cc float64
+	if err := db.QueryRow(`SELECT input_per_mtok, output_per_mtok, cache_read_per_mtok,
+		cache_create_per_mtok FROM model_pricing WHERE model_prefix='claude-opus-4-8'`).
+		Scan(&in, &out, &cr, &cc); err != nil {
+		t.Fatalf("pricing row: %v", err)
+	}
+	if in != 5.0 || out != 25.0 || cr != 0.50 || cc != 6.25 {
+		t.Errorf("pricing row = %v/%v/%v/%v, want 5/25/0.5/6.25", in, out, cr, cc)
+	}
+
+	var evCost float64
+	if err := db.QueryRow(`SELECT cost_usd FROM events WHERE message_id='m1'`).Scan(&evCost); err != nil {
+		t.Fatalf("event cost: %v", err)
+	}
+	if evCost != 5.0 {
+		t.Errorf("event cost_usd = %v, want 5.0 (1M input tokens at $5/MTok)", evCost)
+	}
+
+	var sessCost float64
+	var errCount int
+	if err := db.QueryRow(`SELECT total_cost, error_count FROM sessions WHERE id='s-020'`).
+		Scan(&sessCost, &errCount); err != nil {
+		t.Fatalf("session row: %v", err)
+	}
+	if sessCost != 5.0 {
+		t.Errorf("session total_cost = %v, want 5.0", sessCost)
+	}
+	if errCount != 1 {
+		t.Errorf("session error_count = %d, want 1 (doubled count must be recomputed)", errCount)
+	}
+}
+
+// TestFixOpus48Pricing_PreservesCustomPricing verifies migration 020's value
+// gate: a deliberately customized claude-opus-4-8 row (any rates other than
+// the known-bad 15/75) is left untouched and its events are not recomputed.
+func TestFixOpus48Pricing_PreservesCustomPricing(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "fix_opus_4_8_pricing")
+
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`UPDATE model_pricing SET input_per_mtok=12.0, output_per_mtok=60.0,
+		cache_read_per_mtok=1.2, cache_create_per_mtok=15.0 WHERE model_prefix='claude-opus-4-8'`)
+	mustExec(`INSERT INTO sessions (id, model, total_cost, input_tokens)
+		VALUES ('s-020c', 'claude-opus-4-8', 12.0, 1000000)`)
+	mustExec(`INSERT INTO events (session_id, uuid, message_id, model, cost_usd, input_tokens, timestamp)
+		VALUES ('s-020c', 'u1', 'm1', 'claude-opus-4-8', 12.0, 1000000, '2026-06-01T00:00:00Z')`)
+
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+
+	var in, out float64
+	if err := db.QueryRow(`SELECT input_per_mtok, output_per_mtok FROM model_pricing
+		WHERE model_prefix='claude-opus-4-8'`).Scan(&in, &out); err != nil {
+		t.Fatalf("pricing row: %v", err)
+	}
+	if in != 12.0 || out != 60.0 {
+		t.Errorf("custom pricing row = %v/%v, want 12/60 untouched", in, out)
+	}
+
+	var evCost float64
+	if err := db.QueryRow(`SELECT cost_usd FROM events WHERE message_id='m1'`).Scan(&evCost); err != nil {
+		t.Fatalf("event cost: %v", err)
+	}
+	if evCost != 12.0 {
+		t.Errorf("event cost_usd = %v, want 12.0 untouched (custom pricing)", evCost)
+	}
+}
