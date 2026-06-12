@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.3](https://github.com/Zxela/claude-monitor/compare/v3.8.2...v3.8.3) (2026-06-12)
+
+
+### Bug Fixes
+
+* correct opus-4-8 pricing, heal inflated costs and restart-doubled error counts ([#253](https://github.com/Zxela/claude-monitor/issues/253)) ([0702343](https://github.com/Zxela/claude-monitor/commit/070234343df2b0b92fe5762aa6d609e3f0f81f6f))
+
 ## [3.8.2](https://github.com/Zxela/claude-monitor/compare/v3.8.1...v3.8.2) (2026-06-12)
 
 
