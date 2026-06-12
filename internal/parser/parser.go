@@ -188,6 +188,7 @@ type modelPricing struct {
 // pricingTable is the compile-time fallback used when the DB is empty or unavailable.
 var pricingTable = map[string]modelPricing{
 	"claude-fable-5":    {10.0, 50.0, 1.0, 12.50},
+	"claude-opus-4-8":   {5.0, 25.0, 0.50, 6.25},
 	"claude-opus-4-7":   {5.0, 25.0, 0.50, 6.25},
 	"claude-opus-4-6":   {5.0, 25.0, 0.50, 6.25},
 	"claude-opus-4-5":   {5.0, 25.0, 0.50, 6.25},

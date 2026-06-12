@@ -900,14 +900,14 @@ func TestTrendPercentiles(t *testing.T) {
 	}
 
 	b := result.Buckets[0]
-	// Sorted costs: 1,2,3,...,20
-	// Median (index 10): value = 11
-	if b.MedianSessionCost != 11.0 {
-		t.Errorf("median: got %f, want 11.0", b.MedianSessionCost)
+	// Sorted costs: 1,2,3,...,20. Nearest-rank: index ceil(p*20)-1.
+	// Median: ceil(0.5*20)-1 = 9 → value 10
+	if b.MedianSessionCost != 10.0 {
+		t.Errorf("median: got %f, want 10.0", b.MedianSessionCost)
 	}
-	// P95 (index 19): value = 20
-	if b.P95SessionCost != 20.0 {
-		t.Errorf("p95: got %f, want 20.0", b.P95SessionCost)
+	// P95: ceil(0.95*20)-1 = 18 → value 19
+	if b.P95SessionCost != 19.0 {
+		t.Errorf("p95: got %f, want 19.0", b.P95SessionCost)
 	}
 }
 
@@ -1107,9 +1107,10 @@ func TestTrendByModel_CountsChildCostOnce(t *testing.T) {
 }
 
 func TestPercentile(t *testing.T) {
+	// Nearest-rank definition: 0-indexed ceil(p*n)-1.
 	data := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	if got := percentile(data, 0.5); got != 6 {
-		t.Errorf("median of 1-10: got %v, want 6", got)
+	if got := percentile(data, 0.5); got != 5 {
+		t.Errorf("median of 1-10: got %v, want 5 (nearest-rank lower median)", got)
 	}
 	if got := percentile(data, 0.95); got != 10 {
 		t.Errorf("p95 of 1-10: got %v, want 10", got)
@@ -1119,6 +1120,14 @@ func TestPercentile(t *testing.T) {
 	}
 	if got := percentile([]float64{42}, 0.5); got != 42 {
 		t.Errorf("percentile of single element: got %v, want 42", got)
+	}
+	// The motivating regression: a 2-session bucket must not report the
+	// maximum as the median (floor(2*0.5)=1 did exactly that).
+	if got := percentile([]float64{1, 3}, 0.5); got != 1 {
+		t.Errorf("median of {1,3}: got %v, want 1", got)
+	}
+	if got := percentile([]float64{1, 2, 3}, 0.5); got != 2 {
+		t.Errorf("median of {1,2,3}: got %v, want 2", got)
 	}
 }
 

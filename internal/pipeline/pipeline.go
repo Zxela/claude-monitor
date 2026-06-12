@@ -150,9 +150,22 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		// Rebuild dedup state from DB if this session was previously persisted.
 		// After a restart, in-memory dedup maps are empty, which would cause
 		// duplicate events to double-count costs, messages, and errors.
-		if ids, costs, err := p.db.LoadMessageDedup(ev.SessionID); err == nil && len(ids) > 0 {
-			// Also restore session aggregates so totals aren't reset to zero.
-			dbSess, _ := p.db.GetSession(ev.SessionID)
+		// Gate on the session existing in the DB (not on len(ids) > 0): a
+		// session whose only persisted events are errors has no message-id'd
+		// rows, but its err: dedup keys and error_count still need rebuilding
+		// or replay re-inflates the count on every restart.
+		ids, costs, dedupErr := p.db.LoadMessageDedup(ev.SessionID)
+		dbSess, _ := p.db.GetSession(ev.SessionID)
+		if dedupErr == nil && (len(ids) > 0 || dbSess != nil) {
+			// Seed the "err:" dedup keys from persisted error events. Without
+			// them, bootstrap replay of the JSONL re-fires ErrorCount++ for every
+			// historical error line on top of the recounted baseline below —
+			// doubling sessions.error_count on every restart.
+			if errIDs, errIDsErr := p.db.LoadErrorDedup(ev.SessionID); errIDsErr == nil {
+				for _, id := range errIDs {
+					ids["err:"+id] = true
+				}
+			}
 			// Recompute the cost/token aggregates from the SAME per-message map
 			// just rebuilt from events, rather than copying the stored sessions
 			// columns. The stored values can be stale (e.g. accumulated across
@@ -496,8 +509,13 @@ func (p *Pipeline) applySessionMeta(s *session.Session, msg *parser.Event, ev wa
 		s.SessionName = msg.ContentText
 	}
 
-	// Task description from first user message
-	if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" {
+	// Task description from the first user message that is actual user prose.
+	// Local-command echoes and harness-injected blocks (<local-command-caveat>,
+	// <command-name>, <system-reminder>, …) arrive as user-role lines before the
+	// real task; taking one of those produced garbage Task lines in History and
+	// the autopsy. Skip them and wait for the next user message.
+	if s.TaskDescription == "" && msg.Role == "user" && msg.ContentText != "" &&
+		!isHarnessInjectedContent(msg.ContentText) {
 		desc := msg.ContentText
 		if len([]rune(desc)) > 200 {
 			desc = string([]rune(desc)[:200])
@@ -636,6 +654,23 @@ func (p *Pipeline) applyParentDetection(s *session.Session, msg *parser.Event, e
 }
 
 // applyCostDedup handles error tracking, cost/token dedup, and message counting.
+// isHarnessInjectedContent reports whether a user-role message body is a
+// harness artifact rather than user prose: local-command echoes, caveat
+// wrappers, system reminders, and task notifications all arrive as user-role
+// lines and must not become a session's TaskDescription.
+func isHarnessInjectedContent(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, tag := range []string{
+		"<local-command-", "<command-", "<system-reminder>",
+		"<task-notification>", "<user-prompt-submit-hook>",
+	} {
+		if strings.HasPrefix(t, tag) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
 	// Error tracking. Dedup on the stable event identity (message_id, else the
 	// per-line uuid) so a re-emitted error line cannot be counted twice and an

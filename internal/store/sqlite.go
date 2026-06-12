@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -567,6 +568,31 @@ func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]ses
 		}
 	}
 	return ids, costs, rows.Err()
+}
+
+// LoadErrorDedup returns the distinct stable identities (message_id, else uuid)
+// of a session's persisted error events. Used to rebuild the in-memory "err:"
+// dedup keys after a restart so bootstrap replay does not re-increment
+// error_count for errors already counted — the counterpart of LoadMessageDedup
+// for the error path, matching CountSessionErrors' identity definition.
+func (d *DB) LoadErrorDedup(sessionID string) ([]string, error) {
+	rows, err := d.rdb.Query(`SELECT DISTINCT COALESCE(NULLIF(message_id,''), uuid)
+		FROM events WHERE session_id = ? AND is_error = 1`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, rows.Err()
 }
 
 // CountSessionErrors returns the number of distinct error events for a session,
@@ -1308,12 +1334,18 @@ func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
 	return bySession, nil
 }
 
-// percentile returns the value at the given percentile (0-1) from a sorted slice.
+// percentile returns the value at the given percentile (0-1) from a sorted
+// slice, using the nearest-rank definition: ceil(p*n)-1 (0-indexed). The
+// previous floor(p*n) index was biased one rank high — in a 2-session bucket
+// it reported the maximum as the "median", which 24h trend views hit often.
 func percentile(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int(float64(len(sorted)) * p)
+	idx := int(math.Ceil(float64(len(sorted))*p)) - 1
+	if idx < 0 {
+		idx = 0
+	}
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}

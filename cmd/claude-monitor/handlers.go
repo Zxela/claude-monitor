@@ -635,7 +635,7 @@ func handleSessionAutopsy(sessionStore *session.Store, historyDB *store.DB) http
 			sess = row.ToSession()
 		}
 
-		events, err := historyDB.ListEvents(id, 5000, 0)
+		events, err := historyDB.ListEvents(id, autopsyEventLimit, 0)
 		if err != nil {
 			writeJSONError(w, "failed to list session events", http.StatusInternalServerError)
 			return
@@ -648,6 +648,10 @@ func handleSessionAutopsy(sessionStore *session.Store, historyDB *store.DB) http
 		_, _ = w.Write([]byte(report))
 	}
 }
+
+// autopsyEventLimit caps the event scan for command/error extraction; the
+// report notes when a session exceeds it instead of truncating silently.
+const autopsyEventLimit = 5000
 
 func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow) string {
 	const (
@@ -711,6 +715,12 @@ func buildSessionAutopsyMarkdown(sess *session.Session, events []store.EventRow)
 		for _, errLine := range errors {
 			fmt.Fprintf(&sb, "- %s\n", errLine)
 		}
+		if sess.ErrorCount > len(errors) {
+			fmt.Fprintf(&sb, "\n_Showing %d of %d errors._\n", len(errors), sess.ErrorCount)
+		}
+	}
+	if len(events) >= autopsyEventLimit {
+		fmt.Fprintf(&sb, "\n_Note: command and error extraction scanned the first %d events; the session has more._\n", autopsyEventLimit)
 	}
 
 	return sb.String()
@@ -752,7 +762,10 @@ func formatRFC3339(t time.Time) string {
 	if t.IsZero() {
 		return "n/a"
 	}
-	return t.Format(time.RFC3339)
+	// Normalize to UTC: StartedAt and LastActive can carry different zones
+	// (DB rows parse as UTC, live sessions hold local time), which previously
+	// rendered mixed-timezone Started/Ended lines in the same report.
+	return t.UTC().Format(time.RFC3339)
 }
 
 func sessionDuration(sess *session.Session) string {
