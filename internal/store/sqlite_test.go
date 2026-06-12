@@ -286,7 +286,7 @@ func TestSaveSession_InsertAndUpdate(t *testing.T) {
 	}
 }
 
-func TestAggregateStats_IncludesChildren(t *testing.T) {
+func TestAggregateStats_TopLevelSessionsAndAgentsSplit(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
@@ -314,9 +314,13 @@ func TestAggregateStats_IncludesChildren(t *testing.T) {
 		t.Fatalf("AggregateStats failed: %v", err)
 	}
 
-	// Both sessions should be counted (no parent_id filter)
-	if agg.SessionCount != 2 {
-		t.Errorf("SessionCount: got %d, want 2", agg.SessionCount)
+	// SessionCount is top-level only; the child surfaces as AgentCount. Cost
+	// and tokens still include the child's spend (counted once).
+	if agg.SessionCount != 1 {
+		t.Errorf("SessionCount: got %d, want 1 (top-level only)", agg.SessionCount)
+	}
+	if agg.AgentCount != 1 {
+		t.Errorf("AgentCount: got %d, want 1 (the child row)", agg.AgentCount)
 	}
 	if agg.TotalCost != 2.50 {
 		t.Errorf("TotalCost: got %f, want 2.50", agg.TotalCost)
@@ -1198,9 +1202,53 @@ func TestTrendData_InvalidWindow(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	_, err := db.TrendData("99d", "")
-	if err == nil {
-		t.Fatal("expected error for invalid window, got nil")
+	for _, window := range []string{"99d", "all", ""} {
+		if _, err := db.TrendData(window, ""); err == nil {
+			t.Errorf("TrendData(%q): expected error, got nil", window)
+		}
+	}
+}
+
+// TestTrendData_CalendarWindows verifies the calendar tokens share the
+// /api/stats definitions: "today" starts at local midnight (hourly buckets) and
+// excludes yesterday; "week" and "month" bucket daily.
+func TestTrendData_CalendarWindows(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	insertTestSession(t, db, "s-today", todayStart.Add(30*time.Minute), 1.00, 100, 50, 30, 10)
+	insertTestSession(t, db, "s-yesterday", todayStart.Add(-2*time.Hour), 2.00, 200, 100, 60, 20)
+
+	result, err := db.TrendData("today", "")
+	if err != nil {
+		t.Fatalf("TrendData(today) failed: %v", err)
+	}
+	if result.Window != "today" {
+		t.Errorf("Window: got %q, want today", result.Window)
+	}
+	if result.Summary.SessionCount != 1 {
+		t.Errorf("today sessionCount: got %d, want 1 (yesterday's session excluded)", result.Summary.SessionCount)
+	}
+	if result.Summary.TotalCost != 1.00 {
+		t.Errorf("today totalCost: got %f, want 1.00", result.Summary.TotalCost)
+	}
+
+	for _, window := range []string{"week", "month"} {
+		result, err := db.TrendData(window, "")
+		if err != nil {
+			t.Fatalf("TrendData(%s) failed: %v", window, err)
+		}
+		if result.Window != window {
+			t.Errorf("Window: got %q, want %s", result.Window, window)
+		}
+		// Both rows fall inside the current ISO week only if today isn't Monday
+		// with yesterday in last week (same for month boundaries), so only
+		// assert the boundary-independent invariant: at least today's session.
+		if result.Summary.SessionCount < 1 {
+			t.Errorf("%s sessionCount: got %d, want >= 1", window, result.Summary.SessionCount)
+		}
 	}
 }
 
@@ -1235,6 +1283,10 @@ func TestTrendData_CountsChildCostOnceButNotAsSession(t *testing.T) {
 	// SessionCount counts top-level sessions only (parent_id empty): parent only.
 	if result.Summary.SessionCount != 1 {
 		t.Errorf("expected 1 session (parent only), got %d", result.Summary.SessionCount)
+	}
+	// The child surfaces as an agent instead.
+	if result.Summary.AgentCount != 1 {
+		t.Errorf("expected 1 agent (the child row), got %d", result.Summary.AgentCount)
 	}
 	// Cost is summed across ALL rows so the child's spend is counted once:
 	// 5.00 (parent) + 1.00 (child) = 6.00.
@@ -2391,10 +2443,13 @@ func TestAggregateStatsByRepo_IncludesChildCostOnce(t *testing.T) {
 	if agg.InputTokens != 600 {
 		t.Errorf("InputTokens: got %d, want 600", agg.InputTokens)
 	}
-	// Both rows count toward the per-repo aggregate session count (this aggregate
-	// counts every row; trend SessionCount is the top-level-only definition).
-	if agg.SessionCount != 2 {
-		t.Errorf("SessionCount: got %d, want 2", agg.SessionCount)
+	// SessionCount is top-level only (matching trends); the child surfaces as
+	// AgentCount.
+	if agg.SessionCount != 1 {
+		t.Errorf("SessionCount: got %d, want 1 (top-level only)", agg.SessionCount)
+	}
+	if agg.AgentCount != 1 {
+		t.Errorf("AgentCount: got %d, want 1 (the child row)", agg.AgentCount)
 	}
 	// The child's distinct model still contributes its cost to the model breakdown.
 	if agg.CostByModel["claude-sonnet-4-6"] != 1.00 {

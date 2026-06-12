@@ -223,6 +223,9 @@ const WINDOW_LABELS: Record<string, string> = {
   week: 'this week',
   month: 'this month',
   all: 'all time',
+  '24h': 'last 24h',
+  '7d': 'last 7d',
+  '30d': 'last 30d',
 };
 
 function updateStats(): void {

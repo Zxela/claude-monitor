@@ -67,13 +67,20 @@ export async function fetchRepos(): Promise<RepoEntry[]> {
   return request<RepoEntry[]>(`/api/repos`);
 }
 
-export type StatsWindow = 'all' | 'today' | 'week' | 'month';
+// Both vocabularies share one definition across every stats endpoint:
+// calendar tokens (today = local midnight, week = ISO-week Monday, month =
+// 1st of month) and rolling tokens (24h/7d/30d). Picking the same token in
+// two views therefore always yields the same numbers.
+export type CalendarWindow = 'today' | 'week' | 'month';
+export type RollingWindow = '24h' | '7d' | '30d';
+
+export type StatsWindow = 'all' | CalendarWindow | RollingWindow;
 
 export async function fetchStats(window: StatsWindow = 'today'): Promise<Stats> {
   return request<Stats>(`/api/stats?window=${window}`);
 }
 
-export type TrendWindow = '24h' | '7d' | '30d';
+export type TrendWindow = CalendarWindow | RollingWindow;
 
 export async function fetchTrends(window: TrendWindow = '7d', repo?: string): Promise<TrendResult> {
   const params = new URLSearchParams({ window });

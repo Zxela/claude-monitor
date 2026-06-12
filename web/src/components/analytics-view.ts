@@ -9,8 +9,11 @@ import '../styles/analytics.css';
 
 let container: HTMLElement | null = null;
 let root: HTMLElement | null = null;
-let currentWindow: TrendWindow =
-  (localStorage.getItem('claude-monitor-analytics-window') as TrendWindow) || '7d';
+// Validate the persisted token: an unrecognized value would 400 on every
+// fetch and leave the analytics page permanently blank.
+const TREND_WINDOWS: TrendWindow[] = ['today', 'week', 'month', '24h', '7d', '30d'];
+const storedWindow = localStorage.getItem('claude-monitor-analytics-window') as TrendWindow;
+let currentWindow: TrendWindow = TREND_WINDOWS.includes(storedWindow) ? storedWindow : '7d';
 let currentRepo: string | undefined;
 let repos: RepoEntry[] = [];
 let trendData: TrendResult | null = null;
@@ -65,7 +68,10 @@ function show(): void {
 
   const windowToggle = document.createElement('div');
   windowToggle.className = 'analytics-window-toggle';
-  for (const w of ['24h', '7d', '30d'] as TrendWindow[]) {
+  // Calendar tokens share definitions with the topbar window toggle (local
+  // midnight / ISO-week Monday / 1st of month), so TODAY here and TODAY in the
+  // topbar always agree; the rolling tokens remain for trailing-window views.
+  for (const w of TREND_WINDOWS) {
     const btn = document.createElement('button');
     btn.className = `analytics-win-btn${currentWindow === w ? ' active' : ''}`;
     btn.textContent = w.toUpperCase();
@@ -118,11 +124,10 @@ function show(): void {
       <div class="analytics-stat-val orange">${s ? s.cacheHitPct.toFixed(0) + '%' : '—'}</div>
       <div class="analytics-stat-label">CACHE HIT</div>
     </div>
-    <div class="analytics-stat" title="Counts top-level sessions only (excludes subagent/workflow rows)">
+    <div class="analytics-stat" title="Top-level sessions, plus workflow/subagent runs as a separate count">
       <div class="analytics-stat-val purple">${s ? String(s.sessionCount) : '—'}</div>
-      <div class="analytics-stat-label">TOP-LEVEL SESSIONS</div>
-    </div>
-  `;
+      <div class="analytics-stat-label">SESSIONS${s && s.agentCount > 0 ? ` (+${s.agentCount} AGENTS)` : ''}</div>
+    </div>`;
   root.appendChild(summary);
 
   // Cards container
