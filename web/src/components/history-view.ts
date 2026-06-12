@@ -142,11 +142,15 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 async function loadData(append = false): Promise<void> {
   if (state.view !== 'history') return; // Guard against stale timer callbacks
-  if (append) {
-    if (reachedEnd || loadingMore) return;
-    loadingMore = true;
-  } else {
-    // First load or refresh: start over from page 0 so new sessions appear.
+  if (loadingMore) return; // a page append or refresh is already in flight
+  if (append && reachedEnd) return;
+  loadingMore = true;
+  // Append loads exactly one more page. Refresh refetches every page already
+  // on screen (the server caps limit at 500, so it pages in PAGE chunks)
+  // instead of collapsing back to page 1 — a background refresh must not
+  // shrink the list out from under a user who has scrolled deep.
+  const target = append ? offset + PAGE : Math.max(offset, PAGE);
+  if (!append) {
     offset = 0;
     reachedEnd = false;
     seenIds.clear();
@@ -166,17 +170,19 @@ async function loadData(append = false): Promise<void> {
       });
   }
   try {
-    const raw = await fetchSessions(PAGE, offset);
-    if (state.view !== 'history') return; // Re-check after async
-    if (raw.length < PAGE) reachedEnd = true;
-    offset += PAGE;
-    // Filter out trivial sessions (no cost, no tokens, few messages) and dedupe
-    // by id so an overlapping/refetched page never produces duplicate rows.
-    for (const s of raw) {
-      if (seenIds.has(s.id)) continue;
-      if (!(s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3)) continue;
-      seenIds.add(s.id);
-      data.push(s);
+    while (offset < target && !reachedEnd) {
+      const raw = await fetchSessions(PAGE, offset);
+      if (state.view !== 'history') return; // Re-check after async
+      if (raw.length < PAGE) reachedEnd = true;
+      offset += PAGE;
+      // Filter out trivial sessions (no cost, no tokens, few messages) and dedupe
+      // by id so an overlapping/refetched page never produces duplicate rows.
+      for (const s of raw) {
+        if (seenIds.has(s.id)) continue;
+        if (!(s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3)) continue;
+        seenIds.add(s.id);
+        data.push(s);
+      }
     }
     show();
   } catch (err) {
@@ -279,8 +285,15 @@ function workflowSummary(children: Session[]): { id: string; count: number; cost
   return [...byWorkflow.values()];
 }
 
-function show(): void {
+function show(resetScroll = false): void {
   if (!container) return;
+  // show() rebuilds the whole .view-overlay scroll container, which resets
+  // scrollTop to 0 — so carry the position over to the new element. Otherwise
+  // paging in more rows (or a background refresh) teleports the user to the
+  // top. resetScroll opts out for re-renders where the old position is
+  // meaningless, e.g. re-sorting.
+  const prevOverlay = container.querySelector('.view-overlay');
+  const prevScroll = !resetScroll && prevOverlay ? prevOverlay.scrollTop : 0;
   container.innerHTML = '';
 
   const wrapper = document.createElement('div');
@@ -346,7 +359,8 @@ function show(): void {
         sortCol = col.key;
         sortAsc = false;
       }
-      show();
+      // Re-sorting reorders every row, so jump to the top of the new order.
+      show(true);
     };
     th.addEventListener('click', sortByCol);
     th.addEventListener('keydown', (e) => {
@@ -503,6 +517,7 @@ function show(): void {
   }
 
   container.appendChild(wrapper);
+  if (prevScroll > 0) wrapper.scrollTop = prevScroll;
 }
 
 // mergeSkills combines several per-session skill lists into one, summing uses
