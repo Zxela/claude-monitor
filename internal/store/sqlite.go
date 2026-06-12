@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -274,9 +275,18 @@ type DB struct {
 // many file handles open.
 const readPoolSize = 4
 
+// dsn builds a file: URI for path with the given pragma options. SQLite's URI
+// parser treats ? and # as delimiters and decodes %XX sequences, so those
+// three characters must be escaped for the path to round-trip; everything
+// else (including spaces) passes through literally.
+func dsn(path, pragmas string) string {
+	escaped := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
+	return "file:" + escaped + "?" + pragmas
+}
+
 // Open opens a SQLite database at the given path and runs pending migrations.
 func Open(path string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	sqlDB, err := sql.Open("sqlite", dsn(path, "_pragma=busy_timeout(5000)"))
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +305,7 @@ func Open(path string) (*DB, error) {
 	// WAL mode supports any number of readers concurrent with the single
 	// writer. Reads go through a separate read-only pool so API queries are
 	// not serialized behind long-running ingest or retention transactions.
-	rdb, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	rdb, err := sql.Open("sqlite", dsn(path, "_pragma=busy_timeout(5000)&_pragma=query_only(1)"))
 	if err != nil {
 		sqlDB.Close()
 		return nil, err
@@ -314,9 +324,9 @@ func (d *DB) Close() error {
 	return rErr
 }
 
-// Ping verifies the database connection is alive.
+// Ping verifies both database pools are alive.
 func (d *DB) Ping() error {
-	return d.db.Ping()
+	return errors.Join(d.db.Ping(), d.rdb.Ping())
 }
 
 // --- Repos ---

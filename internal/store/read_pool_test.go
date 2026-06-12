@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -34,22 +36,53 @@ func TestReadsNotBlockedByWriteTransaction(t *testing.T) {
 		t.Fatalf("write inside transaction failed: %v", err)
 	}
 
-	done := make(chan error, 1)
+	type listResult struct {
+		rows []SessionRow
+		err  error
+	}
+	done := make(chan listResult, 1)
 	go func() {
 		rows, err := db.ListSessions(10, 0)
-		if err == nil && len(rows) != 1 {
-			t.Errorf("ListSessions returned %d rows, want 1", len(rows))
-		}
-		done <- err
+		done <- listResult{rows: rows, err: err}
 	}()
 
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("ListSessions failed: %v", err)
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("ListSessions failed: %v", res.err)
+		}
+		if len(res.rows) != 1 {
+			t.Errorf("ListSessions returned %d rows, want 1", len(res.rows))
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("read query blocked behind held write transaction")
+	}
+}
+
+// TestOpenPathWithSpecialChars verifies the file: DSN escapes characters that
+// SQLite's URI parser would otherwise treat as delimiters or percent-escapes.
+func TestOpenPathWithSpecialChars(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "odd %dir #1?")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	path := filepath.Join(dir, "test.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q) failed: %v", path, err)
+	}
+	defer db.Close()
+
+	if err := db.SetSetting("k", "v"); err != nil {
+		t.Fatalf("SetSetting failed: %v", err)
+	}
+	if got, err := db.GetSetting("k"); err != nil || got != "v" {
+		t.Fatalf("GetSetting = %q, %v; want \"v\", nil", got, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("database file not created at literal path: %v", err)
 	}
 }
 
