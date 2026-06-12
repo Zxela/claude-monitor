@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.1](https://github.com/Zxela/claude-monitor/compare/v3.8.0...v3.8.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* index the tool_use→tool_result self-join so tool/skill stats stop scanning whole sessions ([#247](https://github.com/Zxela/claude-monitor/issues/247)) ([3f6acf8](https://github.com/Zxela/claude-monitor/commit/3f6acf889e4b3103946ff0f8d149a3f199d6cc3e))
+
 ## [3.8.0](https://github.com/Zxela/claude-monitor/compare/v3.7.1...v3.8.0) (2026-06-12)
 
 
