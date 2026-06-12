@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.8.0](https://github.com/Zxela/claude-monitor/compare/v3.7.1...v3.8.0) (2026-06-12)
+
+
+### Features
+
+* add Claude Fable 5 model pricing ([#243](https://github.com/Zxela/claude-monitor/issues/243)) ([95662b6](https://github.com/Zxela/claude-monitor/commit/95662b6bc5c995fc3eb7256994bb4a2aa5b2b6b6))
+
+
+### Bug Fixes
+
+* serve reads from a concurrent read-only pool so API queries don't queue behind writes ([#245](https://github.com/Zxela/claude-monitor/issues/245)) ([d17ff7c](https://github.com/Zxela/claude-monitor/commit/d17ff7c70087e20ce21646931bf5488b61aa31bc))
+
 ## [3.7.1](https://github.com/Zxela/claude-monitor/compare/v3.7.0...v3.7.1) (2026-06-02)
 
 
