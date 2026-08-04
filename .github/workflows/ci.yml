@@ -47,6 +47,60 @@ jobs:
       - name: Vet
         run: go vet $(go list ./... | grep -v /node_modules/)
 
+  # Boots the server and checks api/openapi.yaml against it in both directions:
+  # responses that violate the spec, and responses carrying fields the spec does
+  # not document. Also asserts every route registered in main.go is documented,
+  # which is what let /api/stats/tools and /api/skills/sessions ship invisible.
+  api-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Install validator dependencies
+        run: python3 -m pip install --quiet pyyaml jsonschema
+
+      - name: Create embed placeholder
+        run: mkdir -p cmd/claude-monitor/static && echo '<!doctype html>' > cmd/claude-monitor/static/index.html
+
+      - name: Validate OpenAPI spec against the running API
+        run: |
+          go build -o /tmp/claude-monitor ./cmd/claude-monitor
+          # Point HOME at a scratch dir so the run gets its own empty database
+          # instead of touching anything pre-existing. Done after `go build`, so
+          # the module cache under the real HOME is still used.
+          WORKSPACE="$PWD"
+          HOME="$(mktemp -d)"
+          export HOME
+          mkdir -p "$HOME/.claude/projects"
+          /tmp/claude-monitor -port 7799 >/tmp/server.log 2>&1 &
+          server=$!
+          for _ in $(seq 1 40); do
+            curl -sf http://127.0.0.1:7799/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          set +e
+          python3 "$WORKSPACE/api/validate_spec.py" \
+            http://127.0.0.1:7799 \
+            "$WORKSPACE/api/openapi.yaml" \
+            "$WORKSPACE/cmd/claude-monitor/main.go"
+          status=$?
+          set -e
+          kill "$server" 2>/dev/null || true
+          if [ "$status" -ne 0 ]; then
+            echo "::error::openapi.yaml and the running API disagree — see the report above"
+            echo "--- server log ---"
+            tail -30 /tmp/server.log
+          fi
+          exit "$status"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -100,7 +154,7 @@ jobs:
       contents: write
       pull-requests: write
     if: github.ref == 'refs/heads/main'
-    needs: [build-and-test, lint]
+    needs: [build-and-test, lint, api-spec]
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
