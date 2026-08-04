@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.8.4](https://github.com/Zxela/claude-monitor/compare/v3.8.3...v3.8.4) (2026-08-04)
+
+
+### Bug Fixes
+
+* **api:** correct OpenAPI spec drift and cover the per-repo 404 contract ([#262](https://github.com/Zxela/claude-monitor/issues/262)) ([d2abb41](https://github.com/Zxela/claude-monitor/commit/d2abb41ea38af35612e61987ddad67e4abf978e5))
+* patched Go toolchain, enforced formatting, working hooks, and an OpenAPI conformance check ([#270](https://github.com/Zxela/claude-monitor/issues/270)) ([1d1fc7b](https://github.com/Zxela/claude-monitor/commit/1d1fc7bf26d943d4b1dec770e2276385c01bca00))
+* unify reporting semantics (tool errors, windows, session counts) ([#256](https://github.com/Zxela/claude-monitor/issues/256)) ([d3f1c3d](https://github.com/Zxela/claude-monitor/commit/d3f1c3d9bdbd2b4b7ebf41711e5b07ad1c895487))
+
 ## [3.8.3](https://github.com/Zxela/claude-monitor/compare/v3.8.2...v3.8.3) (2026-06-12)
 
 
