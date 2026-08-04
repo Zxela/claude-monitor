@@ -1,0 +1,36 @@
+# lefthook git hooks — https://lefthook.dev
+#
+# Enable once per clone:  lefthook install
+# Run manually:           lefthook run pre-push
+#
+# pre-push runs the full validation suite (mirrors CI) before code leaves your
+# machine. Push is infrequent, so the cost is acceptable and it catches what a
+# fast pre-commit hook cannot.
+#
+# There is deliberately no pre-commit formatter step: formatting is enforced in
+# CI, and a hook that rewrites staged files needs a formatter config that
+# actually matches the tree (see CONTRIBUTING).
+
+pre-push:
+  parallel: true
+  commands:
+    frontend-typecheck:
+      run: cd web && npx tsc --noEmit
+    frontend-test:
+      run: cd web && npm test
+    go-build:
+      # `./...` would also match Go source vendored inside web/node_modules —
+      # some npm packages ship a Go port. Same exclusion as the Makefile/CI.
+      run: go build $(go list ./... | grep -v /node_modules/)
+    go-vet:
+      run: go vet $(go list ./... | grep -v /node_modules/)
+    go-mod-tidy:
+      run: go mod tidy -diff
+    go-test:
+      # Strip inherited GIT_* vars: `git push` runs this hook with GIT_DIR /
+      # GIT_WORK_TREE exported, which makes git-dependent tests (e.g. the
+      # internal/repo resolver) resolve THIS repo instead of their own temp
+      # dirs and fail spuriously. CI doesn't hit this — it runs go test directly.
+      run: >
+        env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_COMMON_DIR
+        go test $(go list ./... | grep -v /node_modules/) -count=1

@@ -37,11 +37,26 @@ make dev       # start Go backend + Vite dev server
 ## Testing
 
 ```bash
-make test    # Go tests
-make lint    # Go vet + TypeScript type-check
+make test              # Go tests
+make lint              # Go vet + TypeScript type-check
+cd web && npm test     # frontend tests (vitest)
 ```
 
-There are no frontend tests yet.
+The frontend has tests — 45 of them across 7 files — and CI runs them. They are
+not wired into `make test`, which covers Go only.
+
+## Git Hooks
+
+Hooks are managed by [lefthook](https://lefthook.dev) and are opt-in per clone:
+
+```bash
+lefthook install
+```
+
+That installs a `pre-push` hook running the full validation suite in parallel
+(Go build/vet/test, `go mod tidy -diff`, frontend `tsc` and tests) — about nine
+seconds. There is no pre-commit hook; CI is the backstop, and pre-push catches
+problems before anything leaves your machine.
 
 ## Commit Convention
 
