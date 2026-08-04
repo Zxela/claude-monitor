@@ -686,8 +686,14 @@ type WorkflowRow struct {
 // most-recent activity. Cost is summed across every agent row in the workflow,
 // so a workflow's spend is counted exactly once across its agents.
 //
-// workflow_id is nullable (migration 013 adds it as plain TEXT, no DEFAULT ”),
-// so the non-empty filter uses COALESCE(workflow_id,”) <> ”.
+// workflow_id is nullable (migration 013 adds it as plain TEXT with no default),
+// so the non-empty filter coalesces NULL to the empty string before comparing:
+//
+//	COALESCE(workflow_id, '') <> ''
+//
+// The SQL above is an indented doc-comment code block on purpose. In ordinary
+// prose gofmt rewrites the two-apostrophe quoting convention into a Unicode
+// right double quote, which would misdocument the query.
 func (d *DB) ListWorkflows() ([]WorkflowRow, error) {
 	rows, err := d.rdb.Query(`SELECT workflow_id, COUNT(*), COALESCE(SUM(total_cost),0), COALESCE(MAX(ended_at),'')
 		FROM sessions WHERE COALESCE(workflow_id,'') <> '' GROUP BY workflow_id ORDER BY MAX(ended_at) DESC`)
