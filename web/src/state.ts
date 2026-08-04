@@ -95,7 +95,9 @@ export const state: AppState = {
   updateDismissed: false,
   historyShowSubagents: false,
   stats: null,
-  statsWindow: (localStorage.getItem('claude-monitor-stats-window') as StatsWindow) || 'today',
+  statsWindow:
+    (localStorage.getItem('claude-monitor-stats-window') as StatsWindow) ||
+    'today',
   sidebarCollapsed: false,
   collapsedSubagents: new Set<string>(),
 };

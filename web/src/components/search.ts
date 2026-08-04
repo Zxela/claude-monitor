@@ -17,9 +17,11 @@ export function render(searchBoxEl: HTMLElement): void {
 
   // Close dropdown on outside click
   document.addEventListener('click', (e) => {
-    if (!dropdown || dropdown.classList.contains('search-dropdown-hidden')) return;
+    if (!dropdown || dropdown.classList.contains('search-dropdown-hidden'))
+      return;
     if (!searchBoxEl.contains(e.target as Node)) {
-      const searchInput = document.querySelector<HTMLInputElement>('[data-search]');
+      const searchInput =
+        document.querySelector<HTMLInputElement>('[data-search]');
       if (searchInput) searchInput.value = '';
       update({ searchQuery: '', searchOpen: false, searchResults: [] });
     }
@@ -49,12 +51,21 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
         });
       } catch (err) {
         console.error('Search failed:', err);
-        update({ searchResults: [], searchLoading: false, searchError: true, searchedFull: false });
+        update({
+          searchResults: [],
+          searchLoading: false,
+          searchError: true,
+          searchedFull: false,
+        });
       }
     }, 300);
   }
 
-  if (changed.has('searchResults') || changed.has('searchLoading') || changed.has('searchedFull')) {
+  if (
+    changed.has('searchResults') ||
+    changed.has('searchLoading') ||
+    changed.has('searchedFull')
+  ) {
     renderResults();
   }
 
@@ -90,7 +101,10 @@ function renderResults(): void {
     return;
   }
 
-  const groups = new Map<string, { name: string; project: string; results: Event[] }>();
+  const groups = new Map<
+    string,
+    { name: string; project: string; results: Event[] }
+  >();
   for (const r of state.searchResults as unknown as Event[]) {
     let group = groups.get(r.sessionId);
     if (!group) {
@@ -137,7 +151,8 @@ function renderResults(): void {
           searchQuery: '',
           searchHighlightEventId: result.id ?? null,
         });
-        const searchInput = document.querySelector<HTMLInputElement>('[data-search]');
+        const searchInput =
+          document.querySelector<HTMLInputElement>('[data-search]');
         if (searchInput) searchInput.value = '';
       });
       dropdown.appendChild(el);
@@ -162,12 +177,14 @@ function searchPreview(r: Event, query?: string): string {
   // If we have a query, prefer the field that contains the match
   if (query) {
     const q = query.toLowerCase();
-    if (detail && detail.toLowerCase().includes(q)) return name ? `${name}: ${detail}` : detail;
+    if (detail && detail.toLowerCase().includes(q))
+      return name ? `${name}: ${detail}` : detail;
     if (cp && cp.toLowerCase().includes(q)) return cp;
     // Try individual words
     const words = q.split(/\s+/).filter((w) => w.length > 1);
     for (const w of words) {
-      if (detail && detail.toLowerCase().includes(w)) return name ? `${name}: ${detail}` : detail;
+      if (detail && detail.toLowerCase().includes(w))
+        return name ? `${name}: ${detail}` : detail;
     }
   }
 
@@ -197,9 +214,15 @@ function formatTime(ts: string): string {
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   if (isToday) return time;
-  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const date = d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
   return `${date} ${time}`;
 }
 
@@ -225,7 +248,9 @@ function highlightMatch(text: string, query: string): string {
       const start = Math.max(0, matchIdx - padding);
       const end = Math.min(text.length, start + maxLen);
       truncated =
-        (start > 0 ? '...' : '') + text.substring(start, end) + (end < text.length ? '...' : '');
+        (start > 0 ? '...' : '') +
+        text.substring(start, end) +
+        (end < text.length ? '...' : '');
     } else {
       truncated = text.substring(0, maxLen) + '...';
     }
@@ -234,7 +259,8 @@ function highlightMatch(text: string, query: string): string {
   const escaped = escapeHtml(truncated);
   // Highlight all query words individually
   const words = query.split(/\s+/).filter((w) => w.length > 1);
-  const pattern = words.length > 0 ? words.map(escapeRegex).join('|') : escapeRegex(query);
+  const pattern =
+    words.length > 0 ? words.map(escapeRegex).join('|') : escapeRegex(query);
   const re = new RegExp(`(${pattern})`, 'gi');
   return escaped.replace(re, '<mark>$1</mark>');
 }

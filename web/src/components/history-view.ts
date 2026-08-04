@@ -3,7 +3,11 @@ import type { Session, SessionSkills, ToolUsageEntry } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { fetchSessions, fetchSessionSkills } from '../api';
-import { formatDurationSecs, formatTokens, effectiveInputTokens } from '../utils';
+import {
+  formatDurationSecs,
+  formatTokens,
+  effectiveInputTokens,
+} from '../utils';
 import '../styles/views.css';
 
 function sessionIdentifier(s: Session): string {
@@ -43,7 +47,12 @@ const treeCostMap = new Map<string, number>();
 let sessionSkills: SessionSkills = {};
 let skillsLoaded = false;
 
-type Column = { key: string; label: string; cls?: string; fmt: (r: Session) => string };
+type Column = {
+  key: string;
+  label: string;
+  cls?: string;
+  fmt: (r: Session) => string;
+};
 
 const COLUMNS: Column[] = [
   {
@@ -52,16 +61,28 @@ const COLUMNS: Column[] = [
     cls: 'col-dim',
     fmt: (r) => (r.lastActive ? new Date(r.lastActive).toLocaleString() : ''),
   },
-  { key: 'session', label: 'Session', cls: 'col-session', fmt: sessionIdentifier },
+  {
+    key: 'session',
+    label: 'Session',
+    cls: 'col-session',
+    fmt: sessionIdentifier,
+  },
   { key: 'project', label: 'Project', cls: 'col-dim', fmt: projectLabel },
-  { key: 'totalCost', label: 'Cost', cls: 'col-cost', fmt: (r) => `$${r.totalCost.toFixed(2)}` },
+  {
+    key: 'totalCost',
+    label: 'Cost',
+    cls: 'col-cost',
+    fmt: (r) => `$${r.totalCost.toFixed(2)}`,
+  },
   {
     key: 'duration',
     label: 'Duration',
     cls: 'col-dim',
     fmt: (r) => {
       if (!r.startedAt || !r.lastActive) return '';
-      const secs = (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000;
+      const secs =
+        (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) /
+        1000;
       return formatDurationSecs(secs);
     },
   },
@@ -76,7 +97,8 @@ const COLUMNS: Column[] = [
     label: 'Cache%',
     cls: 'col-cache',
     fmt: (r) => {
-      const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
+      const total =
+        r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
       if (total === 0) return '';
       return `${Math.round((r.cacheReadTokens / total) * 100)}%`;
     },
@@ -108,7 +130,8 @@ function showLoading(): void {
   container.innerHTML = '';
   const wrapper = document.createElement('div');
   wrapper.className = 'view-overlay';
-  wrapper.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text-dim);font-family:var(--font-mono);font-size:12px;letter-spacing:1px">LOADING HISTORY...</div>';
+  wrapper.innerHTML =
+    '<div style="text-align:center;padding:48px;color:var(--text-dim);font-family:var(--font-mono);font-size:12px;letter-spacing:1px">LOADING HISTORY...</div>';
   container.appendChild(wrapper);
 }
 
@@ -179,7 +202,8 @@ async function loadData(append = false): Promise<void> {
       // by id so an overlapping/refetched page never produces duplicate rows.
       for (const s of raw) {
         if (seenIds.has(s.id)) continue;
-        if (!(s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3)) continue;
+        if (!(s.totalCost > 0 || s.inputTokens > 0 || s.messageCount > 3))
+          continue;
         seenIds.add(s.id);
         data.push(s);
       }
@@ -209,7 +233,9 @@ function exportCsv(): void {
 
 /** Group rows: parents first (sorted), children grouped under their parent.
  *  Exported for unit testing of the orphan-promotion / nested-flatten logic. */
-export function groupRows(rows: Session[]): { parent: Session; children: Session[] }[] {
+export function groupRows(
+  rows: Session[],
+): { parent: Session; children: Session[] }[] {
   const childrenByParent = new Map<string, Session[]>();
   const parents: Session[] = [];
   const rowById = new Map<string, Session>();
@@ -234,7 +260,11 @@ export function groupRows(rows: Session[]): { parent: Session; children: Session
       // Find top-level ancestor
       let ancestor = parentRow;
       let depth = 0;
-      while (ancestor.parentId && rowById.has(ancestor.parentId) && depth < 10) {
+      while (
+        ancestor.parentId &&
+        rowById.has(ancestor.parentId) &&
+        depth < 10
+      ) {
         ancestor = rowById.get(ancestor.parentId)!;
         depth++;
       }
@@ -272,8 +302,13 @@ export function groupRows(rows: Session[]): { parent: Session; children: Session
 }
 
 /** Reduce children into one entry per distinct non-empty workflowId. */
-function workflowSummary(children: Session[]): { id: string; count: number; cost: number }[] {
-  const byWorkflow = new Map<string, { id: string; count: number; cost: number }>();
+function workflowSummary(
+  children: Session[],
+): { id: string; count: number; cost: number }[] {
+  const byWorkflow = new Map<
+    string,
+    { id: string; count: number; cost: number }
+  >();
   for (const c of children) {
     const id = c.workflowId;
     if (!id) continue;
@@ -379,7 +414,8 @@ function show(resetScroll = false): void {
 
   for (const { parent, children } of grouped) {
     const hasChildren = children.length > 0;
-    const isCollapsed = collapsedParents.has(parent.id) || !state.historyShowSubagents;
+    const isCollapsed =
+      collapsedParents.has(parent.id) || !state.historyShowSubagents;
     const workflows = workflowSummary(children);
 
     // Parent row
@@ -400,7 +436,10 @@ function show(resetScroll = false): void {
       triangle.textContent = isCollapsed ? '▶' : '▼';
       triangle.setAttribute('role', 'button');
       triangle.setAttribute('tabindex', '0');
-      triangle.setAttribute('aria-label', isCollapsed ? 'Expand subagents' : 'Collapse subagents');
+      triangle.setAttribute(
+        'aria-label',
+        isCollapsed ? 'Expand subagents' : 'Collapse subagents',
+      );
       triangle.addEventListener('click', (e) => {
         e.stopPropagation();
         if (isCollapsed) {
@@ -436,14 +475,18 @@ function show(resetScroll = false): void {
         nameCell.appendChild(badge);
 
         // Per-workflow badges (additive to the subagent badge)
-        const titleLines = [`${children.length} subagent${children.length > 1 ? 's' : ''}, $${childCost.toFixed(2)}`];
+        const titleLines = [
+          `${children.length} subagent${children.length > 1 ? 's' : ''}, $${childCost.toFixed(2)}`,
+        ];
         for (const wf of workflows) {
           const wfBadge = document.createElement('span');
           wfBadge.className = 'history-subagent-badge';
           const shortId = wf.id.replace(/^wf_/, '').slice(0, 8);
           wfBadge.textContent = `wf ${shortId} (${wf.count} agent${wf.count > 1 ? 's' : ''}, $${wf.cost.toFixed(2)})`;
           nameCell.appendChild(wfBadge);
-          titleLines.push(`wf ${shortId}: ${wf.count} agent${wf.count > 1 ? 's' : ''} $${wf.cost.toFixed(2)}`);
+          titleLines.push(
+            `wf ${shortId}: ${wf.count} agent${wf.count > 1 ? 's' : ''} $${wf.cost.toFixed(2)}`,
+          );
         }
         // Recoverable tooltip: reflect the badge breakdown (the badges no longer
         // clip, but hover still surfaces the full per-workflow figures) instead
@@ -457,7 +500,10 @@ function show(resetScroll = false): void {
     // otherwise vanish with the hidden child rows.
     addSkillBadge(
       tr.children[1] as HTMLElement,
-      mergeSkills([sessionSkills[parent.id] ?? [], ...children.map((c) => sessionSkills[c.id] ?? [])]),
+      mergeSkills([
+        sessionSkills[parent.id] ?? [],
+        ...children.map((c) => sessionSkills[c.id] ?? []),
+      ]),
     );
     tbody.appendChild(tr);
 
@@ -478,7 +524,10 @@ function show(resetScroll = false): void {
       }
       for (const child of children) {
         const childTr = createRow(child, true);
-        addSkillBadge(childTr.children[1] as HTMLElement, sessionSkills[child.id] ?? []);
+        addSkillBadge(
+          childTr.children[1] as HTMLElement,
+          sessionSkills[child.id] ?? [],
+        );
         tbody.appendChild(childTr);
       }
     }
@@ -506,7 +555,11 @@ function show(resetScroll = false): void {
     sentinel.style.cssText = 'height:1px';
     footer.appendChild(sentinel);
     const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting) && !loadingMore && !reachedEnd) {
+      if (
+        entries.some((e) => e.isIntersecting) &&
+        !loadingMore &&
+        !reachedEnd
+      ) {
         io.disconnect();
         loadData(true);
       }
@@ -536,7 +589,9 @@ function mergeSkills(lists: ToolUsageEntry[][]): ToolUsageEntry[] {
       }
     }
   }
-  return [...byName.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+  return [...byName.values()].sort(
+    (a, b) => b.uses - a.uses || a.name.localeCompare(b.name),
+  );
 }
 
 // addSkillBadge appends a fuchsia "✦ N" badge to a row's Session cell when the
@@ -550,7 +605,9 @@ function addSkillBadge(nameCell: HTMLElement, skills: ToolUsageEntry[]): void {
   badge.textContent = `✦ ${total}`;
   badge.title =
     'Skills invoked:\n' +
-    skills.map((s) => `${s.name} ×${s.uses}${s.errors ? ` (${s.errors} err)` : ''}`).join('\n');
+    skills
+      .map((s) => `${s.name} ×${s.uses}${s.errors ? ` (${s.errors} err)` : ''}`)
+      .join('\n');
   nameCell.appendChild(badge);
 }
 
@@ -587,8 +644,16 @@ function sortData(rows: Session[]): Session[] {
     let va: number | string, vb: number | string;
     switch (sortCol) {
       case 'tokens':
-        va = a.inputTokens + a.outputTokens + a.cacheReadTokens + (a.cacheCreationTokens || 0);
-        vb = b.inputTokens + b.outputTokens + b.cacheReadTokens + (b.cacheCreationTokens || 0);
+        va =
+          a.inputTokens +
+          a.outputTokens +
+          a.cacheReadTokens +
+          (a.cacheCreationTokens || 0);
+        vb =
+          b.inputTokens +
+          b.outputTokens +
+          b.cacheReadTokens +
+          (b.cacheCreationTokens || 0);
         break;
       case 'session':
         va = sessionIdentifier(a).toLowerCase();
@@ -613,12 +678,15 @@ function sortData(rows: Session[]): Session[] {
           totalCost: (r) => treeCostMap.get(r.id) ?? r.totalCost,
           duration: (r) =>
             r.startedAt && r.lastActive
-              ? (new Date(r.lastActive).getTime() - new Date(r.startedAt).getTime()) / 1000
+              ? (new Date(r.lastActive).getTime() -
+                  new Date(r.startedAt).getTime()) /
+                1000
               : 0,
           messageCount: (r) => r.messageCount,
           errorCount: (r) => r.errorCount,
           cache: (r) => {
-            const t = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
+            const t =
+              r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens || 0);
             return t > 0 ? (r.cacheReadTokens / t) * 100 : 0;
           },
         };
@@ -628,7 +696,9 @@ function sortData(rows: Session[]): Session[] {
       }
     }
     const cmp =
-      typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
+      typeof va === 'string'
+        ? va.localeCompare(vb as string)
+        : (va as number) - (vb as number);
     return sortAsc ? cmp : -cmp;
   });
 }

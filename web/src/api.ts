@@ -27,17 +27,27 @@ export async function fetchSessions(
   offset = 0,
   workflow?: string,
 ): Promise<Session[]> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
   if (workflow) params.set('workflow', workflow);
   return request<Session[]>(`/api/sessions?${params}`);
 }
 
 export async function fetchSearch(query: string, limit = 50): Promise<Event[]> {
-  return request<Event[]>(`/api/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return request<Event[]>(
+    `/api/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+  );
 }
 
-export async function fetchFullSearch(query: string, limit = 50): Promise<Event[]> {
-  return request<Event[]>(`/api/search/full?q=${encodeURIComponent(query)}&limit=${limit}`);
+export async function fetchFullSearch(
+  query: string,
+  limit = 50,
+): Promise<Event[]> {
+  return request<Event[]>(
+    `/api/search/full?q=${encodeURIComponent(query)}&limit=${limit}`,
+  );
 }
 
 export interface CombinedSearchResult {
@@ -54,7 +64,10 @@ export async function fetchSearchCombined(
   );
 }
 
-export async function fetchSessionEvents(sessionId: string, last?: number): Promise<Event[]> {
+export async function fetchSessionEvents(
+  sessionId: string,
+  last?: number,
+): Promise<Event[]> {
   const params = last ? `?last=${last}` : '';
   return request<Event[]>(`/api/sessions/${sessionId}/events${params}`);
 }
@@ -76,19 +89,27 @@ export type RollingWindow = '24h' | '7d' | '30d';
 
 export type StatsWindow = 'all' | CalendarWindow | RollingWindow;
 
-export async function fetchStats(window: StatsWindow = 'today'): Promise<Stats> {
+export async function fetchStats(
+  window: StatsWindow = 'today',
+): Promise<Stats> {
   return request<Stats>(`/api/stats?window=${window}`);
 }
 
 export type TrendWindow = CalendarWindow | RollingWindow;
 
-export async function fetchTrends(window: TrendWindow = '7d', repo?: string): Promise<TrendResult> {
+export async function fetchTrends(
+  window: TrendWindow = '7d',
+  repo?: string,
+): Promise<TrendResult> {
   const params = new URLSearchParams({ window });
   if (repo) params.set('repo', repo);
   return request<TrendResult>(`/api/stats/trends?${params}`);
 }
 
-export async function fetchToolUsage(window: TrendWindow = '7d', repo?: string): Promise<ToolUsage> {
+export async function fetchToolUsage(
+  window: TrendWindow = '7d',
+  repo?: string,
+): Promise<ToolUsage> {
   const params = new URLSearchParams({ window });
   if (repo) params.set('repo', repo);
   return request<ToolUsage>(`/api/stats/tools?${params}`);

@@ -58,7 +58,10 @@ export function render(container: HTMLElement): void {
     update({ sidebarCollapsed: collapsed });
     el!.classList.toggle('collapsed', collapsed);
     toggleBtn.textContent = collapsed ? '▶' : '◀';
-    toggleBtn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    toggleBtn.setAttribute(
+      'aria-label',
+      collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+    );
   });
   el.appendChild(toggleBtn);
 
@@ -196,7 +199,9 @@ function renderList(): void {
   if (state.selectedSessionId) {
     const sel = localSessions.get(state.selectedSessionId);
     // Find the parent if this is a subagent
-    const target = sel?.parentId ? (localSessions.get(sel.parentId) ?? sel) : sel;
+    const target = sel?.parentId
+      ? (localSessions.get(sel.parentId) ?? sel)
+      : sel;
     // Mirror the active-group test above: an active (incl. waiting) target lives in
     // the always-visible ACTIVE NOW section, so only time-grouped targets need reveal.
     if (target && !target.isActive) {
@@ -215,7 +220,9 @@ function renderList(): void {
       // Switch to 'all' filter if the group isn't visible under current filter
       if (
         activeFilter === 'active' ||
-        (activeFilter === 'recent' && groupKey !== 'lastHour' && groupKey !== 'today')
+        (activeFilter === 'recent' &&
+          groupKey !== 'lastHour' &&
+          groupKey !== 'today')
       ) {
         activeFilter = 'all';
         updateFilterBar();
@@ -237,28 +244,40 @@ function renderList(): void {
     s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
     s.messageCount < 4;
   const topLevelFilter = (s: Session) =>
-    !s.parentId && !isTrivial(s) && (!filter || s.cwd === filter || s.sessionName === filter);
+    !s.parentId &&
+    !isTrivial(s) &&
+    (!filter || s.cwd === filter || s.sessionName === filter);
   const recentCount =
     // Count top-level active sessions only — subagents are inlined under their
     // parent, never rendered as standalone cards. This matches #fc-active (line
     // below) and the rendered ACTIVE NOW / RECENT card set.
     active.filter((s) => !s.parentId).length +
     [...lastHour, ...today].filter(
-      (s) => topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
+      (s) =>
+        topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
     ).length;
-  const totalCount = Array.from(localSessions.values()).filter(topLevelFilter).length;
+  const totalCount = Array.from(localSessions.values()).filter(
+    topLevelFilter,
+  ).length;
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
-  if (fcActive) fcActive.textContent = String(active.filter((s) => !s.parentId).length);
+  if (fcActive)
+    fcActive.textContent = String(active.filter((s) => !s.parentId).length);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
   const topLevel = (sessions: Session[], includeTrivial = false) =>
-    (filter ? sessions.filter((s) => s.cwd === filter || s.sessionName === filter) : sessions)
+    (filter
+      ? sessions.filter((s) => s.cwd === filter || s.sessionName === filter)
+      : sessions
+    )
       .filter((s) => !s.parentId)
       .filter((s) => includeTrivial || !isTrivial(s));
   const sort = (sessions: Session[]) =>
-    sessions.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
+    sessions.sort(
+      (a, b) =>
+        new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime(),
+    );
 
   // Active Now (always show active sessions, even trivial ones)
   const activeSorted = sort(topLevel(active, true));
@@ -282,7 +301,11 @@ function renderList(): void {
     for (const sess of activeSorted) {
       renderCompact(sess, section);
       const children = activeChildrenOf.get(sess.id);
-      if (children && children.length > 0 && !state.collapsedSubagents.has(sess.id)) {
+      if (
+        children &&
+        children.length > 0 &&
+        !state.collapsedSubagents.has(sess.id)
+      ) {
         const familyIds = new Set([sess.id, ...children.map((c) => c.id)]);
         if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
           // Active parents: only show active children
@@ -315,7 +338,8 @@ function renderList(): void {
   ];
 
   for (const [key, label, sessions] of groups) {
-    if (activeFilter === 'recent' && key !== 'lastHour' && key !== 'today') continue;
+    if (activeFilter === 'recent' && key !== 'lastHour' && key !== 'today')
+      continue;
 
     const filtered = sort(topLevel(sessions));
     if (filtered.length === 0) continue;
@@ -334,9 +358,13 @@ function renderList(): void {
     header.innerHTML = `<span>${label}</span><span class="time-group-count">${filtered.length}</span>`;
     header.addEventListener('click', () => {
       group.classList.toggle('time-group-collapsed');
-      if (group.classList.contains('time-group-collapsed')) collapsedGroups.add(key);
+      if (group.classList.contains('time-group-collapsed'))
+        collapsedGroups.add(key);
       else collapsedGroups.delete(key);
-      header.setAttribute('aria-expanded', String(!group.classList.contains('time-group-collapsed')));
+      header.setAttribute(
+        'aria-expanded',
+        String(!group.classList.contains('time-group-collapsed')),
+      );
     });
     header.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -362,7 +390,11 @@ function renderList(): void {
       renderCompact(sess, items);
       // For inactive parents: show children inline when this family is selected
       const children = childrenOf.get(sess.id);
-      if (children && children.length > 0 && !state.collapsedSubagents.has(sess.id)) {
+      if (
+        children &&
+        children.length > 0 &&
+        !state.collapsedSubagents.has(sess.id)
+      ) {
         const familyIds = new Set([sess.id, ...children.map((c) => c.id)]);
         if (state.selectedSessionId && familyIds.has(state.selectedSessionId)) {
           for (const child of sort([...children])) renderCompact(child, items);
@@ -389,9 +421,14 @@ function renderList(): void {
   // Apply focused class to the focused session's card (must happen during render,
   // not in a separate state change handler, since innerHTML clears previous classes).
   if (state.focusedSessionId) {
-    listEl.querySelectorAll<HTMLElement>('.session-card, .session-card-compact').forEach((card) => {
-      card.classList.toggle('focused', card.dataset.sessionId === state.focusedSessionId);
-    });
+    listEl
+      .querySelectorAll<HTMLElement>('.session-card, .session-card-compact')
+      .forEach((card) => {
+        card.classList.toggle(
+          'focused',
+          card.dataset.sessionId === state.focusedSessionId,
+        );
+      });
   }
 
   listEl.scrollTop = scrollTop;

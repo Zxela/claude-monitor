@@ -1,0 +1,64 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "files": {
+    // Matches the old `eslint src/` scope. Note Biome also lints CSS, which
+    // ESLint never did — see noImportantStyles/noDescendingSpecificity below.
+    "includes": ["src/**"]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        // Carried over from the ESLint config's explicit rules.
+        "noExplicitAny": "warn"
+      },
+      "correctness": {
+        // Biome already exempts identifiers prefixed with `_`, which is what
+        // the old `argsIgnorePattern: '^_'` was for.
+        "noUnusedVariables": "warn"
+      },
+      "style": {
+        // The following were never enforced under ESLint (tseslint's
+        // `recommended` preset excludes them) and account for ~70 findings of
+        // pure style churn on existing code. Left off to keep this migration
+        // behaviour-preserving; enable deliberately if the team wants them.
+        "noNonNullAssertion": "off", // 50 findings
+        "useTemplate": "off", // 19 findings
+        "useExponentiationOperator": "off", // 1 finding
+        // CSS-only rule; the codebase uses !important intentionally for
+        // utility overrides.
+        "noDescendingSpecificity": "off" // 3 findings
+      },
+      "complexity": {
+        "noImportantStyles": "off", // 8 findings, CSS
+        "useOptionalChain": "off", // 5 findings
+        "useLiteralKeys": "off" // 1 finding
+      }
+    }
+  },
+  "formatter": {
+    // Configured to match the code's existing style rather than Prettier's
+    // defaults (Prettier had no config file here, so `npm run format` would
+    // have rewritten every string to double quotes; 12 files were already
+    // failing `prettier --check`).
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        // Import ordering was not enforced before; leave it alone so this
+        // change does not reshuffle every import block.
+        "organizeImports": "off"
+      }
+    }
+  }
+}

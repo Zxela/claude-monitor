@@ -154,23 +154,23 @@ type EventRow struct {
 	IsAgent             bool    `json:"isAgent,omitempty"`
 	Timestamp           string  `json:"timestamp"`
 	// New fields from JSONL capture.
-	DurationMs        *int64  `json:"durationMs,omitempty"`
-	Success           *bool   `json:"success,omitempty"`
-	Stderr            string  `json:"stderr,omitempty"`
-	Interrupted       bool    `json:"interrupted,omitempty"`
-	Truncated         bool    `json:"truncated,omitempty"`
-	AgentDurationMs   *int64  `json:"agentDurationMs,omitempty"`
-	AgentTokens       *int64  `json:"agentTokens,omitempty"`
-	AgentToolUseCount *int    `json:"agentToolUseCount,omitempty"`
-	AgentType         string  `json:"agentType,omitempty"`
-	Subtype           string  `json:"subtype,omitempty"`
-	TurnMessageCount  *int    `json:"turnMessageCount,omitempty"`
-	HookCount         *int    `json:"hookCount,omitempty"`
-	HookInfos         string  `json:"hookInfos,omitempty"`
-	Level             string  `json:"level,omitempty"`
-	IsMeta            bool    `json:"isMeta,omitempty"`
-	Version           string  `json:"version,omitempty"`
-	Entrypoint        string  `json:"entrypoint,omitempty"`
+	DurationMs        *int64 `json:"durationMs,omitempty"`
+	Success           *bool  `json:"success,omitempty"`
+	Stderr            string `json:"stderr,omitempty"`
+	Interrupted       bool   `json:"interrupted,omitempty"`
+	Truncated         bool   `json:"truncated,omitempty"`
+	AgentDurationMs   *int64 `json:"agentDurationMs,omitempty"`
+	AgentTokens       *int64 `json:"agentTokens,omitempty"`
+	AgentToolUseCount *int   `json:"agentToolUseCount,omitempty"`
+	AgentType         string `json:"agentType,omitempty"`
+	Subtype           string `json:"subtype,omitempty"`
+	TurnMessageCount  *int   `json:"turnMessageCount,omitempty"`
+	HookCount         *int   `json:"hookCount,omitempty"`
+	HookInfos         string `json:"hookInfos,omitempty"`
+	Level             string `json:"level,omitempty"`
+	IsMeta            bool   `json:"isMeta,omitempty"`
+	Version           string `json:"version,omitempty"`
+	Entrypoint        string `json:"entrypoint,omitempty"`
 	// Per-event metadata (migration 010)
 	ToolUseIDs  string `json:"toolUseIds,omitempty"`
 	CWD         string `json:"cwd,omitempty"`
@@ -258,8 +258,8 @@ type TrendSummary struct {
 
 // TrendResult holds the complete trend analysis response.
 type TrendResult struct {
-	Window  string        `json:"window"`
-	Buckets []TrendBucket `json:"buckets"`
+	Window    string         `json:"window"`
+	Buckets   []TrendBucket  `json:"buckets"`
 	ByRepo    []RepoTrend    `json:"byRepo"`
 	ByModel   []ModelTrend   `json:"byModel"`
 	BySession []SessionTrend `json:"bySession"`
@@ -268,8 +268,8 @@ type TrendResult struct {
 
 // StorageInfo holds database storage statistics.
 type StorageInfo struct {
-	TotalSizeBytes  int64 `json:"totalSizeBytes"`
-	HotContentBytes int64 `json:"hotContentBytes"`
+	TotalSizeBytes   int64 `json:"totalSizeBytes"`
+	HotContentBytes  int64 `json:"hotContentBytes"`
 	WarmContentBytes int64 `json:"warmContentBytes"`
 	EventCount       int64 `json:"eventCount"`
 }
@@ -548,7 +548,6 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 	return nil
 }
 
-
 // LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
 // This is used to rebuild in-memory dedup state after a restart, preventing double-counting.
 func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]session.MessageCosts, error) {
@@ -696,8 +695,14 @@ type WorkflowRow struct {
 // most-recent activity. Cost is summed across every agent row in the workflow,
 // so a workflow's spend is counted exactly once across its agents.
 //
-// workflow_id is nullable (migration 013 adds it as plain TEXT, no DEFAULT ''),
-// so the non-empty filter uses COALESCE(workflow_id,'') <> ''.
+// workflow_id is nullable (migration 013 adds it as plain TEXT with no default),
+// so the non-empty filter coalesces NULL to the empty string before comparing:
+//
+//	COALESCE(workflow_id, '') <> ''
+//
+// The SQL above is an indented doc-comment code block on purpose. In ordinary
+// prose gofmt rewrites the two-apostrophe quoting convention into a Unicode
+// right double quote, which would misdocument the query.
 func (d *DB) ListWorkflows() ([]WorkflowRow, error) {
 	rows, err := d.rdb.Query(`SELECT workflow_id, COUNT(*), COALESCE(SUM(total_cost),0), COALESCE(MAX(ended_at),'')
 		FROM sessions WHERE COALESCE(workflow_id,'') <> '' GROUP BY workflow_id ORDER BY MAX(ended_at) DESC`)
@@ -1519,8 +1524,8 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			dedupKey = ev.MessageID
 		}
 		var (
-			oldRowExists                          bool
-			oldRowID                              int64
+			oldRowExists                           bool
+			oldRowID                               int64
 			oldPreview, oldToolName, oldToolDetail string
 		)
 		if dedupKey != "" {
@@ -1736,25 +1741,32 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 			}
 		}
 		if durationMs.Valid {
-			v := durationMs.Int64; r.DurationMs = &v
+			v := durationMs.Int64
+			r.DurationMs = &v
 		}
 		if success.Valid {
-			v := success.Bool; r.Success = &v
+			v := success.Bool
+			r.Success = &v
 		}
 		if agentDurationMs.Valid {
-			v := agentDurationMs.Int64; r.AgentDurationMs = &v
+			v := agentDurationMs.Int64
+			r.AgentDurationMs = &v
 		}
 		if agentTokens.Valid {
-			v := agentTokens.Int64; r.AgentTokens = &v
+			v := agentTokens.Int64
+			r.AgentTokens = &v
 		}
 		if agentToolUseCount.Valid {
-			v := int(agentToolUseCount.Int64); r.AgentToolUseCount = &v
+			v := int(agentToolUseCount.Int64)
+			r.AgentToolUseCount = &v
 		}
 		if turnMessageCount.Valid {
-			v := int(turnMessageCount.Int64); r.TurnMessageCount = &v
+			v := int(turnMessageCount.Int64)
+			r.TurnMessageCount = &v
 		}
 		if hookCount.Valid {
-			v := int(hookCount.Int64); r.HookCount = &v
+			v := int(hookCount.Int64)
+			r.HookCount = &v
 		}
 		result = append(result, r)
 	}
@@ -2038,4 +2050,3 @@ func (d *DB) StorageInfo() (*StorageInfo, error) {
 
 	return info, nil
 }
-

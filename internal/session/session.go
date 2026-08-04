@@ -30,40 +30,40 @@ type MessageCosts struct {
 
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
-	ID              string    `json:"id"`
-	RepoID          string    `json:"repoId,omitempty"`
-	SessionName     string    `json:"sessionName,omitempty"`
-	TotalCost       float64   `json:"totalCost"`
-	InputTokens     int64     `json:"inputTokens"`
-	OutputTokens    int64     `json:"outputTokens"`
-	CacheReadTokens     int64   `json:"cacheReadTokens"`
-	CacheCreationTokens int64   `json:"cacheCreationTokens"`
-	MessageCount   int              `json:"messageCount"`
-	EventCount     int              `json:"eventCount"`
-	LastActive     time.Time        `json:"lastActive"`
-	IsActive       bool             `json:"isActive"` // true if lastActive < 30s ago
-	StartedAt      time.Time        `json:"startedAt"`
-	Status         string           `json:"status"` // idle, thinking, tool_use, waiting
-	seenMessageIDs   map[string]bool          `json:"-"` // tracks message IDs to deduplicate streaming chunks
-	seenMessageCosts map[string]MessageCosts  `json:"-"` // tracks per-message cost/tokens for dedup
-	seenMessageOrder []string                 `json:"-"` // insertion order for LRU eviction
-	ParentID       string           `json:"parentId,omitempty"`
-	Children       []string         `json:"children,omitempty"`
-	CWD            string           `json:"cwd,omitempty"`
-	GitBranch      string           `json:"gitBranch,omitempty"`
-	Model          string           `json:"model,omitempty"`
-	CostRate       float64          `json:"costRate"`  // dollars per minute (active sessions only)
-	ErrorCount     int              `json:"errorCount"`
-	TaskDescription string          `json:"taskDescription"`
-	Version        string           `json:"version,omitempty"`
-	Entrypoint     string           `json:"entrypoint,omitempty"`
-	WorkflowID     string           `json:"workflowId,omitempty"` // wf_<id> grouping all agents of one Claude Code workflow run; empty for non-workflow sessions
-	AgentID        string           `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
-	AgentKind      string           `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
-	SourceFile     string           `json:"-"` // JSONL file path currently providing events (not serialized)
-	repoSourceRank int              `json:"-"` // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
-	repoToplevel   string           `json:"-"` // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
-	repoInherited  bool             `json:"-"` // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
+	ID                  string                  `json:"id"`
+	RepoID              string                  `json:"repoId,omitempty"`
+	SessionName         string                  `json:"sessionName,omitempty"`
+	TotalCost           float64                 `json:"totalCost"`
+	InputTokens         int64                   `json:"inputTokens"`
+	OutputTokens        int64                   `json:"outputTokens"`
+	CacheReadTokens     int64                   `json:"cacheReadTokens"`
+	CacheCreationTokens int64                   `json:"cacheCreationTokens"`
+	MessageCount        int                     `json:"messageCount"`
+	EventCount          int                     `json:"eventCount"`
+	LastActive          time.Time               `json:"lastActive"`
+	IsActive            bool                    `json:"isActive"` // true if lastActive < 30s ago
+	StartedAt           time.Time               `json:"startedAt"`
+	Status              string                  `json:"status"` // idle, thinking, tool_use, waiting
+	seenMessageIDs      map[string]bool         `json:"-"`      // tracks message IDs to deduplicate streaming chunks
+	seenMessageCosts    map[string]MessageCosts `json:"-"`      // tracks per-message cost/tokens for dedup
+	seenMessageOrder    []string                `json:"-"`      // insertion order for LRU eviction
+	ParentID            string                  `json:"parentId,omitempty"`
+	Children            []string                `json:"children,omitempty"`
+	CWD                 string                  `json:"cwd,omitempty"`
+	GitBranch           string                  `json:"gitBranch,omitempty"`
+	Model               string                  `json:"model,omitempty"`
+	CostRate            float64                 `json:"costRate"` // dollars per minute (active sessions only)
+	ErrorCount          int                     `json:"errorCount"`
+	TaskDescription     string                  `json:"taskDescription"`
+	Version             string                  `json:"version,omitempty"`
+	Entrypoint          string                  `json:"entrypoint,omitempty"`
+	WorkflowID          string                  `json:"workflowId,omitempty"` // wf_<id> grouping all agents of one Claude Code workflow run; empty for non-workflow sessions
+	AgentID             string                  `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
+	AgentKind           string                  `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
+	SourceFile          string                  `json:"-"`                    // JSONL file path currently providing events (not serialized)
+	repoSourceRank      int                     `json:"-"`                    // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
+	repoToplevel        string                  `json:"-"`                    // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
+	repoInherited       bool                    `json:"-"`                    // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
 }
 
 // RepoSourceRank reports the resolution-authority rank of the current RepoID
@@ -151,7 +151,7 @@ func (s *Session) SetDedupState(ids map[string]bool, costs map[string]MessageCos
 
 // Store is a thread-safe registry of sessions keyed by session ID.
 type Store struct {
-	mu              sync.RWMutex
+	mu       sync.RWMutex
 	sessions map[string]*Session
 }
 
@@ -239,9 +239,9 @@ func (s *Store) All() []*Session {
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		cp := *sess
-		cp.seenMessageIDs = nil    // don't share internal dedup map
-		cp.seenMessageCosts = nil  // don't share internal dedup map
-		cp.seenMessageOrder = nil  // don't share internal dedup slice
+		cp.seenMessageIDs = nil   // don't share internal dedup map
+		cp.seenMessageCosts = nil // don't share internal dedup map
+		cp.seenMessageOrder = nil // don't share internal dedup slice
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
 		if cp.ParentID != "" && cp.Status == "waiting" {
@@ -302,4 +302,3 @@ func (s *Store) Get(id string) (*Session, bool) {
 	cp.seenMessageOrder = nil
 	return &cp, true
 }
-

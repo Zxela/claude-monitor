@@ -187,7 +187,6 @@ func handleMigrate(args []string) {
 	db.Close()
 }
 
-
 func handleHook(args []string) {
 	sub := ""
 	if len(args) > 0 {

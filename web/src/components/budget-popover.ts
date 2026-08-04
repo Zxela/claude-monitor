@@ -1,7 +1,12 @@
 // web/src/components/budget-popover.ts
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
-import { loadSettings, saveSettings, getSettings, notify } from '../notifications';
+import {
+  loadSettings,
+  saveSettings,
+  getSettings,
+  notify,
+} from '../notifications';
 import type { StatsWindow } from '../api';
 import { fetchStats } from '../api';
 import { dismiss as dismissCostBreakdown } from './cost-breakdown';
@@ -53,11 +58,17 @@ function closePanel(): void {
   sparkCanvas = null;
 }
 
-export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: HTMLElement): void {
+export function render(
+  gearBtn: HTMLElement,
+  costEl: HTMLElement,
+  bannerMount: HTMLElement,
+): void {
   costStatEl = costEl;
 
   // Find the $/MIN stat element for click binding
-  const rateStat = gearBtn.closest('.topbar')?.querySelector('[data-stat="rate"]');
+  const rateStat = gearBtn
+    .closest('.topbar')
+    ?.querySelector('[data-stat="rate"]');
   rateStatEl = rateStat as HTMLElement | null;
 
   banner = document.createElement('div');
@@ -69,7 +80,9 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
     update({ budgetThreshold: parseFloat(saved) });
   }
 
-  const savedWindow = localStorage.getItem('budget-window') as StatsWindow | null;
+  const savedWindow = localStorage.getItem(
+    'budget-window',
+  ) as StatsWindow | null;
   if (savedWindow) {
     update({ statsWindow: savedWindow });
   }
@@ -107,7 +120,11 @@ export function render(gearBtn: HTMLElement, costEl: HTMLElement, bannerMount: H
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('stats') || changed.has('budgetThreshold') || changed.has('budgetDismissed')) {
+  if (
+    changed.has('stats') ||
+    changed.has('budgetThreshold') ||
+    changed.has('budgetDismissed')
+  ) {
     checkBudget();
   }
 }
@@ -151,9 +168,14 @@ function renderPanelContent(): void {
   const projected = getProjectedDailyCost(todayCost);
   const samples = getSamples();
 
-  const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
-  const prevSettings = panel.querySelector('.burn-rate-settings') as HTMLElement | null;
-  const settingsOpen = prevSettings !== null && prevSettings.style.display !== 'none';
+  const activeSessions = Array.from(state.sessions.values()).filter(
+    (s) => s.isActive,
+  );
+  const prevSettings = panel.querySelector(
+    '.burn-rate-settings',
+  ) as HTMLElement | null;
+  const settingsOpen =
+    prevSettings !== null && prevSettings.style.display !== 'none';
 
   panel.innerHTML = '';
 
@@ -203,7 +225,9 @@ function renderPanelContent(): void {
     for (const sess of activeSessions) {
       const row = document.createElement('div');
       row.className = 'burn-rate-session-row';
-      const model = (sess.model || '').replace('claude-', '').replace('-4-6', '');
+      const model = (sess.model || '')
+        .replace('claude-', '')
+        .replace('-4-6', '');
       row.innerHTML = `
         <span class="burn-rate-session-name">${escapeHtml(sessionDisplayName(sess))}</span>
         <span class="burn-rate-session-rate">$${sess.costRate.toFixed(3)}/min</span>
@@ -239,7 +263,8 @@ function renderPanelContent(): void {
   // Settings toggle
   const toggle = document.createElement('div');
   toggle.className = 'burn-rate-settings-toggle';
-  toggle.textContent = (settingsOpen ? '\u25BC' : '\u25B6') + ' Budget Settings';
+  toggle.textContent =
+    (settingsOpen ? '\u25BC' : '\u25B6') + ' Budget Settings';
   panel.appendChild(toggle);
 
   // Settings section
@@ -273,10 +298,12 @@ function renderPanelContent(): void {
     toggle.textContent = (hidden ? '\u25BC' : '\u25B6') + ' Budget Settings';
   });
 
-  const input = settingsEl.querySelector('input[type="number"]') as HTMLInputElement;
+  const input = settingsEl.querySelector(
+    'input[type="number"]',
+  ) as HTMLInputElement;
   settingsEl.querySelector('.set-btn')!.addEventListener('click', () => {
     const val = parseFloat(input.value);
-    if (!isNaN(val) && val > 0) {
+    if (!Number.isNaN(val) && val > 0) {
       localStorage.setItem('budget', String(val));
       budgetNotificationSent = false;
       update({ budgetThreshold: val, budgetDismissed: false });
@@ -299,12 +326,14 @@ function renderPanelContent(): void {
     s.error = (e.target as HTMLInputElement).checked;
     saveSettings(s);
   });
-  settingsEl.querySelector('.budget-window-select')?.addEventListener('change', (e) => {
-    const win = (e.target as HTMLSelectElement).value as StatsWindow;
-    localStorage.setItem('budget-window', win);
-    update({ statsWindow: win, budgetDismissed: false });
-    budgetNotificationSent = false;
-  });
+  settingsEl
+    .querySelector('.budget-window-select')
+    ?.addEventListener('change', (e) => {
+      const win = (e.target as HTMLSelectElement).value as StatsWindow;
+      localStorage.setItem('budget-window', win);
+      update({ statsWindow: win, budgetDismissed: false });
+      budgetNotificationSent = false;
+    });
 }
 
 function updatePanelValues(): void {
@@ -324,13 +353,16 @@ function updatePanelValues(): void {
   // Update metrics
   const metricValues = panel.querySelectorAll('.burn-rate-metric-value');
   if (metricValues[0]) metricValues[0].textContent = `$${projected.toFixed(2)}`;
-  if (metricValues[1]) metricValues[1].textContent = `${formatTokens(Math.round(tokenRate))}/min`;
+  if (metricValues[1])
+    metricValues[1].textContent = `${formatTokens(Math.round(tokenRate))}/min`;
 
   // Redraw sparkline
   drawSparkline(samples);
 
   // Update active sessions
-  const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
+  const activeSessions = Array.from(state.sessions.values()).filter(
+    (s) => s.isActive,
+  );
   const sessSection = panel.querySelector('.burn-rate-sessions');
   if (sessSection) {
     const rows = sessSection.querySelectorAll('.burn-rate-session-row');
@@ -340,7 +372,9 @@ function updatePanelValues(): void {
       for (const sess of activeSessions) {
         const row = document.createElement('div');
         row.className = 'burn-rate-session-row';
-        const model = (sess.model || '').replace('claude-', '').replace('-4-6', '');
+        const model = (sess.model || '')
+          .replace('claude-', '')
+          .replace('-4-6', '');
         row.innerHTML = `
           <span class="burn-rate-session-name">${escapeHtml(sessionDisplayName(sess))}</span>
           <span class="burn-rate-session-rate">$${sess.costRate.toFixed(3)}/min</span>
@@ -363,7 +397,9 @@ function updatePanelValues(): void {
     const pct = Math.min(100, (totalCost / budget) * 100);
     const barColor = pct >= 100 ? '#ff6b6b' : pct >= 80 ? '#ffa64a' : '#4ae68a';
     const depletionMin = getDepletionMinutes(budget, totalCost);
-    const fill = panel.querySelector('.burn-rate-budget-fill') as HTMLElement | null;
+    const fill = panel.querySelector(
+      '.burn-rate-budget-fill',
+    ) as HTMLElement | null;
     if (fill) {
       fill.style.width = `${pct}%`;
       fill.style.background = barColor;
@@ -374,11 +410,15 @@ function updatePanelValues(): void {
     const depletion = panel.querySelector('.burn-rate-depletion');
     if (depletion)
       depletion.textContent =
-        depletionMin !== null ? `Depletes in ~${formatMinutes(depletionMin)} at current rate` : '';
+        depletionMin !== null
+          ? `Depletes in ~${formatMinutes(depletionMin)} at current rate`
+          : '';
   }
 }
 
-function drawSparkline(samples: { timestamp: number; costRate: number }[]): void {
+function drawSparkline(
+  samples: { timestamp: number; costRate: number }[],
+): void {
   if (!sparkCanvas) return;
   const ctx = sparkCanvas.getContext('2d');
   if (!ctx) return;
@@ -420,7 +460,8 @@ function drawSparkline(samples: { timestamp: number; costRate: number }[]): void
   // Line
   ctx.beginPath();
   ctx.moveTo(points[0][0], points[0][1]);
-  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+  for (let i = 1; i < points.length; i++)
+    ctx.lineTo(points[i][0], points[i][1]);
   ctx.strokeStyle = '#4ae68a';
   ctx.lineWidth = 1.5;
   ctx.stroke();

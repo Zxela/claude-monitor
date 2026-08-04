@@ -7,6 +7,8 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["src/**/*.test.ts"],
+  // vite-env.d.ts carries Vite's ambient `*.css` declarations; without it in this
+  // program, components pulled in transitively by tests trip TS2882.
+  "include": ["src/**/*.test.ts", "src/vite-env.d.ts"],
   "exclude": []
 }

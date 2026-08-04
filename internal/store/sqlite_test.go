@@ -443,15 +443,15 @@ func TestPersistBatch(t *testing.T) {
 			{
 				SessionID: "s1",
 				Event: &parser.Event{
-					Type:        "assistant",
-					Role:        "assistant",
-					ContentText: "Hello, I can help with that.",
-					CostUSD:     0.01,
-					InputTokens: 100,
+					Type:         "assistant",
+					Role:         "assistant",
+					ContentText:  "Hello, I can help with that.",
+					CostUSD:      0.01,
+					InputTokens:  100,
 					OutputTokens: 50,
-					Timestamp:   time.Now(),
-					Model:       "claude-sonnet-4-6",
-					UUID:        "uuid-001",
+					Timestamp:    time.Now(),
+					Model:        "claude-sonnet-4-6",
+					UUID:         "uuid-001",
 				},
 				FullContent: "Hello, I can help with that. Let me look at the code.",
 			},
@@ -2553,25 +2553,25 @@ func TestLoadMessageDedup(t *testing.T) {
 		{
 			SessionID: "s1",
 			Event: &parser.Event{
-				MessageID:   "msg-dedup-1",
-				Type:        "assistant",
-				ContentText: "first message",
-				CostUSD:     0.01,
-				InputTokens: 100,
+				MessageID:    "msg-dedup-1",
+				Type:         "assistant",
+				ContentText:  "first message",
+				CostUSD:      0.01,
+				InputTokens:  100,
 				OutputTokens: 50,
-				Timestamp:   time.Now(),
+				Timestamp:    time.Now(),
 			},
 		},
 		{
 			SessionID: "s1",
 			Event: &parser.Event{
-				MessageID:   "msg-dedup-2",
-				Type:        "assistant",
-				ContentText: "second message",
-				CostUSD:     0.02,
-				InputTokens: 200,
+				MessageID:    "msg-dedup-2",
+				Type:         "assistant",
+				ContentText:  "second message",
+				CostUSD:      0.02,
+				InputTokens:  200,
 				OutputTokens: 100,
-				Timestamp:   time.Now().Add(time.Second),
+				Timestamp:    time.Now().Add(time.Second),
 			},
 		},
 	}}
@@ -3195,8 +3195,8 @@ func TestAggregateStats_WindowBoundaryUTC(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	boundary := time.Date(2026, 5, 30, 7, 0, 0, 0, time.UTC) // == local midnight in -07:00
-	insertTestSession(t, db, "in", boundary, 3.00, 30, 10, 5, 2)               // exactly at boundary -> included
+	boundary := time.Date(2026, 5, 30, 7, 0, 0, 0, time.UTC)                         // == local midnight in -07:00
+	insertTestSession(t, db, "in", boundary, 3.00, 30, 10, 5, 2)                     // exactly at boundary -> included
 	insertTestSession(t, db, "out", boundary.Add(-1*time.Hour), 9.00, 90, 30, 15, 6) // 1h before -> excluded
 
 	// Same instant as `boundary`, but expressed with a -07:00 offset (as the

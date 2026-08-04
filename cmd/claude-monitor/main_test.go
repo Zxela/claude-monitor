@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -590,5 +591,81 @@ func TestSessionReplay(t *testing.T) {
 	}
 	if body.Events == nil {
 		t.Error("events should be non-nil array")
+	}
+}
+
+// TestRepoEndpointsUnknownIDReturn404 pins the documented contract that the
+// per-repo endpoints reject an unknown repo id rather than reporting zeroed
+// aggregates or an empty list, which would be indistinguishable from a real
+// repo that happens to have no recorded activity.
+func TestRepoEndpointsUnknownIDReturn404(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{
+		"/api/repos/no-such-repo/stats",
+		"/api/repos/no-such-repo/sessions",
+	} {
+		resp, err := http.Get(baseURL + path)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", path, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: status = %d, want 404", path, resp.StatusCode)
+			continue
+		}
+
+		var body struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Errorf("GET %s: failed to decode error body: %v", path, err)
+			continue
+		}
+		if body.Error != "repo not found" {
+			t.Errorf("GET %s: error = %q, want %q", path, body.Error, "repo not found")
+		}
+	}
+}
+
+// TestRepoStatsRequiresEncodedID pins the encoding requirement for repo ids.
+// Ids are canonical repository paths containing "/", so an unencoded id spans
+// several path segments and cannot match the single-segment {id} wildcard; only
+// the percent-encoded form reaches the handler. Callers that interpolate the raw
+// id from /api/repos get a 404, so the contract is worth locking down.
+func TestRepoStatsRequiresEncodedID(t *testing.T) {
+	t.Parallel()
+
+	var repos []struct {
+		ID string `json:"id"`
+	}
+	getJSON(t, "/api/repos", &repos)
+
+	var id string
+	for _, r := range repos {
+		if strings.Contains(r.ID, "/") {
+			id = r.ID
+			break
+		}
+	}
+	if id == "" {
+		t.Skip("no repo with a slash-bearing id in the database")
+	}
+
+	resp, err := http.Get(baseURL + "/api/repos/" + id + "/stats")
+	if err != nil {
+		t.Fatalf("GET unencoded repo stats failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unencoded id %q: status = %d, want 404", id, resp.StatusCode)
+	}
+
+	var agg map[string]interface{}
+	getJSON(t, "/api/repos/"+url.PathEscape(id)+"/stats", &agg)
+	if _, ok := agg["totalCost"]; !ok {
+		t.Errorf("encoded id %q: response missing totalCost, got keys %v",
+			url.PathEscape(id), agg)
 	}
 }

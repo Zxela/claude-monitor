@@ -66,7 +66,9 @@ export function render(container: HTMLElement): void {
   const searchBox = el.querySelector('.search-box');
   const viewToggle = el.querySelector('.view-toggle');
 
-  stats.forEach((stat) => collapsible.appendChild(stat));
+  stats.forEach((stat) => {
+    collapsible.appendChild(stat);
+  });
   if (searchBox) collapsible.appendChild(searchBox);
   if (viewToggle) collapsible.appendChild(viewToggle);
 
@@ -123,7 +125,10 @@ export function render(container: HTMLElement): void {
   updateWindowButtons();
 
   searchInput!.addEventListener('input', () => {
-    update({ searchQuery: searchInput!.value, searchOpen: searchInput!.value.length > 0 });
+    update({
+      searchQuery: searchInput!.value,
+      searchOpen: searchInput!.value.length > 0,
+    });
   });
   searchInput!.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -153,7 +158,10 @@ export function render(container: HTMLElement): void {
     costEl.style.cursor = 'pointer';
     costEl.setAttribute('role', 'button');
     costEl.setAttribute('tabindex', '0');
-    costEl.setAttribute('aria-label', 'Total spend — click to view cost breakdown');
+    costEl.setAttribute(
+      'aria-label',
+      'Total spend — click to view cost breakdown',
+    );
     costEl.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleCostBreakdown(costEl);
@@ -187,7 +195,11 @@ function updateWindowButtons(): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('stats') || changed.has('budgetThreshold') || changed.has('statsWindow')) {
+  if (
+    changed.has('stats') ||
+    changed.has('budgetThreshold') ||
+    changed.has('statsWindow')
+  ) {
     updateStats();
   }
   if (changed.has('statsWindow')) {
@@ -240,7 +252,10 @@ function updateStats(): void {
     const costStr = `$${stats.totalCost.toFixed(0)}`;
     if (state.budgetThreshold) {
       const label = WINDOW_LABELS[state.statsWindow] ?? state.statsWindow;
-      if (statCost.childNodes.length === 1 && statCost.firstChild?.nodeType === Node.TEXT_NODE) {
+      if (
+        statCost.childNodes.length === 1 &&
+        statCost.firstChild?.nodeType === Node.TEXT_NODE
+      ) {
         // First time adding the label span — rebuild
         statCost.textContent = '';
       }
@@ -287,8 +302,14 @@ function updateStats(): void {
     }
   }
 
-  setVal(statCache, stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—');
-  setVal(statRate, stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/min` : '—');
+  setVal(
+    statCache,
+    stats.cacheHitPct > 0 ? `${stats.cacheHitPct.toFixed(0)}%` : '—',
+  );
+  setVal(
+    statRate,
+    stats.costRate > 0 ? `$${stats.costRate.toFixed(3)}/min` : '—',
+  );
 }
 
 export function focusSearch(): void {

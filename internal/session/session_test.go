@@ -163,8 +163,6 @@ func TestIsActive_FalseWhenOldLastActive(t *testing.T) {
 	}
 }
 
-
-
 func TestErrorCount_Tracking(t *testing.T) {
 	t.Parallel()
 	s := NewStore()
@@ -203,9 +201,9 @@ func TestMessageCosts_DedupStreamingChunks(t *testing.T) {
 		cacheRead   int64
 		cacheCreate int64
 	}{
-		{"msg_abc", 0.001, 100, 10, 5000, 2000},   // first chunk
-		{"msg_abc", 0.001, 100, 50, 5000, 2000},   // second chunk (output grew)
-		{"msg_abc", 0.001, 100, 200, 5000, 2000},  // final chunk (output grew)
+		{"msg_abc", 0.001, 100, 10, 5000, 2000},  // first chunk
+		{"msg_abc", 0.001, 100, 50, 5000, 2000},  // second chunk (output grew)
+		{"msg_abc", 0.001, 100, 200, 5000, 2000}, // final chunk (output grew)
 	}
 
 	for _, c := range chunks {
@@ -352,4 +350,3 @@ func TestLRUEviction_EvictsOldestHalf(t *testing.T) {
 		t.Errorf("seenMessageCosts entries: got %d, want 2", costEntries)
 	}
 }
-

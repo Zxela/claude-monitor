@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	flushInterval  = 2 * time.Second
-	maxBatchSize   = 200
-	maxMetaCache   = 500
+	flushInterval = 2 * time.Second
+	maxBatchSize  = 200
+	maxMetaCache  = 500
 )
 
 // BroadcastFunc is called for each processed event. It receives the event,

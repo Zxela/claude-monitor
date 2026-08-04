@@ -32,16 +32,16 @@ func SetPreviewMaxLength(n int) {
 // rawMessage mirrors the on-disk JSONL structure. Content can be a string or
 // an array of content blocks, so we capture it as raw JSON for flexible decoding.
 type rawMessage struct {
-	Type      string          `json:"type"`
-	Message   rawInner        `json:"message"`
-	Timestamp time.Time       `json:"timestamp"`
-	SessionID string          `json:"sessionId"`
-	UUID      string          `json:"uuid"`
+	Type      string    `json:"type"`
+	Message   rawInner  `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+	SessionID string    `json:"sessionId"`
+	UUID      string    `json:"uuid"`
 	// Top-level content for non-wrapped messages (e.g. tool_use lines).
-	Content    json.RawMessage `json:"content"`
-	ParentUUID string          `json:"parentUuid"`
-	CWD        string          `json:"cwd"`
-	GitBranch  string          `json:"gitBranch"`
+	Content     json.RawMessage `json:"content"`
+	ParentUUID  string          `json:"parentUuid"`
+	CWD         string          `json:"cwd"`
+	GitBranch   string          `json:"gitBranch"`
 	IsSidechain bool            `json:"isSidechain"`
 	TeamName    string          `json:"teamName"`
 	AgentName   string          `json:"agentName"`
@@ -55,11 +55,11 @@ type rawMessage struct {
 	IsMeta        bool            `json:"isMeta"`
 	Version       string          `json:"version"`
 	Entrypoint    string          `json:"entrypoint"`
-	DurationMs    *int64          `json:"durationMs"`     // system.turn_duration
-	MessageCount  *int            `json:"messageCount"`   // system.turn_duration
-	HookCount     *int            `json:"hookCount"`      // system.stop_hook_summary
-	HookInfos     json.RawMessage `json:"hookInfos"`      // system.stop_hook_summary
-	Level         string          `json:"level"`           // system.stop_hook_summary
+	DurationMs    *int64          `json:"durationMs"`   // system.turn_duration
+	MessageCount  *int            `json:"messageCount"` // system.turn_duration
+	HookCount     *int            `json:"hookCount"`    // system.stop_hook_summary
+	HookInfos     json.RawMessage `json:"hookInfos"`    // system.stop_hook_summary
+	Level         string          `json:"level"`        // system.stop_hook_summary
 }
 
 type rawProgressData struct {
@@ -83,9 +83,9 @@ type rawToolResult struct {
 }
 
 type rawInner struct {
-	ID      string          `json:"id"`
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	ID         string          `json:"id"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
 	Usage      rawUsage        `json:"usage"`
 	Model      string          `json:"model"`
 	StopReason *string         `json:"stop_reason"`
@@ -102,53 +102,53 @@ type rawUsage struct {
 type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
-	Name      string          `json:"name,omitempty"`       // for tool_use blocks
-	ID        string          `json:"id,omitempty"`         // tool_use block ID
-	Content   json.RawMessage `json:"content,omitempty"`    // for tool_result blocks (string or array)
-	Input     json.RawMessage `json:"input,omitempty"`      // for tool_use blocks (raw input params)
+	Name      string          `json:"name,omitempty"`        // for tool_use blocks
+	ID        string          `json:"id,omitempty"`          // tool_use block ID
+	Content   json.RawMessage `json:"content,omitempty"`     // for tool_result blocks (string or array)
+	Input     json.RawMessage `json:"input,omitempty"`       // for tool_use blocks (raw input params)
 	ToolUseID string          `json:"tool_use_id,omitempty"` // for tool_result blocks: links to tool_use
 	IsError   bool            `json:"is_error,omitempty"`    // for tool_result blocks: true when tool errored
 }
 
 // Event is the normalised representation of one JSONL line.
 type Event struct {
-	Type         string    `json:"type"`
-	MessageID    string    `json:"messageId,omitempty"`
-	Role         string    `json:"role"`
-	ContentText  string    `json:"contentPreview"`         // extracted plain-text preview (truncated)
-	FullContent  string    `json:"fullContent,omitempty"`  // full untruncated content (for expand)
-	ToolName     string    `json:"toolName,omitempty"`
-	CostUSD      float64   `json:"costUSD"`
-	InputTokens  int64     `json:"inputTokens"`
-	OutputTokens int64     `json:"outputTokens"`
-	CacheReadTokens     int64 `json:"cacheReadTokens"`
-	CacheCreationTokens int64 `json:"cacheCreationTokens"`
-	Timestamp    time.Time `json:"timestamp"`
-	SessionID    string    `json:"sessionId"`
-	UUID         string    `json:"uuid"`
-	ParentUUID   string    `json:"parentUuid,omitempty"`
-	CWD          string    `json:"cwd,omitempty"`
-	GitBranch    string    `json:"gitBranch,omitempty"`
-	Model        string    `json:"model,omitempty"`
-	IsSidechain  bool      `json:"isSidechain,omitempty"`
-	StopReason   string    `json:"stopReason,omitempty"`
-	HookEvent    string    `json:"hookEvent,omitempty"`
-	HookName     string    `json:"hookName,omitempty"`
-	ToolDetail   string    `json:"toolDetail,omitempty"` // extra context for Agent/Skill calls
-	IsAgent      bool      `json:"isAgent,omitempty"`      // true when toolName is "Agent"
-	ToolUseID    string    `json:"toolUseId,omitempty"`    // first tool_use block ID
-	ToolUseIDs   []string  `json:"toolUseIds,omitempty"`   // all tool_use block IDs (for batched calls)
-	ForToolUseID string    `json:"forToolUseId,omitempty"` // on tool_result: which tool_use this responds to
-	IsError      bool      `json:"isError,omitempty"`      // true for tool_result with is_error or error content
-	TeamName        string    `json:"teamName,omitempty"`        // team name for team agents
-	ThinkingContent string    `json:"thinkingContent,omitempty"` // full text from thinking blocks
-	AgentName    string    `json:"agentName,omitempty"`    // agent name within a team
+	Type                string    `json:"type"`
+	MessageID           string    `json:"messageId,omitempty"`
+	Role                string    `json:"role"`
+	ContentText         string    `json:"contentPreview"`        // extracted plain-text preview (truncated)
+	FullContent         string    `json:"fullContent,omitempty"` // full untruncated content (for expand)
+	ToolName            string    `json:"toolName,omitempty"`
+	CostUSD             float64   `json:"costUSD"`
+	InputTokens         int64     `json:"inputTokens"`
+	OutputTokens        int64     `json:"outputTokens"`
+	CacheReadTokens     int64     `json:"cacheReadTokens"`
+	CacheCreationTokens int64     `json:"cacheCreationTokens"`
+	Timestamp           time.Time `json:"timestamp"`
+	SessionID           string    `json:"sessionId"`
+	UUID                string    `json:"uuid"`
+	ParentUUID          string    `json:"parentUuid,omitempty"`
+	CWD                 string    `json:"cwd,omitempty"`
+	GitBranch           string    `json:"gitBranch,omitempty"`
+	Model               string    `json:"model,omitempty"`
+	IsSidechain         bool      `json:"isSidechain,omitempty"`
+	StopReason          string    `json:"stopReason,omitempty"`
+	HookEvent           string    `json:"hookEvent,omitempty"`
+	HookName            string    `json:"hookName,omitempty"`
+	ToolDetail          string    `json:"toolDetail,omitempty"`      // extra context for Agent/Skill calls
+	IsAgent             bool      `json:"isAgent,omitempty"`         // true when toolName is "Agent"
+	ToolUseID           string    `json:"toolUseId,omitempty"`       // first tool_use block ID
+	ToolUseIDs          []string  `json:"toolUseIds,omitempty"`      // all tool_use block IDs (for batched calls)
+	ForToolUseID        string    `json:"forToolUseId,omitempty"`    // on tool_result: which tool_use this responds to
+	IsError             bool      `json:"isError,omitempty"`         // true for tool_result with is_error or error content
+	TeamName            string    `json:"teamName,omitempty"`        // team name for team agents
+	ThinkingContent     string    `json:"thinkingContent,omitempty"` // full text from thinking blocks
+	AgentName           string    `json:"agentName,omitempty"`       // agent name within a team
 	// Tool result metadata (from toolUseResult on user lines)
-	DurationMs      *int64  `json:"durationMs,omitempty"`
-	Success         *bool   `json:"success,omitempty"`
-	Stderr          string  `json:"stderr,omitempty"`
-	Interrupted     bool    `json:"interrupted,omitempty"`
-	Truncated       bool    `json:"truncated,omitempty"`
+	DurationMs  *int64 `json:"durationMs,omitempty"`
+	Success     *bool  `json:"success,omitempty"`
+	Stderr      string `json:"stderr,omitempty"`
+	Interrupted bool   `json:"interrupted,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
 	// Agent result metadata (from toolUseResult on agent completions)
 	AgentDurationMs   *int64 `json:"agentDurationMs,omitempty"`
 	AgentTokens       *int64 `json:"agentTokens,omitempty"`
@@ -615,7 +615,9 @@ func extractContent(raw json.RawMessage) contentInfo {
 						name, _ := inp["name"].(string)
 						// Build agent identity (type or name) separate from task description
 						agentName := name
-						if agentName == "" { agentName = st }
+						if agentName == "" {
+							agentName = st
+						}
 						switch {
 						case agentName != "" && desc != "":
 							info.toolDetail = agentName
@@ -636,7 +638,11 @@ func extractContent(raw json.RawMessage) contentInfo {
 					case "Bash":
 						cmd, _ := inp["command"].(string)
 						desc, _ := inp["description"].(string)
-						if desc != "" { info.toolDetail = desc } else { info.toolDetail = truncate(cmd, 120) }
+						if desc != "" {
+							info.toolDetail = desc
+						} else {
+							info.toolDetail = truncate(cmd, 120)
+						}
 					case "Read", "Write", "Edit":
 						fp, _ := inp["file_path"].(string)
 						info.toolDetail = fp
