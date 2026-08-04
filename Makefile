@@ -1,8 +1,15 @@
-.PHONY: build dev clean test lint web migrate migrate-status migrate-rollback migrate-create
+.PHONY: build dev clean test lint validate-spec web migrate migrate-status migrate-rollback migrate-create
 
 # Version from release-please manifest (fallback to "dev")
 VERSION ?= $(shell cat .release-please-manifest.json 2>/dev/null | grep -o '"[^"]*"$$' | tr -d '"' || echo "dev")
 LDFLAGS := -s -w -X main.version=$(VERSION)
+
+# web/ sits inside this Go module, so `./...` also matches any Go source an npm
+# package happens to vendor (eslint pulled in flatted/golang, which was being
+# built, vetted and tested as part of this project). Resolve the package list
+# instead of hardcoding directories, so a new top-level package is picked up
+# automatically rather than silently skipped.
+GOPKGS = $(shell go list ./... | grep -v '/node_modules/')
 
 # Build frontend then Go binary
 build: web
@@ -31,7 +38,7 @@ install:
 
 # Run all Go tests
 test:
-	go test ./... -count=1 -v
+	go test $(GOPKGS) -count=1 -v
 
 # Type-check frontend
 typecheck:
@@ -39,7 +46,19 @@ typecheck:
 
 # Run Go vet + frontend type check
 lint: typecheck
-	go vet ./...
+	go vet $(GOPKGS)
+
+# Check api/openapi.yaml against a running server. Boots its own instance on a
+# scratch HOME (empty database), so it never touches ~/.claude-monitor.
+# Requires: python3 with pyyaml + jsonschema.
+validate-spec:
+	@go build -o /tmp/claude-monitor-spec ./cmd/claude-monitor
+	@HOME_DIR=$$(mktemp -d); mkdir -p "$$HOME_DIR/.claude/projects"; \
+	HOME="$$HOME_DIR" /tmp/claude-monitor-spec -port 7799 >/tmp/claude-monitor-spec.log 2>&1 & \
+	SRV=$$!; \
+	for _ in $$(seq 1 40); do curl -sf http://127.0.0.1:7799/health >/dev/null 2>&1 && break; sleep 1; done; \
+	python3 api/validate_spec.py http://127.0.0.1:7799 api/openapi.yaml; \
+	STATUS=$$?; kill $$SRV 2>/dev/null; exit $$STATUS
 
 # Clean build artifacts
 clean:
