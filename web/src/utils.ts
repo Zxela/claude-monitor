@@ -33,7 +33,11 @@ export function effectiveInputTokens(s: {
 }
 
 /** Extract a short display name for a session. */
-export function sessionDisplayName(s: { sessionName?: string; cwd?: string; id: string }): string {
+export function sessionDisplayName(s: {
+  sessionName?: string;
+  cwd?: string;
+  id: string;
+}): string {
   if (s.sessionName) return s.sessionName;
   if (s.cwd) {
     // Use basename of cwd, not the full path

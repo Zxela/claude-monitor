@@ -28,8 +28,16 @@ function makeSession(over: Partial<Session> & { id: string }): Session {
 describe('groupRows', () => {
   it('groups a plain parent with two children into one group', () => {
     const parent = makeSession({ id: 'p', lastActive: '2024-01-01T03:00:00Z' });
-    const c1 = makeSession({ id: 'c1', parentId: 'p', lastActive: '2024-01-01T02:00:00Z' });
-    const c2 = makeSession({ id: 'c2', parentId: 'p', lastActive: '2024-01-01T01:00:00Z' });
+    const c1 = makeSession({
+      id: 'c1',
+      parentId: 'p',
+      lastActive: '2024-01-01T02:00:00Z',
+    });
+    const c2 = makeSession({
+      id: 'c2',
+      parentId: 'p',
+      lastActive: '2024-01-01T01:00:00Z',
+    });
 
     const groups = groupRows([parent, c1, c2]);
     expect(groups).toHaveLength(1);
@@ -56,8 +64,15 @@ describe('groupRows', () => {
 
   it('flattens a nested subagent under the top-level ancestor', () => {
     // grandparent (top-level) -> child -> grandchild
-    const grandparent = makeSession({ id: 'gp', lastActive: '2024-01-01T09:00:00Z' });
-    const child = makeSession({ id: 'c', parentId: 'gp', lastActive: '2024-01-01T08:00:00Z' });
+    const grandparent = makeSession({
+      id: 'gp',
+      lastActive: '2024-01-01T09:00:00Z',
+    });
+    const child = makeSession({
+      id: 'c',
+      parentId: 'gp',
+      lastActive: '2024-01-01T08:00:00Z',
+    });
     const grandchild = makeSession({
       id: 'gc',
       parentId: 'c',
@@ -77,22 +92,46 @@ describe('groupRows', () => {
     // gp -> c -> gc -> ggc: the ancestor walk must climb past every intermediate
     // level, not just one, so all descendants collapse under the single root.
     const gp = makeSession({ id: 'gp', lastActive: '2024-01-01T09:00:00Z' });
-    const c = makeSession({ id: 'c', parentId: 'gp', lastActive: '2024-01-01T08:00:00Z' });
-    const gc = makeSession({ id: 'gc', parentId: 'c', lastActive: '2024-01-01T07:00:00Z' });
-    const ggc = makeSession({ id: 'ggc', parentId: 'gc', lastActive: '2024-01-01T06:00:00Z' });
+    const c = makeSession({
+      id: 'c',
+      parentId: 'gp',
+      lastActive: '2024-01-01T08:00:00Z',
+    });
+    const gc = makeSession({
+      id: 'gc',
+      parentId: 'c',
+      lastActive: '2024-01-01T07:00:00Z',
+    });
+    const ggc = makeSession({
+      id: 'ggc',
+      parentId: 'gc',
+      lastActive: '2024-01-01T06:00:00Z',
+    });
 
     const groups = groupRows([gp, c, gc, ggc]);
     expect(groups).toHaveLength(1);
     expect(groups[0].parent.id).toBe('gp');
-    expect(groups[0].children.map((x) => x.id).sort()).toEqual(['c', 'gc', 'ggc']);
+    expect(groups[0].children.map((x) => x.id).sort()).toEqual([
+      'c',
+      'gc',
+      'ggc',
+    ]);
   });
 
   it('terminates on a parentId cycle (depth guard)', () => {
     // a <-> b form a parentId cycle. The ancestor walk is bounded by the depth
     // guard, so groupRows must return rather than loop forever. Neither node has a
     // root parent (each claims an in-set parent), so there are no top-level rows.
-    const a = makeSession({ id: 'a', parentId: 'b', lastActive: '2024-01-01T02:00:00Z' });
-    const b = makeSession({ id: 'b', parentId: 'a', lastActive: '2024-01-01T01:00:00Z' });
+    const a = makeSession({
+      id: 'a',
+      parentId: 'b',
+      lastActive: '2024-01-01T02:00:00Z',
+    });
+    const b = makeSession({
+      id: 'b',
+      parentId: 'a',
+      lastActive: '2024-01-01T01:00:00Z',
+    });
 
     const groups = groupRows([a, b]);
     expect(groups).toEqual([]);

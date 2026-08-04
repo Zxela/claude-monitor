@@ -9,16 +9,24 @@ import {
 describe('sessionDisplayName', () => {
   it('prefers sessionName over everything', () => {
     expect(
-      sessionDisplayName({ sessionName: 'My Session', cwd: '/home/user/repo', id: 'abcdef123456' }),
+      sessionDisplayName({
+        sessionName: 'My Session',
+        cwd: '/home/user/repo',
+        id: 'abcdef123456',
+      }),
     ).toBe('My Session');
   });
 
   it('falls back to cwd basename when no sessionName', () => {
-    expect(sessionDisplayName({ cwd: '/home/user/my-repo', id: 'abcdef123456' })).toBe('my-repo');
+    expect(
+      sessionDisplayName({ cwd: '/home/user/my-repo', id: 'abcdef123456' }),
+    ).toBe('my-repo');
   });
 
   it('strips trailing slashes from cwd before taking basename', () => {
-    expect(sessionDisplayName({ cwd: '/home/user/my-repo/', id: 'abcdef123456' })).toBe('my-repo');
+    expect(
+      sessionDisplayName({ cwd: '/home/user/my-repo/', id: 'abcdef123456' }),
+    ).toBe('my-repo');
   });
 
   it('falls back to first 8 chars of id when no sessionName/cwd', () => {
@@ -29,7 +37,11 @@ describe('sessionDisplayName', () => {
 describe('effectiveInputTokens', () => {
   it('sums input + cacheRead + cacheCreation', () => {
     expect(
-      effectiveInputTokens({ inputTokens: 10, cacheReadTokens: 100, cacheCreationTokens: 5 }),
+      effectiveInputTokens({
+        inputTokens: 10,
+        cacheReadTokens: 100,
+        cacheCreationTokens: 5,
+      }),
     ).toBe(115);
   });
 });

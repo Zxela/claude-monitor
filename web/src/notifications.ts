@@ -25,7 +25,11 @@ export function getSettings(): NotifSettings {
   return { ...settings };
 }
 
-export async function notify(type: 'budget' | 'error', title: string, body: string): Promise<void> {
+export async function notify(
+  type: 'budget' | 'error',
+  title: string,
+  body: string,
+): Promise<void> {
   if (type === 'budget' && !settings.budget) return;
   if (type === 'error' && !settings.error) return;
   if (typeof Notification === 'undefined') return;

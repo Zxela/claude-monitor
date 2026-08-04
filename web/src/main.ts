@@ -11,7 +11,11 @@ import { render as renderHistoryView } from './components/history-view';
 import { render as renderTimeline } from './components/timeline-view';
 import { render as renderAnalyticsView } from './components/analytics-view';
 import { render as renderTableView } from './components/table-view';
-import { render as renderReplay, togglePlay as replayTogglePlay, restart as replayRestart } from './components/replay';
+import {
+  render as renderReplay,
+  togglePlay as replayTogglePlay,
+  restart as replayRestart,
+} from './components/replay';
 import { render as renderBudget } from './components/budget-popover';
 import { toggle as toggleHelp } from './components/help-overlay';
 import { dismiss as dismissCostBreakdown } from './components/cost-breakdown';
@@ -134,7 +138,9 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       const ids = getVisibleSessionIds();
       if (ids.length === 0) break;
-      const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : -1;
+      const idx = state.focusedSessionId
+        ? ids.indexOf(state.focusedSessionId)
+        : -1;
       // If focused session not in visible list, start from the top
       const next = idx === -1 ? ids[0] : ids[Math.min(idx + 1, ids.length - 1)];
       update({ focusedSessionId: next });
@@ -144,7 +150,9 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       const ids = getVisibleSessionIds();
       if (ids.length === 0) break;
-      const idx = state.focusedSessionId ? ids.indexOf(state.focusedSessionId) : -1;
+      const idx = state.focusedSessionId
+        ? ids.indexOf(state.focusedSessionId)
+        : -1;
       // If focused session not in visible list, start from the bottom
       const prev = idx === -1 ? ids[ids.length - 1] : ids[Math.max(idx - 1, 0)];
       update({ focusedSessionId: prev });
@@ -154,7 +162,9 @@ document.addEventListener('keydown', (e) => {
       if (state.focusedSessionId) {
         update({
           selectedSessionId:
-            state.focusedSessionId === state.selectedSessionId ? null : state.focusedSessionId,
+            state.focusedSessionId === state.selectedSessionId
+              ? null
+              : state.focusedSessionId,
         });
       }
       break;
@@ -184,7 +194,9 @@ document.addEventListener('keydown', (e) => {
         } else {
           update({
             selectedSessionId:
-              state.selectedSessionId === state.focusedSessionId ? null : state.focusedSessionId,
+              state.selectedSessionId === state.focusedSessionId
+                ? null
+                : state.focusedSessionId,
           });
         }
       }

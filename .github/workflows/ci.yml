@@ -35,6 +35,11 @@ jobs:
       - name: Frontend lint
         run: cd web && npm run lint
 
+      # Prettier was never gated in CI, so src/ drifted out of format. Biome's
+      # formatter is gated here so it cannot drift again.
+      - name: Frontend format check
+        run: cd web && npm run format:check
+
       - name: Frontend test
         run: cd web && npm test
 

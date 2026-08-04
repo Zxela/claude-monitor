@@ -21,7 +21,8 @@ function darkTheme(): Record<string, unknown> {
 // to one line, falling back to a short id when unnamed.
 function sessionLabel(name: string, id: string): string {
   const trimmed = (name || '').replace(/\s+/g, ' ').trim();
-  if (trimmed) return trimmed.length > 36 ? trimmed.slice(0, 35) + '…' : trimmed;
+  if (trimmed)
+    return trimmed.length > 36 ? trimmed.slice(0, 35) + '…' : trimmed;
   return id.length > 12 ? id.slice(0, 12) : id;
 }
 
@@ -65,7 +66,10 @@ const CARD_DEFS: CardDef[] = [
       const opts = darkTheme() as any;
       opts.scales.x.stacked = true;
       opts.scales.y.stacked = true;
-      opts.scales.y.ticks = { ...opts.scales.y.ticks, callback: (v: number) => formatTokens(v) };
+      opts.scales.y.ticks = {
+        ...opts.scales.y.ticks,
+        callback: (v: number) => formatTokens(v),
+      };
       return new Chart(canvas, {
         type: 'bar',
         data: {
@@ -130,7 +134,8 @@ const CARD_DEFS: CardDef[] = [
     // Project attribution is approximate: a session's entire cost is booked to
     // the project it started in, so a run spanning multiple projects is not
     // split. Cost by Session (above) is the exact unit.
-    subtitle: '⚠ approximate — whole-session cost booked to its starting project',
+    subtitle:
+      '⚠ approximate — whole-session cost booked to its starting project',
     defaultExpanded: false,
     render(canvas, data) {
       const labels = data.byRepo.map((r) => r.repoName || r.repoId);
@@ -242,7 +247,9 @@ const CARD_DEFS: CardDef[] = [
             // only contain subagent/child spend (sessionCount === 0).
             {
               label: 'Average',
-              data: data.buckets.map((b) => (b.sessionCount > 0 ? b.avgSessionCost : null)),
+              data: data.buckets.map((b) =>
+                b.sessionCount > 0 ? b.avgSessionCost : null,
+              ),
               borderColor: COLORS.blue,
               tension: 0.3,
               pointRadius: 2,
@@ -250,7 +257,9 @@ const CARD_DEFS: CardDef[] = [
             },
             {
               label: 'Median',
-              data: data.buckets.map((b) => (b.sessionCount > 0 ? b.medianSessionCost : null)),
+              data: data.buckets.map((b) =>
+                b.sessionCount > 0 ? b.medianSessionCost : null,
+              ),
               borderColor: COLORS.green,
               tension: 0.3,
               pointRadius: 2,
@@ -258,7 +267,9 @@ const CARD_DEFS: CardDef[] = [
             },
             {
               label: 'P95',
-              data: data.buckets.map((b) => (b.sessionCount > 0 ? b.p95SessionCost : null)),
+              data: data.buckets.map((b) =>
+                b.sessionCount > 0 ? b.p95SessionCost : null,
+              ),
               borderColor: COLORS.red,
               tension: 0.3,
               pointRadius: 2,
@@ -279,9 +290,14 @@ const CARD_DEFS: CardDef[] = [
       const labels = data.buckets.map((b) => b.date);
       // Plot null (a line gap) for buckets with no top-level sessions so the
       // line does not falsely dive to 0 in subagent-only hours.
-      const values = data.buckets.map((b) => (b.sessionCount > 0 ? b.avgSessionTokens : null));
+      const values = data.buckets.map((b) =>
+        b.sessionCount > 0 ? b.avgSessionTokens : null,
+      );
       const opts = darkTheme() as any;
-      opts.scales.y.ticks = { ...opts.scales.y.ticks, callback: (v: number) => formatTokens(v) };
+      opts.scales.y.ticks = {
+        ...opts.scales.y.ticks,
+        callback: (v: number) => formatTokens(v),
+      };
       return new Chart(canvas, {
         type: 'line',
         data: {
@@ -346,7 +362,8 @@ export function renderCards(
   container.innerHTML = '';
 
   for (const def of CARD_DEFS) {
-    const expanded = cardState[def.id] !== undefined ? cardState[def.id] : def.defaultExpanded;
+    const expanded =
+      cardState[def.id] !== undefined ? cardState[def.id] : def.defaultExpanded;
 
     const card = document.createElement('div');
     card.className = 'analytics-card';
@@ -460,7 +477,9 @@ export function renderToolUsageCard(
   header.addEventListener('click', () => {
     const isExpanded = body.style.display !== 'none';
     body.style.display = isExpanded ? 'none' : '';
-    header.querySelector('.analytics-card-toggle')!.textContent = isExpanded ? '▶' : '▼';
+    header.querySelector('.analytics-card-toggle')!.textContent = isExpanded
+      ? '▶'
+      : '▼';
     header.setAttribute('aria-expanded', String(!isExpanded));
     onToggle(!isExpanded);
   });
@@ -478,11 +497,16 @@ function buildToolUsageBody(usage: ToolUsage | null): HTMLElement {
   const skills = usage?.skills ?? [];
   const tools = usage?.tools ?? [];
   if (skills.length === 0 && tools.length === 0) {
-    wrap.innerHTML = '<div class="analytics-empty">No tool or skill activity in this period</div>';
+    wrap.innerHTML =
+      '<div class="analytics-empty">No tool or skill activity in this period</div>';
     return wrap;
   }
-  wrap.appendChild(buildUsageSection('Skills', skills, SKILL_COLOR, 'No skills invoked'));
-  wrap.appendChild(buildUsageSection('Tools', tools, TOOL_COLOR, 'No tools used'));
+  wrap.appendChild(
+    buildUsageSection('Skills', skills, SKILL_COLOR, 'No skills invoked'),
+  );
+  wrap.appendChild(
+    buildUsageSection('Tools', tools, TOOL_COLOR, 'No tools used'),
+  );
   return wrap;
 }
 

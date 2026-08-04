@@ -133,7 +133,8 @@ async function loadEvents(sid: string): Promise<void> {
     // The manifest reports the true count (total) and a hasMore flag; record
     // truncation so draw() can note the timeline is partial.
     loadTruncated =
-      data.hasMore === true || (typeof data.total === 'number' && data.total > raw.length);
+      data.hasMore === true ||
+      (typeof data.total === 'number' && data.total > raw.length);
   } catch (err) {
     console.error('Failed to load timeline events:', err);
     events = [];
@@ -224,7 +225,8 @@ function resizeCanvas(): void {
 
 function getLane(evt: TimelineEvent): number {
   if (evt.role === 'user') return 0;
-  if (evt.toolName || evt.type === 'tool_use' || evt.type === 'tool_result') return 2;
+  if (evt.toolName || evt.type === 'tool_use' || evt.type === 'tool_result')
+    return 2;
   return 1; // assistant, hook, system, etc.
 }
 
@@ -323,7 +325,8 @@ export function pickEventAt(
       let best = span.events[0];
       let bestDist = Infinity;
       for (const evt of span.events) {
-        const evtX = (new Date(evt.timestamp).getTime() - t0) * pixelsPerMs + offsetX;
+        const evtX =
+          (new Date(evt.timestamp).getTime() - t0) * pixelsPerMs + offsetX;
         const dist = Math.abs(evtX - mx);
         if (dist < bestDist) {
           bestDist = dist;
@@ -399,7 +402,10 @@ function draw(): void {
   ctx.fillStyle = '#8888aa';
   ctx.font = '9px monospace';
   ctx.textAlign = 'center';
-  const step = Math.max(1000, Math.pow(10, Math.floor(Math.log10((1 / pixelsPerMs) * 100))));
+  const step = Math.max(
+    1000,
+    Math.pow(10, Math.floor(Math.log10((1 / pixelsPerMs) * 100))),
+  );
   for (let t = 0; ; t += step) {
     const x = t * pixelsPerMs + offsetX;
     if (x > w) break;
@@ -438,11 +444,18 @@ function draw(): void {
 
     // Label inside bar if wide enough
     if (barW > 40) {
-      const label = span.events.length > 1 ? `${span.label} (${span.events.length})` : span.label;
+      const label =
+        span.events.length > 1
+          ? `${span.label} (${span.events.length})`
+          : span.label;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.font = '9px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(label.slice(0, Math.floor(barW / 6)), x + 3, y + barH / 2 + 3);
+      ctx.fillText(
+        label.slice(0, Math.floor(barW / 6)),
+        x + 3,
+        y + barH / 2 + 3,
+      );
     }
   }
 

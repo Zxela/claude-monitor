@@ -136,7 +136,7 @@
 
 /* Left accent bar via pseudo-element (matches old design) */
 .session-card::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 0;
@@ -370,7 +370,7 @@
 
 /* Left accent bar matching expanded cards */
 .session-card-compact::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 0;
