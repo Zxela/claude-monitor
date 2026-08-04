@@ -377,6 +377,6 @@ function truncate(s: string, n: number): string {
 function formatTime(ts: string): string {
   if (!ts) return '—';
   const d = new Date(ts);
-  if (isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }

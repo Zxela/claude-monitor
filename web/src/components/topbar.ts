@@ -66,7 +66,9 @@ export function render(container: HTMLElement): void {
   const searchBox = el.querySelector('.search-box');
   const viewToggle = el.querySelector('.view-toggle');
 
-  stats.forEach((stat) => collapsible.appendChild(stat));
+  stats.forEach((stat) => {
+    collapsible.appendChild(stat);
+  });
   if (searchBox) collapsible.appendChild(searchBox);
   if (viewToggle) collapsible.appendChild(viewToggle);
 

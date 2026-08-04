@@ -186,7 +186,9 @@ function renderFeedPanel(): void {
     currentHighlightGroup = groupId;
     feedContent!
       .querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`)
-      .forEach((el) => el.classList.add('group-highlight'));
+      .forEach((el) => {
+        el.classList.add('group-highlight');
+      });
   });
   feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
@@ -452,7 +454,9 @@ function clearGroupHighlight(): void {
   if (!currentHighlightGroup || !feedContent) return;
   feedContent
     .querySelectorAll('.group-highlight')
-    .forEach((el) => el.classList.remove('group-highlight'));
+    .forEach((el) => {
+      el.classList.remove('group-highlight');
+    });
   currentHighlightGroup = null;
 }
 

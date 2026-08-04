@@ -276,7 +276,7 @@ function renderPanelContent(): void {
   const input = settingsEl.querySelector('input[type="number"]') as HTMLInputElement;
   settingsEl.querySelector('.set-btn')!.addEventListener('click', () => {
     const val = parseFloat(input.value);
-    if (!isNaN(val) && val > 0) {
+    if (!Number.isNaN(val) && val > 0) {
       localStorage.setItem('budget', String(val));
       budgetNotificationSent = false;
       update({ budgetThreshold: val, budgetDismissed: false });
