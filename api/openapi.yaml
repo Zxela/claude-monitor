@@ -433,13 +433,14 @@ paths:
         - name: window
           in: query
           description: >
-            Rolling time window for the breakdown. `all` (or omitted) aggregates
-            over all history. Note this endpoint accepts only the rolling
-            vocabulary — the calendar tokens (`today`/`week`/`month`) are not
-            valid here.
+            Time window for the breakdown, filtering by session start. `all` (or
+            omitted) aggregates over all history. Accepts the same vocabulary as
+            the other stats endpoints, resolved by the same shared definition —
+            calendar (`today` = local midnight, `week` = ISO-week Monday,
+            `month` = the 1st) and rolling (`24h`/`7d`/`30d`).
           schema:
             type: string
-            enum: [all, 24h, 7d, 30d]
+            enum: [all, today, week, month, 24h, 7d, 30d]
             default: all
         - name: repo
           in: query
