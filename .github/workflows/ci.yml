@@ -39,13 +39,13 @@ jobs:
         run: cd web && npm test
 
       - name: Build
-        run: go build ./...
+        run: go build $(go list ./... | grep -v /node_modules/)
 
       - name: Test
-        run: go test ./... -v -count=1
+        run: go test $(go list ./... | grep -v /node_modules/) -v -count=1
 
       - name: Vet
-        run: go vet ./...
+        run: go vet $(go list ./... | grep -v /node_modules/)
 
   lint:
     runs-on: ubuntu-latest
@@ -80,7 +80,7 @@ jobs:
       - name: Security scan (govulncheck)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          govulncheck $(go list ./... | grep -v /node_modules/)
         continue-on-error: true  # informational — stdlib vulns may not have patches yet
 
   # Create or update the release PR on pushes to main

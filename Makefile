@@ -4,6 +4,13 @@
 VERSION ?= $(shell cat .release-please-manifest.json 2>/dev/null | grep -o '"[^"]*"$$' | tr -d '"' || echo "dev")
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
+# web/ sits inside this Go module, so `./...` also matches any Go source an npm
+# package happens to vendor (eslint pulled in flatted/golang, which was being
+# built, vetted and tested as part of this project). Resolve the package list
+# instead of hardcoding directories, so a new top-level package is picked up
+# automatically rather than silently skipped.
+GOPKGS = $(shell go list ./... | grep -v '/node_modules/')
+
 # Build frontend then Go binary
 build: web
 	go build -ldflags="$(LDFLAGS)" -o claude-monitor ./cmd/claude-monitor
@@ -31,7 +38,7 @@ install:
 
 # Run all Go tests
 test:
-	go test ./... -count=1 -v
+	go test $(GOPKGS) -count=1 -v
 
 # Type-check frontend
 typecheck:
@@ -39,7 +46,7 @@ typecheck:
 
 # Run Go vet + frontend type check
 lint: typecheck
-	go vet ./...
+	go vet $(GOPKGS)
 
 # Clean build artifacts
 clean:
