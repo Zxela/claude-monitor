@@ -50,7 +50,10 @@ function getDotClass(session: Session): string {
   return 'dot-active';
 }
 
-export function renderExpanded(session: Session, container: HTMLElement): HTMLElement {
+export function renderExpanded(
+  session: Session,
+  container: HTMLElement,
+): HTMLElement {
   const el = document.createElement('div');
   el.className = 'session-card';
   el.dataset.sessionId = session.id;
@@ -114,7 +117,8 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   // Card click: select session
   const selectSession = () => {
     const updates: Record<string, unknown> = {
-      selectedSessionId: session.id === state.selectedSessionId ? null : session.id,
+      selectedSessionId:
+        session.id === state.selectedSessionId ? null : session.id,
     };
     if (state.view !== 'list') updates.view = 'list';
     update(updates);
@@ -143,7 +147,10 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
     };
     errEl.addEventListener('click', filterErrors);
     errEl.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      if (
+        (e as KeyboardEvent).key === 'Enter' ||
+        (e as KeyboardEvent).key === ' '
+      ) {
         e.preventDefault();
         filterErrors(e);
       }
@@ -153,7 +160,10 @@ export function renderExpanded(session: Session, container: HTMLElement): HTMLEl
   return el;
 }
 
-export function renderCompact(session: Session, container: HTMLElement): HTMLElement {
+export function renderCompact(
+  session: Session,
+  container: HTMLElement,
+): HTMLElement {
   const el = document.createElement('div');
   el.className = 'session-card-compact';
   el.dataset.sessionId = session.id;
@@ -203,7 +213,8 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
 
   const selectCompactSession = () => {
     const updates: Record<string, unknown> = {
-      selectedSessionId: session.id === state.selectedSessionId ? null : session.id,
+      selectedSessionId:
+        session.id === state.selectedSessionId ? null : session.id,
     };
     if (state.view !== 'list') updates.view = 'list';
     update(updates);
@@ -231,7 +242,10 @@ export function renderCompact(session: Session, container: HTMLElement): HTMLEle
     };
     errEl.addEventListener('click', filterErrors);
     errEl.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      if (
+        (e as KeyboardEvent).key === 'Enter' ||
+        (e as KeyboardEvent).key === ' '
+      ) {
         e.preventDefault();
         filterErrors(e);
       }

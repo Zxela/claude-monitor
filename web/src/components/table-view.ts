@@ -4,7 +4,15 @@ import { state, subscribe, update } from '../state';
 import { sessionDisplayName, formatDurationSecs } from '../utils';
 import '../styles/views.css';
 
-type SortKey = 'name' | 'status' | 'cost' | 'tokens' | 'messages' | 'errors' | 'duration' | 'lastActive';
+type SortKey =
+  | 'name'
+  | 'status'
+  | 'cost'
+  | 'tokens'
+  | 'messages'
+  | 'errors'
+  | 'duration'
+  | 'lastActive';
 type SortDir = 'asc' | 'desc';
 
 let container: HTMLElement | null = null;
@@ -67,7 +75,7 @@ function sortSessions(sessions: Session[]): Session[] {
         cmp = a.totalCost - b.totalCost;
         break;
       case 'tokens':
-        cmp = (a.inputTokens + a.outputTokens) - (b.inputTokens + b.outputTokens);
+        cmp = a.inputTokens + a.outputTokens - (b.inputTokens + b.outputTokens);
         break;
       case 'messages':
         cmp = a.messageCount - b.messageCount;
@@ -83,7 +91,8 @@ function sortSessions(sessions: Session[]): Session[] {
         break;
       }
       case 'lastActive':
-        cmp = new Date(a.lastActive).getTime() - new Date(b.lastActive).getTime();
+        cmp =
+          new Date(a.lastActive).getTime() - new Date(b.lastActive).getTime();
         break;
     }
     return sortDir === 'asc' ? cmp : -cmp;
@@ -137,7 +146,8 @@ function renderTable(): void {
   ];
 
   const arrowFor = (key: SortKey): string => {
-    if (sortKey !== key) return '<span style="color:var(--text-dim);opacity:0.4">⇅</span>';
+    if (sortKey !== key)
+      return '<span style="color:var(--text-dim);opacity:0.4">⇅</span>';
     return sortDir === 'asc'
       ? '<span style="color:var(--cyan)">↑</span>'
       : '<span style="color:var(--cyan)">↓</span>';
@@ -148,7 +158,7 @@ function renderTable(): void {
       (c) =>
         `<th data-sort="${c.key}" style="text-align:${c.align ?? 'left'};cursor:pointer;user-select:none;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:10px;letter-spacing:0.5px;white-space:nowrap">
           ${c.label} ${arrowFor(c.key)}
-        </th>`
+        </th>`,
     )
     .join('');
 
@@ -169,7 +179,9 @@ function renderTable(): void {
             ? 'var(--yellow)'
             : 'var(--green)'
         : 'var(--text-dim)';
-      const statusLabel = s.isActive ? s.status.toUpperCase().replace('_', ' ') : 'IDLE';
+      const statusLabel = s.isActive
+        ? s.status.toUpperCase().replace('_', ' ')
+        : 'IDLE';
       const isSelected = state.selectedSessionId === s.id;
 
       return `<tr data-session-id="${s.id}" style="cursor:pointer;background:${isSelected ? 'var(--bg-hover)' : 'transparent'};border-left:${isSelected ? '2px solid var(--cyan)' : '2px solid transparent'}">
@@ -203,28 +215,35 @@ function renderTable(): void {
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
     th.addEventListener('click', () => handleSort(th.dataset.sort as SortKey));
-    th.addEventListener('mouseenter', () => { th.style.color = 'var(--text)'; });
-    th.addEventListener('mouseleave', () => { th.style.color = sortKey === th.dataset.sort ? 'var(--cyan)' : 'var(--text-dim)'; });
+    th.addEventListener('mouseenter', () => {
+      th.style.color = 'var(--text)';
+    });
+    th.addEventListener('mouseleave', () => {
+      th.style.color =
+        sortKey === th.dataset.sort ? 'var(--cyan)' : 'var(--text-dim)';
+    });
   });
 
   // Row click: select session
-  tableEl.querySelectorAll<HTMLElement>('tr[data-session-id]').forEach((row) => {
-    row.addEventListener('mouseenter', () => {
-      if (state.selectedSessionId !== row.dataset.sessionId) {
-        row.style.background = 'var(--bg-hover)';
-      }
-    });
-    row.addEventListener('mouseleave', () => {
-      if (state.selectedSessionId !== row.dataset.sessionId) {
-        row.style.background = 'transparent';
-      }
-    });
-    row.addEventListener('click', () => {
-      const sid = row.dataset.sessionId!;
-      update({
-        selectedSessionId: state.selectedSessionId === sid ? null : sid,
-        view: 'list',
+  tableEl
+    .querySelectorAll<HTMLElement>('tr[data-session-id]')
+    .forEach((row) => {
+      row.addEventListener('mouseenter', () => {
+        if (state.selectedSessionId !== row.dataset.sessionId) {
+          row.style.background = 'var(--bg-hover)';
+        }
+      });
+      row.addEventListener('mouseleave', () => {
+        if (state.selectedSessionId !== row.dataset.sessionId) {
+          row.style.background = 'transparent';
+        }
+      });
+      row.addEventListener('click', () => {
+        const sid = row.dataset.sessionId!;
+        update({
+          selectedSessionId: state.selectedSessionId === sid ? null : sid,
+          view: 'list',
+        });
       });
     });
-  });
 }

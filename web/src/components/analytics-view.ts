@@ -4,13 +4,18 @@ import type { TrendWindow } from '../api';
 import { state, subscribe } from '../state';
 import { fetchTrends, fetchRepos, fetchToolUsage } from '../api';
 import { formatTokens } from '../utils';
-import { renderCards, renderToolUsageCard, destroyCards } from './analytics-cards';
+import {
+  renderCards,
+  renderToolUsageCard,
+  destroyCards,
+} from './analytics-cards';
 import '../styles/analytics.css';
 
 let container: HTMLElement | null = null;
 let root: HTMLElement | null = null;
 let currentWindow: TrendWindow =
-  (localStorage.getItem('claude-monitor-analytics-window') as TrendWindow) || '7d';
+  (localStorage.getItem('claude-monitor-analytics-window') as TrendWindow) ||
+  '7d';
 let currentRepo: string | undefined;
 let repos: RepoEntry[] = [];
 let trendData: TrendResult | null = null;
@@ -20,7 +25,9 @@ let loading = false;
 
 function getCardState(): Record<string, boolean> {
   try {
-    return JSON.parse(localStorage.getItem('claude-monitor-analytics-cards') || '{}');
+    return JSON.parse(
+      localStorage.getItem('claude-monitor-analytics-cards') || '{}',
+    );
   } catch {
     return {};
   }
@@ -136,7 +143,8 @@ function show(): void {
       // produces blank plots with a meaningless 0..1 axis and a stray legend.
       // Show an explicit empty state instead.
       destroyCards();
-      cardsContainer.innerHTML = '<div class="analytics-empty">No activity in this period</div>';
+      cardsContainer.innerHTML =
+        '<div class="analytics-empty">No activity in this period</div>';
     } else {
       renderCards(cardsContainer, trendData, getCardState(), (id, expanded) => {
         setCardState(id, expanded);
@@ -144,7 +152,8 @@ function show(): void {
       // Tool & Skill Usage is a non-chart card appended after the chart cards;
       // renderCards clears the container, so it must be (re)added here each render.
       const cs = getCardState();
-      const tuExpanded = cs['tool-skill-usage'] !== undefined ? cs['tool-skill-usage'] : true;
+      const tuExpanded =
+        cs['tool-skill-usage'] !== undefined ? cs['tool-skill-usage'] : true;
       renderToolUsageCard(cardsContainer, toolUsage, tuExpanded, (expanded) => {
         setCardState('tool-skill-usage', expanded);
       });
@@ -160,9 +169,14 @@ function show(): void {
 
 function updateToolbar(): void {
   if (!root) return;
-  root.querySelectorAll<HTMLButtonElement>('.analytics-win-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.textContent === currentWindow.toUpperCase());
-  });
+  root
+    .querySelectorAll<HTMLButtonElement>('.analytics-win-btn')
+    .forEach((btn) => {
+      btn.classList.toggle(
+        'active',
+        btn.textContent === currentWindow.toUpperCase(),
+      );
+    });
 }
 
 async function loadData(): Promise<void> {

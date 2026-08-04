@@ -13,7 +13,11 @@ export function render(container: HTMLElement): void {
     if (changed.has('updateVersion') || changed.has('updateDismissed')) {
       const { updateVersion, updateUrl, updateDismissed } = state;
 
-      if (updateVersion && !updateDismissed && !sessionStorage.getItem('update-dismissed')) {
+      if (
+        updateVersion &&
+        !updateDismissed &&
+        !sessionStorage.getItem('update-dismissed')
+      ) {
         banner.style.display = 'flex';
         banner.innerHTML = '';
 

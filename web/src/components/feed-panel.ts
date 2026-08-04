@@ -60,7 +60,11 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   const viewChanged = changed.has('view');
 
   // When sessions first load, populate multi-session feed
-  if (changed.has('grouped') && !multiSessionLoaded && !state.selectedSessionId) {
+  if (
+    changed.has('grouped') &&
+    !multiSessionLoaded &&
+    !state.selectedSessionId
+  ) {
     multiSessionLoaded = true;
     loadMultiSessionEvents();
   }
@@ -105,16 +109,22 @@ function onWsMessage(event: WsEvent): void {
   const msg = event.data;
 
   // In single-session mode, only show messages for selected session
-  if (state.selectedSessionId && event.session.id !== state.selectedSessionId) return;
+  if (state.selectedSessionId && event.session.id !== state.selectedSessionId)
+    return;
 
   if (msg.toolName && msg.role === 'assistant') {
-    const toolInfo = msg.toolName + (msg.toolDetail ? ': ' + msg.toolDetail.slice(0, 60) : '');
+    const toolInfo =
+      msg.toolName + (msg.toolDetail ? ': ' + msg.toolDetail.slice(0, 60) : '');
     setLastTool(event.session.id, toolInfo);
   }
 
   if (msg.isError) {
     const name = sessionDisplayName(event.session);
-    notify('error', 'Agent Error', `${name}: ${(msg.contentPreview || '').slice(0, 100)}`);
+    notify(
+      'error',
+      'Agent Error',
+      `${name}: ${(msg.contentPreview || '').slice(0, 100)}`,
+    );
   }
 
   const sessionName = sessionDisplayName(event.session);
@@ -142,8 +152,13 @@ function renderFeedPanel(): void {
     btn.textContent = type.toUpperCase();
     btn.dataset.type = type;
     btn.setAttribute('aria-pressed', String(!!isActive));
-    btn.setAttribute('aria-label', `Filter by ${type.replace('_', ' ')} messages`);
-    btn.addEventListener('click', (e) => handleFilterClick(type, e as MouseEvent));
+    btn.setAttribute(
+      'aria-label',
+      `Filter by ${type.replace('_', ' ')} messages`,
+    );
+    btn.addEventListener('click', (e) =>
+      handleFilterClick(type, e as MouseEvent),
+    );
     filterBar!.appendChild(btn);
   }
   container.appendChild(filterBar);
@@ -152,7 +167,9 @@ function renderFeedPanel(): void {
   feedContent = document.createElement('div');
   feedContent.className = 'feed-content';
   feedContent.setAttribute('aria-live', 'polite');
-  const sess = state.selectedSessionId ? state.sessions.get(state.selectedSessionId) : null;
+  const sess = state.selectedSessionId
+    ? state.sessions.get(state.selectedSessionId)
+    : null;
   feedContent.setAttribute(
     'aria-label',
     sess?.isActive !== false ? 'Live event feed' : 'Session history',
@@ -167,7 +184,10 @@ function renderFeedPanel(): void {
       scrollRafPending = false;
       if (!feedContent) return;
       const atBottom =
-        feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 30;
+        feedContent.scrollHeight -
+          feedContent.scrollTop -
+          feedContent.clientHeight <
+        30;
       autoScroll = atBottom;
       scrollLockBtn?.classList.toggle('visible', !atBottom);
     });
@@ -175,7 +195,9 @@ function renderFeedPanel(): void {
   // Hover-based group highlighting: hovering any entry with a data-group-id
   // highlights all entries in the same group (tool_use + hooks + tool_result).
   feedContent.addEventListener('mouseover', (e) => {
-    const entry = (e.target as HTMLElement).closest<HTMLElement>('.feed-entry[data-group-id]');
+    const entry = (e.target as HTMLElement).closest<HTMLElement>(
+      '.feed-entry[data-group-id]',
+    );
     if (!entry) {
       clearGroupHighlight();
       return;
@@ -226,7 +248,10 @@ function updateHeader(): void {
       update({ selectedSessionId: null });
     });
     backBtn?.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      if (
+        (e as KeyboardEvent).key === 'Enter' ||
+        (e as KeyboardEvent).key === ' '
+      ) {
         e.preventDefault();
         update({ selectedSessionId: null });
       }
@@ -236,7 +261,10 @@ function updateHeader(): void {
       if (state.selectedSessionId) update({ view: 'timeline' });
     });
     timelineBtn?.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      if (
+        (e as KeyboardEvent).key === 'Enter' ||
+        (e as KeyboardEvent).key === ' '
+      ) {
         e.preventDefault();
         if (state.selectedSessionId) update({ view: 'timeline' });
       }
@@ -246,7 +274,10 @@ function updateHeader(): void {
       if (state.selectedSessionId) openReplay(state.selectedSessionId);
     });
     replayBtn?.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      if (
+        (e as KeyboardEvent).key === 'Enter' ||
+        (e as KeyboardEvent).key === ' '
+      ) {
         e.preventDefault();
         if (state.selectedSessionId) openReplay(state.selectedSessionId);
       }
@@ -265,7 +296,10 @@ function updateHeader(): void {
       downloadAutopsy();
     });
     autopsyBtn?.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      if (
+        (e as KeyboardEvent).key === 'Enter' ||
+        (e as KeyboardEvent).key === ' '
+      ) {
         e.preventDefault();
         downloadAutopsy();
       }
@@ -279,7 +313,9 @@ function updateHeader(): void {
 function handleFilterClick(type: string, e: MouseEvent): void {
   if (type === 'all') {
     // Toggle: if all on → all off, if any off → all on
-    const allOn = FILTER_TYPES.every((t) => t === 'all' || state.feedTypeFilters[t]);
+    const allOn = FILTER_TYPES.every(
+      (t) => t === 'all' || state.feedTypeFilters[t],
+    );
     const filters: Record<string, boolean> = {};
     for (const t of FILTER_TYPES) {
       if (t !== 'all') filters[t] = !allOn;
@@ -306,13 +342,15 @@ function handleFilterClick(type: string, e: MouseEvent): void {
 
 function updateFilterButtons(): void {
   if (!filterBar) return;
-  filterBar.querySelectorAll<HTMLButtonElement>('.feed-filter-btn').forEach((btn) => {
-    const t = btn.dataset.type!;
-    if (t === 'all') return;
-    const isActive = state.feedTypeFilters[t] ?? true;
-    btn.classList.toggle('active', isActive);
-    btn.setAttribute('aria-pressed', String(isActive));
-  });
+  filterBar
+    .querySelectorAll<HTMLButtonElement>('.feed-filter-btn')
+    .forEach((btn) => {
+      const t = btn.dataset.type!;
+      if (t === 'all') return;
+      const isActive = state.feedTypeFilters[t] ?? true;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-pressed', String(isActive));
+    });
 }
 
 function applyFilters(): void {
@@ -367,11 +405,13 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     const recentDeduped = dedup(messages);
     const missingPinned = dedup(pinned);
     const merged = [...missingPinned, ...recentDeduped].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
 
     if (merged.length === 0) {
-      feedContent.innerHTML = '<div class="feed-empty">No events in this session yet</div>';
+      feedContent.innerHTML =
+        '<div class="feed-empty">No events in this session yet</div>';
       return;
     }
 
@@ -404,7 +444,8 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     }
   } catch {
     if (currentLoadSessionId === sessionId) {
-      feedContent.innerHTML = '<div class="feed-empty">Failed to load messages</div>';
+      feedContent.innerHTML =
+        '<div class="feed-empty">Failed to load messages</div>';
     }
   }
 }
@@ -414,7 +455,9 @@ async function loadMultiSessionEvents(): Promise<void> {
   if (!feedContent) return;
   if (state.selectedSessionId) return; // only for multi-session mode
 
-  const activeSessions = Array.from(state.sessions.values()).filter((s) => s.isActive);
+  const activeSessions = Array.from(state.sessions.values()).filter(
+    (s) => s.isActive,
+  );
   if (activeSessions.length === 0) return;
 
   try {
@@ -427,7 +470,10 @@ async function loadMultiSessionEvents(): Promise<void> {
       const results = await Promise.all(
         chunk.map(async (sess) => {
           const events = await fetchSessionEvents(sess.id, 20);
-          return events.map((e) => ({ ...e, _sessionName: sessionDisplayName(sess) }));
+          return events.map((e) => ({
+            ...e,
+            _sessionName: sessionDisplayName(sess),
+          }));
         }),
       );
       perSession.push(...results);
@@ -435,7 +481,10 @@ async function loadMultiSessionEvents(): Promise<void> {
 
     const allEvents = perSession
       .flat()
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      .sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
 
     // Deduplicate
     const seen = new Set<string>();
@@ -452,15 +501,16 @@ async function loadMultiSessionEvents(): Promise<void> {
 
 function clearGroupHighlight(): void {
   if (!currentHighlightGroup || !feedContent) return;
-  feedContent
-    .querySelectorAll('.group-highlight')
-    .forEach((el) => {
-      el.classList.remove('group-highlight');
-    });
+  feedContent.querySelectorAll('.group-highlight').forEach((el) => {
+    el.classList.remove('group-highlight');
+  });
   currentHighlightGroup = null;
 }
 
-function appendMessage(msg: Event, opts: { showSessionId?: string } = {}): void {
+function appendMessage(
+  msg: Event,
+  opts: { showSessionId?: string } = {},
+): void {
   if (!feedContent) return;
 
   // Suppress thinking-only assistant messages — they're streaming intermediates
@@ -468,7 +518,10 @@ function appendMessage(msg: Event, opts: { showSessionId?: string } = {}): void 
   // These have no contentPreview text (renderer would fall back to "[thinking...]")
   // and no tool info. Keep them if they have expandable fullContent or thinkingContent.
   if (msg.role === 'assistant' && !msg.toolName && !msg.isAgent) {
-    const preview = (msg.contentPreview || '').replace(/^\[thinking\.\.\.\]$/, '');
+    const preview = (msg.contentPreview || '').replace(
+      /^\[thinking\.\.\.\]$/,
+      '',
+    );
     if (!preview && !msg.fullContent && !msg.thinkingContent) {
       return;
     }
@@ -476,7 +529,12 @@ function appendMessage(msg: Event, opts: { showSessionId?: string } = {}): void 
 
   // Suppress empty system messages (e.g. queue-operation/remove with no content),
   // but allow turn_duration summaries through — they're rendered as separators.
-  if (!msg.role && !msg.contentPreview && !msg.fullContent && msg.subtype !== 'turn_duration') {
+  if (
+    !msg.role &&
+    !msg.contentPreview &&
+    !msg.fullContent &&
+    msg.subtype !== 'turn_duration'
+  ) {
     return;
   }
 
@@ -545,7 +603,10 @@ function appendMessage(msg: Event, opts: { showSessionId?: string } = {}): void 
   if (autoScroll && feedContent) {
     // Re-check scroll position to avoid race with scroll events
     const atBottom =
-      feedContent.scrollHeight - feedContent.scrollTop - feedContent.clientHeight < 60;
+      feedContent.scrollHeight -
+        feedContent.scrollTop -
+        feedContent.clientHeight <
+      60;
     if (atBottom) {
       feedContent.scrollTop = feedContent.scrollHeight;
     }

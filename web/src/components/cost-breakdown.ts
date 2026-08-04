@@ -40,7 +40,9 @@ export function toggle(anchor: HTMLElement): void {
   const totalCache = stats.cacheReadTokens;
 
   const allSessions = Array.from(state.sessions.values());
-  const top5 = [...allSessions].sort((a, b) => b.totalCost - a.totalCost).slice(0, 5);
+  const top5 = [...allSessions]
+    .sort((a, b) => b.totalCost - a.totalCost)
+    .slice(0, 5);
 
   popover = document.createElement('div');
   popover.className = 'cost-breakdown';
@@ -74,8 +76,14 @@ export function toggle(anchor: HTMLElement): void {
   // (e.g. current opus-4-7/4-8) to the same '#888' gray, making the two largest
   // slices visually indistinguishable.
   const PALETTE = [
-    COLORS.purple, COLORS.cyan, COLORS.green, COLORS.orange,
-    COLORS.yellow, COLORS.red, COLORS.user, COLORS.statusIdle,
+    COLORS.purple,
+    COLORS.cyan,
+    COLORS.green,
+    COLORS.orange,
+    COLORS.yellow,
+    COLORS.red,
+    COLORS.user,
+    COLORS.statusIdle,
   ];
   const colorFor = (i: number): string => PALETTE[i % PALETTE.length];
   const cx = 60,
@@ -97,8 +105,12 @@ export function toggle(anchor: HTMLElement): void {
     ctx.fill();
     angle += slice;
 
-    const shortName = model.replace('claude-', '').replace('-4-6', '').replace('-4-5-20251001', '');
-    const pct = displayedCost > 0 ? ((cost / displayedCost) * 100).toFixed(0) : '0';
+    const shortName = model
+      .replace('claude-', '')
+      .replace('-4-6', '')
+      .replace('-4-5-20251001', '');
+    const pct =
+      displayedCost > 0 ? ((cost / displayedCost) * 100).toFixed(0) : '0';
     legend.innerHTML += `<div style="font-size:10px;display:flex;align-items:center;gap:4px;margin:2px 0">
       <span style="width:8px;height:8px;border-radius:50%;background:${escapeHtml(color)};display:inline-block;flex-shrink:0"></span>
       <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${escapeHtml(shortName)}</span>
@@ -131,7 +143,11 @@ export function toggle(anchor: HTMLElement): void {
     bars[2].style.background = COLORS.green;
   }
   const fmt = (n: number) =>
-    n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+    n >= 1e6
+      ? `${(n / 1e6).toFixed(1)}M`
+      : n >= 1e3
+        ? `${(n / 1e3).toFixed(1)}k`
+        : String(n);
   vals[0].textContent = fmt(totalInput);
   vals[1].textContent = fmt(totalOutput);
   vals[2].textContent = fmt(totalCache);

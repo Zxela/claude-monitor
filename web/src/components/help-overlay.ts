@@ -67,7 +67,7 @@ export function toggle(): void {
     // Focus trap: keep Tab within the overlay
     if (e.key === 'Tab') {
       const focusable = overlay!.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
       if (focusable.length === 0) return;
       const first = focusable[0];

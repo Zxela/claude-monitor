@@ -31,7 +31,10 @@ function ev(over: Partial<TimelineEvent> & { tsMs: number }): TimelineEvent {
 describe('timeline buildSpansFrom (merge/split geometry)', () => {
   it('merges consecutive same-lane events within GAP_THRESHOLD into one span', () => {
     // Two assistant (lane 1) events 1s apart — under the 2s threshold.
-    const events = [ev({ tsMs: T0, role: 'assistant' }), ev({ tsMs: T0 + 1000, role: 'assistant' })];
+    const events = [
+      ev({ tsMs: T0, role: 'assistant' }),
+      ev({ tsMs: T0 + 1000, role: 'assistant' }),
+    ];
     const spans = buildSpansFrom(events);
     expect(spans).toHaveLength(1);
     expect(spans[0].lane).toBe(1);
@@ -77,7 +80,10 @@ describe('timeline pickEventAt (hover hit-test)', () => {
 
   it('resolves a cursor inside a drawn bar to that span', () => {
     // One assistant span (lane 1) spanning T0..T0+500 -> x in [0, 500].
-    const events = [ev({ tsMs: T0, role: 'assistant' }), ev({ tsMs: T0 + 800, role: 'user' })];
+    const events = [
+      ev({ tsMs: T0, role: 'assistant' }),
+      ev({ tsMs: T0 + 800, role: 'user' }),
+    ];
     const spans = buildSpansFrom(events);
     // lane 1 bar: y = 30 + 1*100 + 4 = 134, height = 100 - 8 = 92 -> [134, 226].
     const hit = pickEventAt(spans, geom, 50, 150);
@@ -86,7 +92,10 @@ describe('timeline pickEventAt (hover hit-test)', () => {
   });
 
   it('returns null when the cursor is outside every bar', () => {
-    const events = [ev({ tsMs: T0, role: 'assistant' }), ev({ tsMs: T0 + 800, role: 'user' })];
+    const events = [
+      ev({ tsMs: T0, role: 'assistant' }),
+      ev({ tsMs: T0 + 800, role: 'user' }),
+    ];
     const spans = buildSpansFrom(events);
     // y=10 is above topY (30); no lane there.
     expect(pickEventAt(spans, geom, 50, 10)).toBeNull();

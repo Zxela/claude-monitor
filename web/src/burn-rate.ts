@@ -15,7 +15,11 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let prevTokenTotal = 0;
 let prevTimestamp = 0;
 
-function getActiveSessionTotals(): { costRate: number; tokenTotal: number; totalCost: number } {
+function getActiveSessionTotals(): {
+  costRate: number;
+  tokenTotal: number;
+  totalCost: number;
+} {
   let costRate = 0;
   let tokenTotal = 0;
   let totalCost = 0;
@@ -25,7 +29,10 @@ function getActiveSessionTotals(): { costRate: number; tokenTotal: number; total
       costRate += sess.costRate;
     }
     tokenTotal +=
-      sess.inputTokens + sess.cacheReadTokens + sess.cacheCreationTokens + sess.outputTokens;
+      sess.inputTokens +
+      sess.cacheReadTokens +
+      sess.cacheCreationTokens +
+      sess.outputTokens;
   }
   return { costRate, tokenTotal, totalCost };
 }
@@ -88,12 +95,19 @@ export function getProjectedDailyCost(currentTotalCost: number): number {
   const rate = getCurrentRate();
   if (rate <= 0) return currentTotalCost;
   const now = new Date();
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const endOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+  );
   const remainingMinutes = (endOfDay.getTime() - now.getTime()) / 60000;
   return currentTotalCost + rate * remainingMinutes;
 }
 
-export function getDepletionMinutes(budget: number, spent: number): number | null {
+export function getDepletionMinutes(
+  budget: number,
+  spent: number,
+): number | null {
   const rate = getCurrentRate();
   if (rate <= 0 || budget <= spent) return null;
   return (budget - spent) / rate;

@@ -490,42 +490,42 @@
   color: var(--cyan);
   border-color: var(--cyan);
 }
-.feed-filter-btn[data-type='user'].active {
+.feed-filter-btn[data-type="user"].active {
   background: rgba(85, 136, 255, 0.2);
   color: var(--color-user);
   border-color: var(--color-user);
 }
-.feed-filter-btn[data-type='assistant'].active {
+.feed-filter-btn[data-type="assistant"].active {
   background: rgba(51, 221, 153, 0.2);
   color: var(--color-assistant);
   border-color: var(--color-assistant);
 }
-.feed-filter-btn[data-type='tool_use'].active {
+.feed-filter-btn[data-type="tool_use"].active {
   background: rgba(221, 204, 68, 0.2);
   color: var(--color-tool-use);
   border-color: var(--color-tool-use);
 }
-.feed-filter-btn[data-type='tool_result'].active {
+.feed-filter-btn[data-type="tool_result"].active {
   background: rgba(68, 204, 204, 0.2);
   color: var(--color-tool-result);
   border-color: var(--color-tool-result);
 }
-.feed-filter-btn[data-type='agent'].active {
+.feed-filter-btn[data-type="agent"].active {
   background: rgba(221, 136, 68, 0.2);
   color: var(--color-agent);
   border-color: var(--color-agent);
 }
-.feed-filter-btn[data-type='command'].active {
+.feed-filter-btn[data-type="command"].active {
   background: rgba(136, 170, 204, 0.2);
   color: var(--color-command);
   border-color: var(--color-command);
 }
-.feed-filter-btn[data-type='hook'].active {
+.feed-filter-btn[data-type="hook"].active {
   background: rgba(170, 119, 221, 0.2);
   color: var(--color-hook);
   border-color: var(--color-hook);
 }
-.feed-filter-btn[data-type='error'].active {
+.feed-filter-btn[data-type="error"].active {
   background: rgba(221, 68, 85, 0.2);
   color: var(--color-error);
   border-color: var(--color-error);

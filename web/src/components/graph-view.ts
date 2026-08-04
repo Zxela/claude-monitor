@@ -91,7 +91,10 @@ function show(): void {
   if (graphMode === 'graph') {
     canvas = document.createElement('canvas');
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', 'Session dependency graph — nodes represent active sessions, edges show parent-child relationships');
+    canvas.setAttribute(
+      'aria-label',
+      'Session dependency graph — nodes represent active sessions, edges show parent-child relationships',
+    );
     canvas.textContent = 'Session dependency graph visualization';
     wrapper.appendChild(canvas);
 
@@ -122,7 +125,9 @@ function renderSequence(wrapper: HTMLElement): void {
   const threshold = 120_000;
 
   const sessions = Array.from(state.sessions.values())
-    .filter((s) => s.isActive || now - new Date(s.lastActive).getTime() < threshold)
+    .filter(
+      (s) => s.isActive || now - new Date(s.lastActive).getTime() < threshold,
+    )
     .sort((a, b) => {
       const aAttn = needsAttention(a) ? 1 : 0;
       const bAttn = needsAttention(b) ? 1 : 0;
@@ -147,7 +152,9 @@ function renderSequence(wrapper: HTMLElement): void {
     entry.className = `sequence-entry${sess.isActive ? ' sequence-active' : ''}`;
     entry.style.paddingLeft = `${12 + depth * 24}px`;
 
-    const time = sess.startedAt ? new Date(sess.startedAt).toLocaleTimeString() : '';
+    const time = sess.startedAt
+      ? new Date(sess.startedAt).toLocaleTimeString()
+      : '';
     const name = sessionDisplayName(sess);
     const cost = `$${sess.totalCost.toFixed(2)}`;
     const statusClass = sess.isActive
@@ -164,7 +171,8 @@ function renderSequence(wrapper: HTMLElement): void {
         ? '<span style="color:#ffa64a;font-size:9px;margin-left:6px">WAITING</span>'
         : '<span style="color:#ff6b6b;font-size:9px;margin-left:6px">ERROR</span>'
       : '';
-    const toolInfo = sess.status === 'tool_use' ? getLastTool(sess.id) || '' : '';
+    const toolInfo =
+      sess.status === 'tool_use' ? getLastTool(sess.id) || '' : '';
 
     entry.innerHTML = `
       <span class="sequence-time">${time}</span>
@@ -228,7 +236,14 @@ function resizeCanvas(): void {
 /** Deterministic per-workflow tint so all agents of a workflow share a color. */
 function workflowTint(workflowId: string | undefined): string | undefined {
   if (!workflowId) return undefined;
-  const palette = ['#7c5cff', '#1f9d8f', '#d98c2b', '#c0567a', '#3a86ff', '#8ab017'];
+  const palette = [
+    '#7c5cff',
+    '#1f9d8f',
+    '#d98c2b',
+    '#c0567a',
+    '#3a86ff',
+    '#8ab017',
+  ];
   let h = 0;
   for (let i = 0; i < workflowId.length; i++) {
     h = (h * 31 + workflowId.charCodeAt(i)) >>> 0;
@@ -271,7 +286,10 @@ function rebuildNodes(): void {
 
   nodes = visibleSessions.map((sess) => {
     const old = oldNodes.get(sess.id);
-    const radius = Math.min(30, Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8));
+    const radius = Math.min(
+      30,
+      Math.max(8, Math.log(sess.totalCost + 1) * 5 + 8),
+    );
     const color = !sess.isActive
       ? '#44445a'
       : sess.status === 'thinking'
@@ -432,7 +450,8 @@ function simulate(): void {
 
   // Idle detection: check if all velocities are below threshold
   const allSettled = nodes.every(
-    (n) => Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD,
+    (n) =>
+      Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD,
   );
   const anyAttention = nodes.some((n) => needsAttention(n.session));
   if (allSettled && !anyAttention) {
@@ -508,7 +527,11 @@ function draw(): void {
     if (n.session.totalCost > 0.01) {
       ctx.fillStyle = '#888';
       ctx.font = '8px monospace';
-      ctx.fillText(`$${n.session.totalCost.toFixed(2)}`, n.x, n.y + n.radius + 24);
+      ctx.fillText(
+        `$${n.session.totalCost.toFixed(2)}`,
+        n.x,
+        n.y + n.radius + 24,
+      );
     }
   }
 }
@@ -554,7 +577,9 @@ function onMouseMove(e: MouseEvent): void {
 
   if (node) {
     const sess = node.session;
-    const statusText = sess.isActive ? sess.status.replace('_', ' ').toUpperCase() : 'DONE';
+    const statusText = sess.isActive
+      ? sess.status.replace('_', ' ').toUpperCase()
+      : 'DONE';
     const statusClass =
       sess.status === 'waiting'
         ? 'color:#ffa64a'
@@ -563,9 +588,12 @@ function onMouseMove(e: MouseEvent): void {
           : sess.status === 'tool_use'
             ? 'color:#4488ff'
             : 'color:#888';
-    const toolName = sess.status === 'tool_use' ? getLastTool(sess.id) || '' : '';
+    const toolName =
+      sess.status === 'tool_use' ? getLastTool(sess.id) || '' : '';
     const errHtml =
-      sess.errorCount > 0 ? `<div style="color:#ff6b6b">${sess.errorCount} errors</div>` : '';
+      sess.errorCount > 0
+        ? `<div style="color:#ff6b6b">${sess.errorCount} errors</div>`
+        : '';
 
     tooltip.innerHTML = `
       <div><b>${escapeHtml(node.label)}</b> <span style="${statusClass};font-size:9px">${statusText}</span></div>

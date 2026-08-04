@@ -32,12 +32,17 @@ function shortToolName(name: string): string {
 // Detect slash commands in user messages by looking for command XML tags.
 const COMMAND_RE = /<command-name>\s*\/?([^<]+)<\/command-name>/;
 const COMMAND_MSG_RE = /<command-message>([^<]*)<\/command-message>/;
-const COMMAND_CAVEAT_RE = /<local-command-caveat>[\s\S]*?<\/local-command-caveat>\s*/;
+const COMMAND_CAVEAT_RE =
+  /<local-command-caveat>[\s\S]*?<\/local-command-caveat>\s*/;
 
 export function detectType(msg: Event): MessageType {
   if (msg.isError) return 'error';
   if (msg.hookEvent) return 'hook';
-  if (msg.role === 'user' && msg.contentPreview && COMMAND_RE.test(msg.contentPreview))
+  if (
+    msg.role === 'user' &&
+    msg.contentPreview &&
+    COMMAND_RE.test(msg.contentPreview)
+  )
     return 'command';
   // Caveat-only messages (preceding actual command) are also commands
   if (
@@ -55,11 +60,23 @@ export function detectType(msg: Event): MessageType {
   if (msg.toolName === 'Skill' && msg.role === 'assistant') return 'skill';
   if (msg.toolName && msg.role === 'assistant') return 'tool_use';
   // Fallback: detect agent/skill/tool_use from content preview when fields weren't persisted (streaming race)
-  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[agent'))
+  if (
+    !msg.toolName &&
+    msg.role === 'assistant' &&
+    msg.contentPreview?.startsWith('[agent')
+  )
     return 'agent';
-  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[skill:'))
+  if (
+    !msg.toolName &&
+    msg.role === 'assistant' &&
+    msg.contentPreview?.startsWith('[skill:')
+  )
     return 'skill';
-  if (!msg.toolName && msg.role === 'assistant' && msg.contentPreview?.startsWith('[tool: '))
+  if (
+    !msg.toolName &&
+    msg.role === 'assistant' &&
+    msg.contentPreview?.startsWith('[tool: ')
+  )
     return 'tool_use';
   if (msg.forToolUseId) return 'tool_result';
   if (msg.type === 'agent' || msg.type === 'agent-name') return 'agent';
@@ -82,7 +99,10 @@ function formatCommand(raw: string): string {
   return name ? `/${name}` : text;
 }
 
-export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLElement {
+export function renderFeedEntry(
+  msg: Event,
+  opts: RenderOptions = {},
+): HTMLElement {
   const type = detectType(msg);
   const el = document.createElement('div');
   el.className = `feed-entry type-${type}${msg.isError ? ' is-error' : ''}${msg.isMeta ? ' is-meta' : ''}`;
@@ -135,7 +155,9 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
       }
     }
     const display =
-      agentLabel && agentBody ? `${agentLabel}: ${agentBody}` : agentLabel || agentBody;
+      agentLabel && agentBody
+        ? `${agentLabel}: ${agentBody}`
+        : agentLabel || agentBody;
     content = display ? `Agent: ${truncate(display, 80)}` : 'Agent';
     contentClass = 'tool';
     fullContent = rawText || detail;
@@ -165,7 +187,9 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
     // Try to extract a readable summary from the JSON params
     const summary = extractToolSummary(name, fullText) || detail || rawText;
     content =
-      short && summary ? `${short}: ${truncate(summary, 90)}` : short || truncate(summary, 90);
+      short && summary
+        ? `${short}: ${truncate(summary, 90)}`
+        : short || truncate(summary, 90);
     contentClass = 'tool';
     // Prefer full JSON input (from fullContent) for expand, fall back to detail/rawText
     fullContent = formatToolExpand(name, fullText) || detail || rawText;
@@ -175,9 +199,11 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
     // Agent completion results carry agent-level stats
     if (msg.agentDurationMs != null || msg.agentTokens != null) {
       const parts: string[] = [];
-      if (msg.agentDurationMs != null) parts.push(`${(msg.agentDurationMs / 1000).toFixed(1)}s`);
+      if (msg.agentDurationMs != null)
+        parts.push(`${(msg.agentDurationMs / 1000).toFixed(1)}s`);
       if (msg.agentTokens != null) parts.push(`${msg.agentTokens} tok`);
-      if (msg.agentToolUseCount != null) parts.push(`${msg.agentToolUseCount} calls`);
+      if (msg.agentToolUseCount != null)
+        parts.push(`${msg.agentToolUseCount} calls`);
       if (parts.length) content += ` [${parts.join(' · ')}]`;
     }
   } else if (type === 'error') {
@@ -186,10 +212,15 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
     const turnParts: string[] = [];
     if (msg.durationMs != null) {
       const secs = msg.durationMs / 1000;
-      turnParts.push(secs >= 60 ? `${(secs / 60).toFixed(1)}min` : `${secs.toFixed(1)}s`);
+      turnParts.push(
+        secs >= 60 ? `${(secs / 60).toFixed(1)}min` : `${secs.toFixed(1)}s`,
+      );
     }
-    if (msg.turnMessageCount != null) turnParts.push(`${msg.turnMessageCount} messages`);
-    content = turnParts.length ? `Turn completed \u2014 ${turnParts.join(', ')}` : 'Turn completed';
+    if (msg.turnMessageCount != null)
+      turnParts.push(`${msg.turnMessageCount} messages`);
+    content = turnParts.length
+      ? `Turn completed \u2014 ${turnParts.join(', ')}`
+      : 'Turn completed';
     contentClass = 'turn-sep';
     fullContent = '';
   } else {
@@ -200,17 +231,22 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
 
   const hasMore = fullContent.length > content.length;
   const isAgentEntry =
-    type === 'agent' && (msg.isAgent || msg.contentPreview?.startsWith('[agent'));
+    type === 'agent' &&
+    (msg.isAgent || msg.contentPreview?.startsWith('[agent'));
 
   // Build metadata badges (duration, interrupted, truncated)
   let badges = '';
   if (msg.durationMs != null && msg.durationMs > 0) {
     const dur =
-      msg.durationMs >= 1000 ? `${(msg.durationMs / 1000).toFixed(1)}s` : `${msg.durationMs}ms`;
+      msg.durationMs >= 1000
+        ? `${(msg.durationMs / 1000).toFixed(1)}s`
+        : `${msg.durationMs}ms`;
     badges += `<span class="fe-duration">${dur}</span>`;
   }
-  if (msg.interrupted) badges += '<span class="fe-badge fe-interrupted">interrupted</span>';
-  if (msg.truncated) badges += '<span class="fe-badge fe-truncated">truncated</span>';
+  if (msg.interrupted)
+    badges += '<span class="fe-badge fe-interrupted">interrupted</span>';
+  if (msg.truncated)
+    badges += '<span class="fe-badge fe-truncated">truncated</span>';
 
   el.innerHTML =
     `<span class="fe-time">${time}</span>` +
@@ -219,7 +255,9 @@ export function renderFeedEntry(msg: Event, opts: RenderOptions = {}): HTMLEleme
     (hasMore
       ? '<button class="fe-expand" aria-label="Expand content" type="button">+</button>'
       : '') +
-    (isAgentEntry ? '<span class="fe-navigate" title="Go to subagent">→</span>' : '') +
+    (isAgentEntry
+      ? '<span class="fe-navigate" title="Go to subagent">→</span>'
+      : '') +
     badges +
     (opts.showSessionId
       ? `<span class="fe-sid" title="${escapeHtml(opts.showSessionId)}">${escapeHtml(opts.showSessionId.slice(0, 12))}</span>`
@@ -311,8 +349,10 @@ function extractToolSummary(toolName: string, jsonStr: string): string {
     const obj = JSON.parse(jsonStr);
     // Standard Claude tools
     if (toolName === 'Bash' && obj.description) return obj.description;
-    if (toolName === 'Bash' && obj.command) return `$ ${obj.command.slice(0, 100)}`;
-    if ((toolName === 'Read' || toolName === 'Write') && obj.file_path) return obj.file_path;
+    if (toolName === 'Bash' && obj.command)
+      return `$ ${obj.command.slice(0, 100)}`;
+    if ((toolName === 'Read' || toolName === 'Write') && obj.file_path)
+      return obj.file_path;
     if (toolName === 'Edit' && obj.file_path) return obj.file_path;
     if (toolName === 'Grep' && obj.pattern)
       return `/${obj.pattern}/${obj.path ? ' in ' + obj.path : ''}`;
@@ -331,7 +371,8 @@ function extractToolSummary(toolName: string, jsonStr: string): string {
     if (obj.description) return obj.description;
     // If it's a simple object with 1-2 keys, show them compactly
     const keys = Object.keys(obj);
-    if (keys.length <= 2) return keys.map((k) => `${k}: ${String(obj[k]).slice(0, 40)}`).join(', ');
+    if (keys.length <= 2)
+      return keys.map((k) => `${k}: ${String(obj[k]).slice(0, 40)}`).join(', ');
     return '';
   } catch {
     return '';
@@ -350,7 +391,10 @@ function formatToolExpand(toolName: string, jsonStr: string): string {
       return `${desc}$ ${obj.command}`;
     }
     // For file tools, show path prominently
-    if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') && obj.file_path) {
+    if (
+      (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') &&
+      obj.file_path
+    ) {
       const parts = [`file: ${obj.file_path}`];
       if (obj.pattern) parts.push(`pattern: ${obj.pattern}`);
       if (obj.old_string) parts.push(`old: ${obj.old_string.slice(0, 200)}`);
@@ -378,5 +422,9 @@ function formatTime(ts: string): string {
   if (!ts) return '—';
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }

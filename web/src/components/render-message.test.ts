@@ -32,8 +32,12 @@ describe('skill invocation rendering', () => {
   });
 
   it('does NOT classify ordinary tools as skill', () => {
-    expect(detectType(makeEvent({ role: 'assistant', toolName: 'Bash' }))).toBe('tool_use');
-    expect(detectType(makeEvent({ role: 'assistant', toolName: 'Read' }))).toBe('tool_use');
+    expect(detectType(makeEvent({ role: 'assistant', toolName: 'Bash' }))).toBe(
+      'tool_use',
+    );
+    expect(detectType(makeEvent({ role: 'assistant', toolName: 'Read' }))).toBe(
+      'tool_use',
+    );
   });
 
   it('falls back to the [skill:] preview when toolName is missing (streaming race)', () => {
@@ -46,7 +50,11 @@ describe('skill invocation rendering', () => {
   });
 
   it('renders the skill name with the distinct skill content class and chip', () => {
-    const ev = makeEvent({ role: 'assistant', toolName: 'Skill', toolDetail: 'review-pr' });
+    const ev = makeEvent({
+      role: 'assistant',
+      toolName: 'Skill',
+      toolDetail: 'review-pr',
+    });
     const el = renderFeedEntry(ev);
     expect(el.classList.contains('type-skill')).toBe(true);
     const chip = el.querySelector('.fe-type');

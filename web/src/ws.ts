@@ -67,7 +67,9 @@ function showDroppedEventsBanner(delta: number, total: number): void {
   }
 
   // Update message text and show.
-  const msgSpan = droppedBanner.querySelector<HTMLElement>('.dropped-events-msg');
+  const msgSpan = droppedBanner.querySelector<HTMLElement>(
+    '.dropped-events-msg',
+  );
   if (msgSpan) {
     msgSpan.textContent =
       `\u26a0 ${delta} event(s) were dropped \u2014 session data may be incomplete. ` +
@@ -143,7 +145,11 @@ export function connect(): void {
     }
 
     // Handle dropped_events notification from the server.
-    if (event.type === 'dropped_events' && typeof event.delta === 'number' && typeof event.count === 'number') {
+    if (
+      event.type === 'dropped_events' &&
+      typeof event.delta === 'number' &&
+      typeof event.count === 'number'
+    ) {
       showDroppedEventsBanner(event.delta, event.count);
       return;
     }

@@ -82,7 +82,9 @@ function renderReplayPanel(sessionId: string): void {
   progressEl = panel.querySelector('.replay-progress')!;
 
   panel.querySelector('.replay-close-btn')!.addEventListener('click', close);
-  panel.querySelector('.replay-restart-btn')!.addEventListener('click', restart);
+  panel
+    .querySelector('.replay-restart-btn')!
+    .addEventListener('click', restart);
   playBtn.addEventListener('click', togglePlay);
   scrubber.addEventListener('input', onScrub);
   // Changing speed mid-play must take effect immediately: re-arm the loop.
@@ -133,7 +135,8 @@ export function togglePlay(): void {
 export function restart(): void {
   stopPlayback();
   currentIndex = 0;
-  if (feedEl) feedEl.innerHTML = '<div class="replay-empty">PRESS PLAY TO BEGIN</div>';
+  if (feedEl)
+    feedEl.innerHTML = '<div class="replay-empty">PRESS PLAY TO BEGIN</div>';
   if (scrubber) scrubber.value = '0';
   updateProgress();
   update({ replayPlaying: false });
@@ -227,8 +230,14 @@ export function stepDelayFor(
 function stepDelay(index: number): number {
   const speed = currentSpeed();
   const len = manifestEvents.length;
-  const prev = index > 0 && index <= len ? new Date(manifestEvents[index - 1].timestamp).getTime() : NaN;
-  const cur = index >= 0 && index < len ? new Date(manifestEvents[index].timestamp).getTime() : NaN;
+  const prev =
+    index > 0 && index <= len
+      ? new Date(manifestEvents[index - 1].timestamp).getTime()
+      : NaN;
+  const cur =
+    index >= 0 && index < len
+      ? new Date(manifestEvents[index].timestamp).getTime()
+      : NaN;
   return stepDelayFor(prev, cur, speed, index, len);
 }
 
