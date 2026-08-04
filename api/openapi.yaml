@@ -10,10 +10,17 @@ info:
     Routing notes: every route is registered for a single HTTP method, so a
     request to an existing path with an unsupported method returns
     `405 Method Not Allowed` (with an `Allow` header) rather than 404. The
-    per-repo endpoints (`/api/repos/{id}/stats`, `/api/repos/{id}/sessions`) do
-    not 404 for an unknown repo id — they return a `200` with zeroed aggregates
-    or an empty array respectively.
-  version: "3.5.1"
+    per-repo endpoints (`/api/repos/{id}/stats`, `/api/repos/{id}/sessions`)
+    return `404 {"error":"repo not found"}` for a repo id that is not present in
+    the database.
+
+
+    Repo ids are canonical repository paths that contain `/` (for example
+    `github.com/owner/name`), so they MUST be percent-encoded when interpolated
+    into a path — `/api/repos/github.com%2Fowner%2Fname/stats`. An unencoded id
+    spans multiple path segments and does not match the route, yielding a plain
+    `404 page not found`.
+  version: "3.8.3" # x-release-please-version
 
 servers:
   - url: http://localhost:7700
@@ -104,7 +111,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "3.5.1"
+                version: "3.8.3" # x-release-please-version
 
   /api/sessions:
     get:
@@ -362,6 +369,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -400,6 +409,69 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/stats/tools:
+    get:
+      tags: [stats]
+      summary: Tool and skill invocation breakdown
+      description: >
+        Returns per-tool and per-skill invocation counts with the number of
+        invocations whose `tool_result` reported an error, for sessions that
+        started within the window.
+
+
+        `tools` is grouped by tool name and excludes the `Skill` tool itself;
+        `skills` is the `Skill` tool's invocations grouped by the skill that was
+        invoked. Both lists are ordered by `uses` descending and each is capped
+        at 50 entries, so a long tail of rarely-used tools is not returned.
+      operationId: getToolUsage
+      parameters:
+        - name: window
+          in: query
+          description: >
+            Rolling time window for the breakdown. `all` (or omitted) aggregates
+            over all history. Note this endpoint accepts only the rolling
+            vocabulary — the calendar tokens (`today`/`week`/`month`) are not
+            valid here.
+          schema:
+            type: string
+            enum: [all, 24h, 7d, 30d]
+            default: all
+        - name: repo
+          in: query
+          description: Optional repository ID to filter the breakdown to a single repo.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tool and skill usage breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolUsageResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/skills/sessions:
+    get:
+      tags: [stats]
+      summary: Skills invoked per session
+      description: >
+        Returns a sparse map of session ID to the skills that session invoked,
+        with per-skill use and error counts. Only sessions that invoked at least
+        one skill appear as keys. Used to badge rows in the history view.
+      operationId: getSessionSkills
+      responses:
+        "200":
+          description: Map of session ID to that session's skill invocations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSkills"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/repos:
     get:
       tags: [repos]
@@ -435,6 +507,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AggregateResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -470,6 +544,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -505,9 +581,12 @@ paths:
       parameters:
         - name: q
           in: query
-          required: true
+          required: false
           description: >
-            Free-text search query. Each whitespace-separated word is matched as a
+            Free-text search query. Omitted or blank returns an empty array
+            rather than an error.
+
+            Each whitespace-separated word is matched as a
             quoted literal term and the terms are combined with implicit AND, so a
             multi-word query matches documents containing all of the words anywhere
             (not necessarily adjacent). FTS5 operators (AND/OR/NEAR, column filters,
@@ -547,8 +626,10 @@ paths:
       parameters:
         - name: q
           in: query
-          required: true
-          description: Search query string (substring match on full content).
+          required: false
+          description: >
+            Search query string (substring match on full content). Omitted or
+            blank returns an empty array rather than an error.
           schema:
             type: string
         - name: limit
@@ -590,9 +671,12 @@ paths:
       parameters:
         - name: q
           in: query
-          required: true
+          required: false
           description: >
-            Free-text search query. The FTS5 leg matches each whitespace-separated
+            Free-text search query. Omitted or blank returns an empty result
+            rather than an error.
+
+            The FTS5 leg matches each whitespace-separated
             word as a quoted literal term combined with implicit AND (words may
             appear anywhere, not necessarily adjacent); FTS5 operators are not
             interpreted. The full-content leg performs a substring match.
@@ -848,9 +932,15 @@ components:
       name: id
       in: path
       required: true
-      description: Repository ID (SHA256 hash of the repo root path).
+      description: >
+        Repository ID as returned in the `id` field of `GET /api/repos` — a
+        canonical repository path such as `github.com/owner/name`. Because it
+        contains `/`, it MUST be percent-encoded here
+        (`github.com%2Fowner%2Fname`); an unencoded id spans multiple path
+        segments, fails to match the route and returns `404 page not found`.
       schema:
         type: string
+      example: github.com%2Fowner%2Fname
 
   responses:
     NotFound:
@@ -897,7 +987,7 @@ components:
         version:
           type: string
           description: Build version string (set via ldflags at compile time).
-          example: "3.5.1"
+          example: "3.8.3" # x-release-please-version
 
     Session:
       type: object
@@ -1552,7 +1642,7 @@ components:
     TrendResult:
       type: object
       description: Complete trend analysis response with time buckets and breakdowns.
-      required: [window, buckets, byRepo, byModel, summary]
+      required: [window, buckets, byRepo, byModel, bySession, summary]
       properties:
         window:
           type: string
@@ -1576,6 +1666,14 @@ components:
           description: Cost and token breakdown per model.
           items:
             $ref: "#/components/schemas/ModelTrend"
+        bySession:
+          type: array
+          description: >
+            Cost and token breakdown per top-level session. Unlike byRepo, a
+            session's spend stays intact here even when the run touched
+            directories belonging to several repositories.
+          items:
+            $ref: "#/components/schemas/SessionTrend"
         summary:
           $ref: "#/components/schemas/TrendSummary"
 
@@ -1715,6 +1813,90 @@ components:
           type: integer
           description: Number of sessions using this model in the window.
           example: 30
+
+    ToolUsageEntry:
+      type: object
+      description: One tool or skill with its invocation and error counts.
+      required: [name, uses, errors]
+      properties:
+        name:
+          type: string
+          description: Tool name (e.g. `Bash`) or skill name (e.g. `commit`).
+          example: "Bash"
+        uses:
+          type: integer
+          description: Number of `tool_use` invocations.
+          example: 1736
+        errors:
+          type: integer
+          description: Invocations whose `tool_result` reported an error.
+          example: 63
+    ToolUsageResult:
+      type: object
+      description: Tool and skill usage breakdown for a window/repo scope.
+      required: [tools, skills]
+      properties:
+        tools:
+          type: array
+          description: >
+            Invocations grouped by tool name, excluding the `Skill` tool.
+            Ordered by `uses` descending, capped at 50 entries.
+          items:
+            $ref: "#/components/schemas/ToolUsageEntry"
+        skills:
+          type: array
+          description: >
+            The `Skill` tool's invocations grouped by the invoked skill name.
+            Ordered by `uses` descending, capped at 50 entries.
+          items:
+            $ref: "#/components/schemas/ToolUsageEntry"
+    SessionSkills:
+      type: object
+      description: >
+        Sparse map of session ID to the skills that session invoked. Sessions
+        that invoked no skills are absent rather than present with an empty
+        array.
+      additionalProperties:
+        type: array
+        items:
+          $ref: "#/components/schemas/ToolUsageEntry"
+      example:
+        550e8400-e29b-41d4-a716-446655440000:
+          - name: commit
+            uses: 2
+            errors: 0
+
+    SessionTrend:
+      type: object
+      description: >
+        Cost and token breakdown for a single top-level session within a trend
+        window, with its workflow/subagent descendants rolled up into it.
+      required: [sessionId, sessionName, cost, tokens, agents]
+      properties:
+        sessionId:
+          type: string
+          description: ID of the top-level session.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        sessionName:
+          type: string
+          description: Display name for the session.
+          example: "claude-monitor"
+        cost:
+          type: number
+          format: double
+          description: Total cost for this session in the window, including its agents.
+          example: 12.44
+        tokens:
+          type: integer
+          format: int64
+          description: Total tokens consumed by this session in the window, including its agents.
+          example: 2400000
+        agents:
+          type: integer
+          description: >
+            Number of session rows rolled up into this entry (the top-level
+            session plus its workflow/subagent descendants).
+          example: 4
 
     TrendSummary:
       type: object
