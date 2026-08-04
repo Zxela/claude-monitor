@@ -26,6 +26,10 @@ pre-push:
       run: go vet $(go list ./... | grep -v /node_modules/)
     go-mod-tidy:
       run: go mod tidy -diff
+    go-fmt:
+      run: >
+        test -z "$(gofmt -l $(git ls-files '*.go' | grep -v node_modules))"
+        || { gofmt -l $(git ls-files '*.go' | grep -v node_modules); exit 1; }
     go-test:
       # Strip inherited GIT_* vars: `git push` runs this hook with GIT_DIR /
       # GIT_WORK_TREE exported, which makes git-dependent tests (e.g. the

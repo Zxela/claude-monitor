@@ -81,15 +81,15 @@ type fileState struct {
 
 // Watcher monitors JSONL files and emits Events for each new line.
 type Watcher struct {
-	fsw       *fsnotify.Watcher
-	mu        sync.Mutex
-	basePaths []string              // directories to scan
-	labels    map[string]string     // basePath -> label (container name)
+	fsw           *fsnotify.Watcher
+	mu            sync.Mutex
+	basePaths     []string          // directories to scan
+	labels        map[string]string // basePath -> label (container name)
 	states        map[string]*fileState
 	events        chan Event
 	droppedEvents atomic.Int64
-	bootstrapping bool              // true during initial scan
-	bootstrapCB   func(Event)       // called synchronously for bootstrap events
+	bootstrapping bool        // true during initial scan
+	bootstrapCB   func(Event) // called synchronously for bootstrap events
 }
 
 // New creates a Watcher that will scan basePaths plus any extraPaths provided.

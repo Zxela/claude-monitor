@@ -56,8 +56,8 @@ func TestProcess_BasicEvent(t *testing.T) {
 		"timestamp": time.Now().Format(time.RFC3339Nano),
 		"sessionId": "test-session",
 		"message": map[string]interface{}{
-			"id":   "msg-1",
-			"role": "assistant",
+			"id":      "msg-1",
+			"role":    "assistant",
 			"content": "Hello!",
 			"usage": map[string]interface{}{
 				"input_tokens":  100,
@@ -240,8 +240,8 @@ func TestProcess_RebuildDedupFromDB(t *testing.T) {
 			"timestamp": ts.Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano),
 			"sessionId": sid,
 			"message": map[string]interface{}{
-				"id":   msgID,
-				"role": "assistant",
+				"id":      msgID,
+				"role":    "assistant",
 				"content": "response " + msgID,
 				"usage": map[string]interface{}{
 					"input_tokens":  100,
@@ -280,8 +280,8 @@ func TestProcess_RebuildDedupFromDB(t *testing.T) {
 		"timestamp": ts.Format(time.RFC3339Nano),
 		"sessionId": sid,
 		"message": map[string]interface{}{
-			"id":   "msg-aaa",
-			"role": "assistant",
+			"id":      "msg-aaa",
+			"role":    "assistant",
 			"content": "response msg-aaa",
 			"usage": map[string]interface{}{
 				"input_tokens":  100,
@@ -326,10 +326,10 @@ func TestParentLinking_DeferredUUID(t *testing.T) {
 	// Step 1: Process a child event that references the parent via parentUuid.
 	// The parent session does NOT exist yet in the store.
 	childLine := makeJSONL(t, map[string]interface{}{
-		"type":       "assistant",
-		"timestamp":  ts.Format(time.RFC3339Nano),
-		"sessionId":  childID,
-		"parentUuid": parentID,
+		"type":        "assistant",
+		"timestamp":   ts.Format(time.RFC3339Nano),
+		"sessionId":   childID,
+		"parentUuid":  parentID,
 		"isSidechain": true,
 		"message": map[string]interface{}{
 			"id":      "msg-child-1",
@@ -1725,12 +1725,12 @@ func TestProcess_ChildBeforeParent_BackfillsRepo(t *testing.T) {
 func TestSameRepo(t *testing.T) {
 	mk := func(top string) *repo.Repo { return &repo.Repo{Toplevel: top} }
 	cases := []struct {
-		name       string
-		pinnedTop  string
-		startCWD   string
-		incoming   *repo.Repo
-		newCWD     string
-		want       bool
+		name      string
+		pinnedTop string
+		startCWD  string
+		incoming  *repo.Repo
+		newCWD    string
+		want      bool
 	}{
 		{"identical toplevels", "/work/widget", "", mk("/work/widget"), "", true},
 		// Direction guard: a narrower incoming root nested inside the pin is the

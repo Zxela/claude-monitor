@@ -135,7 +135,7 @@ func TestFindClaudePaths(t *testing.T) {
 				}]
 			}]`,
 			wantPaths: nil,
-			wantErr:  false,
+			wantErr:   false,
 		},
 		{
 			name:         "container with no mounts at all",

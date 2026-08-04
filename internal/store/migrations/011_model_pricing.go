@@ -17,7 +17,7 @@ func init() {
 			}
 			// Seed with the three known models.
 			for _, row := range []struct {
-				prefix                                          string
+				prefix                                string
 				input, output, cacheRead, cacheCreate float64
 			}{
 				{"claude-opus-4-6", 5.0, 25.0, 0.50, 6.25},

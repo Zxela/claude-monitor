@@ -168,7 +168,7 @@ func TestRunBackfillV013_SessionIDOnLaterLine(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	summary := `{"type":"summary","summary":"prior session","leafUuid":"x"}` // parses, no sessionId
-	garbage := `this is not json`                                          // unparseable
+	garbage := `this is not json`                                            // unparseable
 	real := fmt.Sprintf(`{"type":"assistant","sessionId":%q,"isSidechain":true,"uuid":"u2","timestamp":%q,"message":{"role":"assistant","content":"hi"}}`,
 		parentUUID, time.Now().UTC().Format(time.RFC3339))
 	// Leading blank line + no-sessionId summary + garbage, then the real line.

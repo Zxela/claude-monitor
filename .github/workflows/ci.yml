@@ -61,6 +61,17 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      # CONTRIBUTING states Go is gofmt-formatted, but nothing enforced it and
+      # 12 files had drifted (struct/map alignment left stale by hand-edits).
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go' | grep -v node_modules))
+          if [ -n "$unformatted" ]; then
+            echo "::error::Not gofmt-formatted; run: gofmt -w \$(git ls-files '*.go' | grep -v node_modules)"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Check no debug code
         run: |
           if grep -rn 'fmt\.Println' internal/ --include='*.go' | grep -v '_test.go'; then
