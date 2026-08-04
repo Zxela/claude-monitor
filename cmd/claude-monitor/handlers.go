@@ -27,16 +27,6 @@ const (
 	shutdownTimeout  = 30 * time.Second
 )
 
-// weekStartTime returns the start of the ISO week (Monday 00:00) for the given time (Issue 37).
-func weekStartTime(now time.Time) time.Time {
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	weekday := int(now.Weekday())
-	if weekday == 0 {
-		weekday = 7
-	}
-	return todayStart.AddDate(0, 0, -(weekday - 1))
-}
-
 // handleWs upgrades the connection to WebSocket.
 func handleWs(h *hub.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +61,7 @@ func handleSessions(sessionStore *session.Store, historyDB *store.DB) http.Handl
 			hourAgo := now.Add(-1 * time.Hour)
 			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 			yesterdayStart := todayStart.Add(-24 * time.Hour)
-			weekStart := weekStartTime(now)
+			weekStart := store.WeekStart(now)
 
 			type grouped struct {
 				Active    []*session.Session `json:"active"`
@@ -213,6 +203,7 @@ func handleStats(sessionStore *session.Store, historyDB *store.DB, fw *watcher.W
 			CacheReadTokens     int64              `json:"cacheReadTokens"`
 			CacheCreationTokens int64              `json:"cacheCreationTokens"`
 			SessionCount        int                `json:"sessionCount"`
+			AgentCount          int                `json:"agentCount"`
 			ActiveSessions      int                `json:"activeSessions"`
 			CacheHitPct         float64            `json:"cacheHitPct"`
 			CostRate            float64            `json:"costRate"`
@@ -221,19 +212,9 @@ func handleStats(sessionStore *session.Store, historyDB *store.DB, fw *watcher.W
 			DroppedEvents       int64              `json:"droppedEvents"`
 		}
 
-		now := time.Now()
-		var since time.Time
-		switch window := r.URL.Query().Get("window"); window {
-		case "today":
-			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		case "week":
-			since = weekStartTime(now)
-		case "month":
-			since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		case "", "all":
-			// lifetime aggregate (since stays zero)
-		default:
-			writeJSONError(w, "window must be today, week, month, or all", http.StatusBadRequest)
+		since, ok := store.WindowStart(r.URL.Query().Get("window"), time.Now())
+		if !ok {
+			writeJSONError(w, "window must be today, week, month, 24h, 7d, 30d, or all", http.StatusBadRequest)
 			return
 		}
 
@@ -261,6 +242,7 @@ func handleStats(sessionStore *session.Store, historyDB *store.DB, fw *watcher.W
 			CacheReadTokens:     agg.CacheReadTokens,
 			CacheCreationTokens: agg.CacheCreationTokens,
 			SessionCount:        agg.SessionCount,
+			AgentCount:          agg.AgentCount,
 			ActiveSessions:      activeSessions,
 			CostRate:            costRate,
 			CostByModel:         agg.CostByModel,
@@ -290,8 +272,10 @@ func handleStatsTrends(historyDB *store.DB) http.HandlerFunc {
 		if window == "" {
 			window = "7d"
 		}
-		if window != "24h" && window != "7d" && window != "30d" {
-			writeJSONError(w, "window must be 24h, 7d, or 30d", http.StatusBadRequest)
+		switch window {
+		case "24h", "7d", "30d", "today", "week", "month":
+		default:
+			writeJSONError(w, "window must be 24h, 7d, 30d, today, week, or month", http.StatusBadRequest)
 			return
 		}
 
@@ -310,22 +294,13 @@ func handleStatsTrends(historyDB *store.DB) http.HandlerFunc {
 
 // handleToolUsage serves GET /api/stats/tools — tool- and skill-invocation
 // counts (with error counts) for the given window and optional repo, scoped by
-// the owning session. Window vocabulary matches /api/stats/trends.
+// the owning session. Window vocabulary matches the other stats endpoints
+// (store.WindowStart).
 func handleToolUsage(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		now := time.Now()
-		var since time.Time
-		switch window := r.URL.Query().Get("window"); window {
-		case "24h":
-			since = now.Add(-24 * time.Hour)
-		case "7d":
-			since = now.AddDate(0, 0, -7)
-		case "30d":
-			since = now.AddDate(0, 0, -30)
-		case "", "all":
-			// lifetime aggregate (since stays zero)
-		default:
-			writeJSONError(w, "window must be 24h, 7d, 30d, or all", http.StatusBadRequest)
+		since, ok := store.WindowStart(r.URL.Query().Get("window"), time.Now())
+		if !ok {
+			writeJSONError(w, "window must be today, week, month, 24h, 7d, 30d, or all", http.StatusBadRequest)
 			return
 		}
 

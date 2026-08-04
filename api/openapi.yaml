@@ -357,10 +357,13 @@ paths:
           in: query
           description: >
             Time window for aggregation. Filters sessions by started_at.
+            Accepts both vocabularies with definitions shared across all stats
+            endpoints — calendar (today = local midnight, week = ISO-week
+            Monday, month = 1st of month) and rolling (24h/7d/30d).
             Defaults to all (no filter).
           schema:
             type: string
-            enum: [all, today, week, month]
+            enum: [all, today, week, month, 24h, 7d, 30d]
             default: all
       responses:
         "200":
@@ -386,11 +389,13 @@ paths:
         - name: window
           in: query
           description: >
-            Time window for trend analysis. Determines bucket granularity:
-            24h = hourly, 7d/30d = daily. Defaults to 7d.
+            Time window for trend analysis. Accepts both vocabularies with
+            definitions shared across all stats endpoints — rolling (24h/7d/30d)
+            and calendar (today/week/month). Determines bucket granularity:
+            24h and today = hourly, the rest = daily. Defaults to 7d.
           schema:
             type: string
-            enum: [24h, 7d, 30d]
+            enum: [24h, 7d, 30d, today, week, month]
             default: 7d
         - name: repo
           in: query
@@ -428,13 +433,14 @@ paths:
         - name: window
           in: query
           description: >
-            Rolling time window for the breakdown. `all` (or omitted) aggregates
-            over all history. Note this endpoint accepts only the rolling
-            vocabulary — the calendar tokens (`today`/`week`/`month`) are not
-            valid here.
+            Time window for the breakdown, filtering by session start. `all` (or
+            omitted) aggregates over all history. Accepts the same vocabulary as
+            the other stats endpoints, resolved by the same shared definition —
+            calendar (`today` = local midnight, `week` = ISO-week Monday,
+            `month` = the 1st) and rolling (`24h`/`7d`/`30d`).
           schema:
             type: string
-            enum: [all, 24h, 7d, 30d]
+            enum: [all, today, week, month, 24h, 7d, 30d]
             default: all
         - name: repo
           in: query
@@ -1500,6 +1506,7 @@ components:
         - cacheReadTokens
         - cacheCreationTokens
         - sessionCount
+        - agentCount
         - costByModel
         - costByRepo
       properties:
@@ -1530,8 +1537,16 @@ components:
           example: 1200000
         sessionCount:
           type: integer
-          description: Number of sessions in the aggregate.
+          description: >
+            Number of top-level sessions in the aggregate (workflow/subagent
+            child rows are excluded; see agentCount).
           example: 87
+        agentCount:
+          type: integer
+          description: >
+            Number of workflow/subagent child sessions in the aggregate. Cost
+            and token totals include agent spend regardless of this split.
+          example: 12
         costByModel:
           type: object
           description: Cost breakdown by model identifier.
@@ -1563,6 +1578,7 @@ components:
         - cacheReadTokens
         - cacheCreationTokens
         - sessionCount
+        - agentCount
         - activeSessions
         - cacheHitPct
         - costRate
@@ -1597,8 +1613,16 @@ components:
           example: 1200000
         sessionCount:
           type: integer
-          description: Number of sessions in the window.
+          description: >
+            Number of top-level sessions in the window (workflow/subagent child
+            rows are excluded; see agentCount).
           example: 87
+        agentCount:
+          type: integer
+          description: >
+            Number of workflow/subagent child sessions in the window. Cost and
+            token totals include agent spend regardless of this split.
+          example: 12
         activeSessions:
           type: integer
           description: Number of currently active top-level sessions.
@@ -1647,7 +1671,7 @@ components:
         window:
           type: string
           description: The time window used for this analysis.
-          enum: [24h, 7d, 30d]
+          enum: [24h, 7d, 30d, today, week, month]
           example: "7d"
         buckets:
           type: array
@@ -1688,6 +1712,7 @@ components:
         - cacheReadTokens
         - cacheCreationTokens
         - sessionCount
+        - agentCount
         - cacheHitPct
         - avgSessionCost
         - medianSessionCost
@@ -1729,8 +1754,12 @@ components:
           example: 200000
         sessionCount:
           type: integer
-          description: Number of sessions that started in this bucket.
+          description: Number of top-level sessions that started in this bucket.
           example: 5
+        agentCount:
+          type: integer
+          description: Number of workflow/subagent child sessions that started in this bucket.
+          example: 2
         cacheHitPct:
           type: number
           format: double
@@ -1901,7 +1930,7 @@ components:
     TrendSummary:
       type: object
       description: Summary totals across all buckets in a trend window.
-      required: [totalCost, effectiveTokens, cacheHitPct, sessionCount]
+      required: [totalCost, effectiveTokens, cacheHitPct, sessionCount, agentCount]
       properties:
         totalCost:
           type: number
@@ -1920,8 +1949,12 @@ components:
           example: 38.2
         sessionCount:
           type: integer
-          description: Total number of sessions in the window.
+          description: Total number of top-level sessions in the window.
           example: 87
+        agentCount:
+          type: integer
+          description: Total number of workflow/subagent child sessions in the window.
+          example: 12
 
     StorageInfo:
       type: object

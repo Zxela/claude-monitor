@@ -208,6 +208,37 @@ func TestAggregateStatsByRepo_UnknownRepoNoPhantom(t *testing.T) {
 	}
 }
 
+// TestAggregateStatsByRepo_ChildOnlyRepoStillReportsCost verifies a repo whose
+// only rows are subagent children (parent_id set) still reports its spend in
+// costByRepo: agent rows count as "repo matched rows" even though sessionCount
+// (top-level only) is 0.
+func TestAggregateStatsByRepo_ChildOnlyRepoStillReportsCost(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	if _, err := db.db.Exec(`INSERT INTO repos (id, name, first_seen) VALUES ('child-repo','child-repo','2024-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+	now := time.Now()
+	if err := db.SaveSession(&session.Session{
+		ID: "agent-only", ParentID: "some-parent", RepoID: "child-repo",
+		TotalCost: 0.75, StartedAt: now, LastActive: now,
+	}); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+
+	agg, err := db.AggregateStatsByRepo("child-repo")
+	if err != nil {
+		t.Fatalf("AggregateStatsByRepo failed: %v", err)
+	}
+	if agg.SessionCount != 0 || agg.AgentCount != 1 {
+		t.Errorf("got sessionCount=%d agentCount=%d, want 0/1", agg.SessionCount, agg.AgentCount)
+	}
+	if got := agg.CostByRepo["child-repo"]; got != 0.75 {
+		t.Errorf("costByRepo[child-repo] = %v, want 0.75 (agent spend must not vanish)", got)
+	}
+}
+
 // TestRepoExists verifies the existence helper used by the per-repo 404 path.
 func TestRepoExists(t *testing.T) {
 	t.Parallel()

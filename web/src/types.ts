@@ -92,7 +92,9 @@ export interface Stats {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /** Top-level sessions only; workflow/subagent children are agentCount. */
   sessionCount: number;
+  agentCount: number;
   activeSessions: number;
   cacheHitPct: number;
   costRate: number;
@@ -107,7 +109,9 @@ export interface TrendBucket {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /** Top-level sessions only; workflow/subagent children are agentCount. */
   sessionCount: number;
+  agentCount: number;
   cacheHitPct: number;
   avgSessionCost: number;
   medianSessionCost: number;
@@ -143,7 +147,9 @@ export interface TrendSummary {
   totalCost: number;
   effectiveTokens: number;
   cacheHitPct: number;
+  /** Top-level sessions only; workflow/subagent children are agentCount. */
   sessionCount: number;
+  agentCount: number;
 }
 
 export interface TrendResult {
