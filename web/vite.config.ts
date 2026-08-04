@@ -4,7 +4,7 @@ import path from 'path';
 export default defineConfig({
   root: '.',
   build: {
-    outDir: path.resolve(__dirname, '../cmd/claude-monitor/static'),
+    outDir: path.resolve(import.meta.dirname, '../cmd/claude-monitor/static'),
     emptyOutDir: true,
   },
   server: {
