@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.5](https://github.com/Zxela/claude-monitor/compare/v3.8.4...v3.8.5) (2026-08-05)
+
+
+### Bug Fixes
+
+* **web:** define the missing type scale and stop views stacking in the shared mount ([#272](https://github.com/Zxela/claude-monitor/issues/272)) ([e7557eb](https://github.com/Zxela/claude-monitor/commit/e7557eb0f7f7052748397c3076d669a806414e2d))
+
 ## [3.8.4](https://github.com/Zxela/claude-monitor/compare/v3.8.3...v3.8.4) (2026-08-04)
 
 
