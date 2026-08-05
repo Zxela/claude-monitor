@@ -20,7 +20,7 @@ info:
     into a path — `/api/repos/github.com%2Fowner%2Fname/stats`. An unencoded id
     spans multiple path segments and does not match the route, yielding a plain
     `404 page not found`.
-  version: "3.8.4" # x-release-please-version
+  version: "3.8.5" # x-release-please-version
 
 servers:
   - url: http://localhost:7700
@@ -111,7 +111,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "3.8.4" # x-release-please-version
+                version: "3.8.5" # x-release-please-version
 
   /api/sessions:
     get:
@@ -993,7 +993,7 @@ components:
         version:
           type: string
           description: Build version string (set via ldflags at compile time).
-          example: "3.8.4" # x-release-please-version
+          example: "3.8.5" # x-release-please-version
 
     Session:
       type: object
