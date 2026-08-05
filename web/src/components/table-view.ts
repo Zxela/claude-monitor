@@ -119,13 +119,23 @@ function renderTable(): void {
     return;
   }
 
-  // Recreate the node if it was detached: the feed panel wipes #feed-mount when
-  // other views render into it, leaving a stale tableEl whose parentElement is no
-  // longer `container`. Without this guard the table stays permanently blank
-  // after navigating away and back.
-  if (!tableEl || tableEl.parentElement !== container) {
+  if (!tableEl) {
     tableEl = document.createElement('div');
     tableEl.className = 'table-view';
+  }
+  // Take over the shared #feed-mount. Two cases are handled together:
+  //   - tableEl was detached, because the feed panel wipes #feed-mount when it
+  //     renders (without this the table stays permanently blank after
+  //     navigating away and back);
+  //   - the mount still holds another view's DOM, because graph/feed/timeline/
+  //     history leave theirs behind on exit. A stale full-height sibling would
+  //     otherwise sit above the table and push it below the fold.
+  // Clearing makes the table the sole occupant. No-op once it already is.
+  if (
+    tableEl.parentElement !== container ||
+    container.childElementCount !== 1
+  ) {
+    container.innerHTML = '';
     container.appendChild(tableEl);
   }
 
