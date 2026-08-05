@@ -119,13 +119,23 @@ function renderTable(): void {
     return;
   }
 
-  // Recreate the node if it was detached: the feed panel wipes #feed-mount when
-  // other views render into it, leaving a stale tableEl whose parentElement is no
-  // longer `container`. Without this guard the table stays permanently blank
-  // after navigating away and back.
-  if (!tableEl || tableEl.parentElement !== container) {
+  if (!tableEl) {
     tableEl = document.createElement('div');
     tableEl.className = 'table-view';
+  }
+  // Take over the shared #feed-mount. Two cases are handled together:
+  //   - tableEl was detached, because the feed panel wipes #feed-mount when it
+  //     renders (without this the table stays permanently blank after
+  //     navigating away and back);
+  //   - the mount still holds another view's DOM, because graph/feed/timeline/
+  //     history leave theirs behind on exit. A stale full-height sibling would
+  //     otherwise sit above the table and push it below the fold.
+  // Clearing makes the table the sole occupant. No-op once it already is.
+  if (
+    tableEl.parentElement !== container ||
+    container.childElementCount !== 1
+  ) {
+    container.innerHTML = '';
     container.appendChild(tableEl);
   }
 
@@ -156,7 +166,7 @@ function renderTable(): void {
   const headerCells = cols
     .map(
       (c) =>
-        `<th data-sort="${c.key}" style="text-align:${c.align ?? 'left'};cursor:pointer;user-select:none;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:10px;letter-spacing:0.5px;white-space:nowrap">
+        `<th data-sort="${c.key}" style="text-align:${c.align ?? 'left'};cursor:pointer;user-select:none;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:var(--fs-base);font-weight:var(--fw-bold);letter-spacing:var(--tracking-label);white-space:nowrap">
           ${c.label} ${arrowFor(c.key)}
         </th>`,
     )
@@ -185,25 +195,25 @@ function renderTable(): void {
       const isSelected = state.selectedSessionId === s.id;
 
       return `<tr data-session-id="${s.id}" style="cursor:pointer;background:${isSelected ? 'var(--bg-hover)' : 'transparent'};border-left:${isSelected ? '2px solid var(--cyan)' : '2px solid transparent'}">
-        <td style="padding:5px 10px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</td>
-        <td style="padding:5px 10px;font-size:10px;color:${statusColor}">${statusLabel}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:${s.totalCost > 0.1 ? 'var(--yellow)' : 'var(--text)'}">$${s.totalCost.toFixed(4)}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:var(--text-dim)">${totalTokens.toLocaleString()}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right">${s.messageCount}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:${s.errorCount > 0 ? 'var(--red)' : 'var(--text-dim)'}">${s.errorCount || '—'}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:var(--text-dim)">${duration}</td>
-        <td style="padding:5px 10px;font-size:11px;text-align:right;color:var(--text-dim)">${lastActive}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-lg);font-weight:var(--fw-medium);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-sm);color:${statusColor}">${statusLabel}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);font-weight:var(--fw-medium);text-align:right;color:${s.totalCost > 0.1 ? 'var(--yellow)' : 'var(--text)'}">$${s.totalCost.toFixed(4)}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${totalTokens.toLocaleString()}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right">${s.messageCount}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:${s.errorCount > 0 ? 'var(--red)' : 'var(--text-dim)'}">${s.errorCount || '—'}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${duration}</td>
+        <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${lastActive}</td>
       </tr>`;
     })
     .join('');
 
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border)">
-      <span style="color:var(--cyan);font-size:11px;letter-spacing:1px">TABLE VIEW</span>
-      <span style="color:var(--text-dim);font-size:10px">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
+      <span style="color:var(--cyan);font-size:var(--fs-base);letter-spacing:var(--tracking-label)">TABLE VIEW</span>
+      <span style="color:var(--text-dim);font-size:var(--fs-sm)">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
     </div>
     <div style="overflow:auto;flex:1">
-      <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono,monospace)">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono)">
         <thead>
           <tr>${headerCells}</tr>
         </thead>
