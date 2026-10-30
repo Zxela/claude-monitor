@@ -4,7 +4,7 @@ import { state } from './state';
 const lastSeenErrors = new Map<string, number>();
 
 export function needsAttention(sess: Session): boolean {
-  if (sess.status === 'waiting') return true;
+  if (sess.needsAttention) return true;
   const lastSeen = lastSeenErrors.get(sess.id) ?? 0;
   return sess.errorCount > lastSeen;
 }

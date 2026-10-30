@@ -21,6 +21,7 @@ export interface Session {
   isActive: boolean;
   startedAt: string;
   status: 'idle' | 'thinking' | 'tool_use' | 'waiting';
+  needsAttention: boolean;
   parentId?: string;
   children?: string[];
   cwd?: string;

@@ -8,13 +8,6 @@ import (
 	"github.com/zxela/claude-monitor/internal/repo"
 )
 
-// activeThreshold is how recent lastActive must be for a session to be considered active.
-const activeThreshold = 30 * time.Second
-
-// subagentWaitingThreshold is a shorter timeout for subagents in "waiting" status.
-// Subagents that finish their task emit end_turn then stop writing — no need to wait 30s.
-const subagentWaitingThreshold = 5 * time.Second
-
 // MessageCosts tracks the last-seen cost/tokens for a single message ID,
 // so we can replace (not double-add) when streaming sends multiple lines per message.
 type MessageCosts struct {
@@ -47,7 +40,7 @@ type Session struct {
 	MessageCount        int                     `json:"messageCount"`
 	EventCount          int                     `json:"eventCount"`
 	LastActive          time.Time               `json:"lastActive"`
-	IsActive            bool                    `json:"isActive"` // true if lastActive < 30s ago
+	IsActive            bool                    `json:"isActive"` // derived in state.go, as are Status and NeedsAttention
 	StartedAt           time.Time               `json:"startedAt"`
 	Status              string                  `json:"status"` // idle, thinking, tool_use, waiting
 	seenMessageCosts    map[string]MessageCosts `json:"-"`      // last cost/tokens per Message; never evicted, since a dropped entry would re-add that Message's full cost
@@ -65,6 +58,8 @@ type Session struct {
 	WorkflowID          string                  `json:"workflowId,omitempty"` // wf_<id> grouping all agents of one Claude Code workflow run; empty for non-workflow sessions
 	AgentID             string                  `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
 	AgentKind           string                  `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
+	NeedsAttention      bool                    `json:"needsAttention"`       // Status is waiting, so Awaiting children counts until #320; the client adds unseen errors
+	turn                string                  `json:"-"`                    // status the last turn left; input to Status
 	SourceFile          string                  `json:"-"`                    // JSONL file path currently providing events (not serialized)
 	repoSourceRank      int                     `json:"-"`                    // repo.Pin.Rank; see RepoPin
 	repoToplevel        string                  `json:"-"`                    // repo.Pin.Toplevel
@@ -151,12 +146,14 @@ func (s *Session) RestoreMessageCosts(costs map[string]MessageCosts) {
 type Store struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	now      func() time.Time
 }
 
 // NewStore creates an empty Store.
 func NewStore() *Store {
 	return &Store{
 		sessions: make(map[string]*Session),
+		now:      time.Now,
 	}
 }
 
@@ -178,69 +175,33 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 
 	update(sess)
 
-	// Recalculate derived fields.
-	// Subagents in "waiting" use a shorter threshold — they emit end_turn then stop.
-	threshold := activeThreshold
-	if sess.ParentID != "" && sess.Status == "waiting" {
-		threshold = subagentWaitingThreshold
-	}
-	sess.IsActive = time.Since(sess.LastActive) < threshold
-	if !sess.IsActive {
-		sess.Status = "idle"
-		sess.CostRate = 0
-	}
-
-	// Cost velocity: dollars per minute for active sessions.
-	if sess.IsActive && sess.TotalCost > 0 && !sess.StartedAt.IsZero() {
-		mins := time.Since(sess.StartedAt).Minutes()
-		if mins >= 1 {
-			sess.CostRate = sess.TotalCost / mins
-		}
-	}
+	s.settleLocked(sess, s.now())
 
 	return sess
 }
 
-// All returns a snapshot slice of all sessions (unordered).
-// IsActive is recalculated for each session based on current time.
+// All returns a snapshot slice of all sessions (unordered), with their state
+// derived at the current time.
 func (s *Store) All() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	now := s.now()
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
-		cp := *sess
-		cp.seenMessageCosts = nil // don't share internal dedup map
-		cp.seenRows = nil
-		// Recalculate IsActive so callers always see fresh status.
-		th := activeThreshold
-		if cp.ParentID != "" && cp.Status == "waiting" {
-			th = subagentWaitingThreshold
-		}
-		cp.IsActive = time.Since(cp.LastActive) < th
-		if !cp.IsActive {
-			cp.Status = "idle"
-			cp.CostRate = 0
-		}
-		out = append(out, &cp)
+		out = append(out, s.snapshotLocked(sess, now))
 	}
-
-	// Second pass: parents with active children stay as "waiting", not "idle".
-	for _, sess := range out {
-		if sess.Status == "idle" && len(sess.Children) > 0 {
-			for _, childID := range sess.Children {
-				if child, ok := s.sessions[childID]; ok {
-					if time.Since(child.LastActive) < activeThreshold {
-						sess.IsActive = true
-						sess.Status = "waiting"
-						break
-					}
-				}
-			}
-		}
-	}
-
 	return out
+}
+
+// snapshotLocked copies sess without its dedup state and derives the copy's
+// state at now. Caller holds s.mu.
+func (s *Store) snapshotLocked(sess *Session, now time.Time) *Session {
+	cp := *sess
+	cp.seenMessageCosts = nil
+	cp.seenRows = nil
+	s.deriveLocked(&cp, now)
+	return &cp
 }
 
 // LinkChild records that childID is a subagent of parentID.
@@ -257,7 +218,8 @@ func (s *Store) LinkChild(parentID, childID string) {
 	}
 }
 
-// Get returns the session for the given ID and whether it was found.
+// Get returns a snapshot of the session for the given ID, with its state
+// derived at the current time, and whether it was found.
 func (s *Store) Get(id string) (*Session, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -266,8 +228,5 @@ func (s *Store) Get(id string) (*Session, bool) {
 	if !ok {
 		return nil, false
 	}
-	cp := *sess
-	cp.seenMessageCosts = nil
-	cp.seenRows = nil
-	return &cp, true
+	return s.snapshotLocked(sess, s.now()), true
 }

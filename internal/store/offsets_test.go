@@ -85,11 +85,12 @@ func TestRestoreSessions_RoundTripsRuntimeState(t *testing.T) {
 	db := openTestDB(t)
 	last := time.Date(2026, 10, 1, 12, 0, 1, 123456789, time.UTC)
 	s := &session.Session{
-		ID: "child", ParentID: "parent", Status: "tool_use",
+		ID: "child", ParentID: "parent",
 		StartedAt: last.Add(-time.Minute), LastActive: last, TotalCost: 1.5,
 		EventCount: 3, MessageCount: 2, ErrorCount: 1, CWD: "/w", GitBranch: "main",
 		AgentKind: "subagent", AgentID: "child",
 	}
+	s.SetLastTurn("tool_use")
 	pin := repo.Pin{ID: "github.com/x/y", Rank: 3, Toplevel: "/w", Inherited: true}
 	s.SetRepoPin(pin)
 	if err := db.FlushSessions([]*session.Session{s, {ID: "other"}}); err != nil {
@@ -107,7 +108,7 @@ func TestRestoreSessions_RoundTripsRuntimeState(t *testing.T) {
 	if !r.LastActive.Equal(last) || !r.StartedAt.Equal(s.StartedAt) {
 		t.Errorf("times = %v / %v, want %v / %v at full precision", r.StartedAt, r.LastActive, s.StartedAt, last)
 	}
-	if r.Status != "tool_use" || r.ParentID != "parent" || r.TotalCost != 1.5 ||
+	if r.LastTurn() != "tool_use" || r.ParentID != "parent" || r.TotalCost != 1.5 ||
 		r.EventCount != 3 || r.MessageCount != 2 || r.ErrorCount != 1 || r.AgentKind != "subagent" {
 		t.Errorf("restored %+v", r)
 	}
