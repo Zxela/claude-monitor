@@ -81,10 +81,32 @@ subscribe((_state, changed) => {
 });
 
 function getVisibleSessionIds(): string[] {
-  const cards = document.querySelectorAll<HTMLElement>('[data-session-id]');
+  const cards =
+    sessionsMount.querySelectorAll<HTMLElement>('[data-session-id]');
   return Array.from(cards)
     .map((c) => c.dataset.sessionId!)
     .filter(Boolean);
+}
+
+// Arrows only drive the session cursor from a focused sidebar card; anywhere
+// else they must keep scrolling the page, feed or table.
+function moveSessionFocus(e: KeyboardEvent, step: 1 | -1): void {
+  const card =
+    e.target instanceof HTMLElement
+      ? e.target.closest<HTMLElement>('[data-session-id]')
+      : null;
+  if (!card || !sessionsMount.contains(card)) return;
+  e.preventDefault();
+  const ids = getVisibleSessionIds();
+  const idx = ids.indexOf(card.dataset.sessionId!);
+  const next = ids[Math.min(Math.max(idx + step, 0), ids.length - 1)];
+  update({ focusedSessionId: next });
+  // The update re-rendered the list, so look the card up again.
+  sessionsMount
+    .querySelectorAll<HTMLElement>('[data-session-id]')
+    .forEach((c) => {
+      if (c.dataset.sessionId === next) c.focus();
+    });
 }
 
 // Keyboard shortcuts
@@ -98,6 +120,8 @@ document.addEventListener('keydown', (e) => {
   ) {
     return;
   }
+  // A focused control already handled this key (e.g. Enter on a card or row).
+  if (e.defaultPrevented) return;
 
   switch (e.key) {
     case 'g':
@@ -134,30 +158,12 @@ document.addEventListener('keydown', (e) => {
       dismissBudget();
       update({ selectedSessionId: null, searchOpen: false });
       break;
-    case 'ArrowDown': {
-      e.preventDefault();
-      const ids = getVisibleSessionIds();
-      if (ids.length === 0) break;
-      const idx = state.focusedSessionId
-        ? ids.indexOf(state.focusedSessionId)
-        : -1;
-      // If focused session not in visible list, start from the top
-      const next = idx === -1 ? ids[0] : ids[Math.min(idx + 1, ids.length - 1)];
-      update({ focusedSessionId: next });
+    case 'ArrowDown':
+      moveSessionFocus(e, 1);
       break;
-    }
-    case 'ArrowUp': {
-      e.preventDefault();
-      const ids = getVisibleSessionIds();
-      if (ids.length === 0) break;
-      const idx = state.focusedSessionId
-        ? ids.indexOf(state.focusedSessionId)
-        : -1;
-      // If focused session not in visible list, start from the bottom
-      const prev = idx === -1 ? ids[ids.length - 1] : ids[Math.max(idx - 1, 0)];
-      update({ focusedSessionId: prev });
+    case 'ArrowUp':
+      moveSessionFocus(e, -1);
       break;
-    }
     case 'Enter': {
       if (state.focusedSessionId) {
         update({
