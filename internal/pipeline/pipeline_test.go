@@ -1962,3 +1962,21 @@ func TestProcess_KeylessLinesGetOwnRows(t *testing.T) {
 		t.Fatalf("got %d rows, want 2 (one per distinct keyless line)", len(events))
 	}
 }
+
+func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: []byte(
+		`{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
+	db.Close() // every write now fails
+	p.flush()
+
+	p.bufMu.Lock()
+	n := len(p.buffer)
+	p.bufMu.Unlock()
+	if n != 1 {
+		t.Errorf("buffer holds %d events after a failed persist, want 1 kept for retry", n)
+	}
+}

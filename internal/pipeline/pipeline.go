@@ -25,6 +25,8 @@ const (
 	flushInterval = 2 * time.Second
 	maxBatchSize  = 200
 	maxMetaCache  = 500
+	// Events held for retry after PersistBatch fails.
+	maxRetainedEvents = 10 * maxBatchSize
 )
 
 // BroadcastFunc is called for each processed event. It receives the event,
@@ -292,9 +294,17 @@ func (p *Pipeline) flush() {
 	p.buffer = nil
 	p.bufMu.Unlock()
 
-	// Persist events
+	// Persist events. On failure put the batch back for the next flush; past
+	// maxRetainedEvents give up so a dead database can't grow memory forever.
 	if err := p.db.PersistBatch(&store.EventBatch{Events: batch}); err != nil {
-		log.Printf("batch persist error: %v", err)
+		p.bufMu.Lock()
+		if len(batch)+len(p.buffer) <= maxRetainedEvents {
+			p.buffer = append(batch, p.buffer...)
+			log.Printf("batch persist error, will retry %d events: %v", len(batch), err)
+		} else {
+			log.Printf("batch persist error, dropping %d events (retry buffer full): %v", len(batch), err)
+		}
+		p.bufMu.Unlock()
 	}
 
 	// Persist affected sessions + repo mappings in a single transaction

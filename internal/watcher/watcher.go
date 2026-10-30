@@ -87,6 +87,7 @@ type Watcher struct {
 	labels        map[string]string // basePath -> label (container name)
 	states        map[string]*fileState
 	events        chan Event
+	done          <-chan struct{} // ctx.Done() of Start; unblocks emit on shutdown
 	droppedEvents atomic.Int64
 	bootstrapping bool        // true during initial scan
 	bootstrapCB   func(Event) // called synchronously for bootstrap events
@@ -225,6 +226,7 @@ func (w *Watcher) FindSessionFile(sessionID string) string {
 // Start begins watching and returns a channel of Events. It runs until ctx
 // is cancelled.
 func (w *Watcher) Start(ctx context.Context) <-chan Event {
+	w.done = ctx.Done()
 	go w.run(ctx)
 	return w.events
 }
@@ -516,15 +518,18 @@ func (w *Watcher) emit(filePath string, line []byte) {
 		return
 	}
 
+	// Block rather than drop when the consumer falls behind: the file offset is
+	// already past this line, so a dropped line would be lost until the next
+	// restart. The file itself is the buffer.
 	select {
 	case w.events <- ev:
-	default:
+	case <-w.done:
 		w.droppedEvents.Add(1)
-		log.Printf("watcher event channel full, dropping line from %s", filePath)
 	}
 }
 
-// DroppedEvents returns the total number of events dropped due to a full channel.
+// DroppedEvents returns the number of lines discarded because the watcher was
+// shutting down while the consumer was behind.
 func (w *Watcher) DroppedEvents() int64 {
 	return w.droppedEvents.Load()
 }
