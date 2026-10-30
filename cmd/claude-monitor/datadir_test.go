@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zxela/claude-monitor/internal/store"
 )
 
 func TestOpenDataDir_TightensExistingInstall(t *testing.T) {
@@ -40,16 +42,30 @@ func TestOpenDataDir_TightensExistingInstall(t *testing.T) {
 	}
 }
 
-func TestOpenDataDir_FreshInstall(t *testing.T) {
-	dbPath, err := openDataDir(t.TempDir())
+func TestOpenDataDir_FreshInstallThroughSQLite(t *testing.T) {
+	home := t.TempDir()
+	dbPath, err := openDataDir(home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fi, err := os.Stat(dbPath)
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fi.Mode().Perm(); got != 0o600 {
-		t.Errorf("history.db mode = %o, want 600", got)
+	defer db.Close()
+
+	for path, want := range map[string]os.FileMode{
+		filepath.Dir(dbPath): 0o700,
+		dbPath:               0o600,
+		dbPath + "-wal":      0o600,
+		dbPath + "-shm":      0o600,
+	} {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fi.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", filepath.Base(path), got, want)
+		}
 	}
 }
