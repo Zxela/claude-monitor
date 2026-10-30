@@ -669,3 +669,28 @@ func TestRepoStatsRequiresEncodedID(t *testing.T) {
 			url.PathEscape(id), agg)
 	}
 }
+
+// TestSecondInstanceExitsBeforeTouchingDB: the shared test server holds
+// testPort, so another instance must fail fast without creating a database.
+func TestSecondInstanceExitsBeforeTouchingDB(t *testing.T) {
+	home := t.TempDir()
+	cmd := exec.Command(testBinary, "--port", fmt.Sprintf("%d", testPort))
+	cmd.Env = append(os.Environ(), "HOME="+home, "CLAUDE_MONITOR_NO_UPDATE_CHECK=1")
+	done := make(chan error, 1)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("second instance exited 0, want a failure exit")
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("second instance did not exit")
+	}
+	if _, err := os.Stat(home + "/.claude-monitor"); !os.IsNotExist(err) {
+		t.Errorf("second instance created a data directory (stat err: %v)", err)
+	}
+}
