@@ -1,7 +1,12 @@
 // web/src/components/table-view.ts
 import type { Session } from '../types';
 import { state, subscribe, update } from '../state';
-import { sessionDisplayName, formatDurationSecs } from '../utils';
+import {
+  sessionDisplayName,
+  formatDurationSecs,
+  escapeHtml,
+  escapeAttr,
+} from '../utils';
 import '../styles/views.css';
 
 type SortKey =
@@ -194,8 +199,8 @@ function renderTable(): void {
         : 'IDLE';
       const isSelected = state.selectedSessionId === s.id;
 
-      return `<tr data-session-id="${s.id}" style="cursor:pointer;background:${isSelected ? 'var(--bg-hover)' : 'transparent'};border-left:${isSelected ? '2px solid var(--cyan)' : '2px solid transparent'}">
-        <td style="padding:5px 10px;font-size:var(--fs-lg);font-weight:var(--fw-medium);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</td>
+      return `<tr data-session-id="${escapeAttr(s.id)}" style="cursor:pointer;background:${isSelected ? 'var(--bg-hover)' : 'transparent'};border-left:${isSelected ? '2px solid var(--cyan)' : '2px solid transparent'}">
+        <td style="padding:5px 10px;font-size:var(--fs-lg);font-weight:var(--fw-medium);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeAttr(name)}">${escapeHtml(name)}</td>
         <td style="padding:5px 10px;font-size:var(--fs-sm);color:${statusColor}">${statusLabel}</td>
         <td style="padding:5px 10px;font-size:var(--fs-base);font-weight:var(--fw-medium);text-align:right;color:${s.totalCost > 0.1 ? 'var(--yellow)' : 'var(--text)'}">$${s.totalCost.toFixed(4)}</td>
         <td style="padding:5px 10px;font-size:var(--fs-base);text-align:right;color:var(--text-dim)">${totalTokens.toLocaleString()}</td>
