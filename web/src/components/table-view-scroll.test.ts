@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render } from './table-view';
 import { update } from '../state';
 import type { Session } from '../types';
@@ -40,11 +40,36 @@ describe('table view re-render', () => {
 
     const scroller = mount.querySelector<HTMLElement>('.table-scroll')!;
     scroller.scrollTop = 120;
+    scroller.scrollLeft = 80;
     update({ grouped: grouped(51) });
 
     expect(mount.querySelectorAll('tbody tr').length).toBe(51);
-    expect(mount.querySelector<HTMLElement>('.table-scroll')!.scrollTop).toBe(
-      120,
-    );
+    const next = mount.querySelector<HTMLElement>('.table-scroll')!;
+    expect(next.scrollTop).toBe(120);
+    expect(next.scrollLeft).toBe(80);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('batches live session updates into one rebuild a second', () => {
+    vi.useFakeTimers();
+    const mount = document.createElement('div');
+    document.body.appendChild(mount);
+    update({ view: 'table', grouped: grouped(3) });
+    render(mount);
+
+    const first = mount.querySelector('table');
+    for (let i = 0; i < 5; i++) update({ sessions: new Map() });
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(999);
+    expect(mount.querySelector('table')).toBe(first);
+    vi.advanceTimersByTime(1);
+    const second = mount.querySelector('table');
+    expect(second).not.toBe(first);
+    expect(vi.getTimerCount()).toBe(0);
+
+    update({ sessions: new Map() });
+    vi.advanceTimersByTime(1000);
+    expect(mount.querySelector('table')).not.toBe(second);
   });
 });
