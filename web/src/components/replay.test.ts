@@ -92,3 +92,31 @@ describe('replay renderUpToCount (off-by-one / inclusive-last guard)', () => {
     expect(renderUpToCount(3, 0)).toBe(0);
   });
 });
+
+describe('replay window', () => {
+  it('renders everything up to the window size, then only the tail', async () => {
+    const { replayWindowStart, REPLAY_WINDOW } = await import('./replay');
+    expect(replayWindowStart(10)).toBe(0);
+    expect(replayWindowStart(REPLAY_WINDOW)).toBe(0);
+    expect(replayWindowStart(REPLAY_WINDOW + 250)).toBe(250);
+  });
+});
+
+describe('replay teardown', () => {
+  it('closes and releases the shortcuts when the view changes', async () => {
+    const { state, update } = await import('../state');
+    const { render, open } = await import('./replay');
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ events: [] }))) as typeof fetch;
+    const mount = document.createElement('div');
+    render(mount);
+    update({ selectedSessionId: 's1' });
+    open('s1');
+    expect(state.replaySessionId).toBe('s1');
+    expect(mount.querySelector('.replay-panel')).not.toBeNull();
+
+    update({ view: 'history' });
+    expect(state.replaySessionId).toBeNull();
+    expect(mount.querySelector('.replay-panel')).toBeNull();
+  });
+});
