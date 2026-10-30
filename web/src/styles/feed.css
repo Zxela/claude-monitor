@@ -631,8 +631,6 @@
 
 /* Scroll lock button */
 .scroll-lock-btn {
-  position: sticky;
-  bottom: 0;
   width: 100%;
   background: rgba(68, 136, 255, 0.1);
   border: none;

@@ -465,8 +465,15 @@ describe('feed panel scroll lock', () => {
     expect(mount.querySelector('.scroll-lock-btn')).not.toBeNull();
   });
 
-  it.skip('keeps its resume-scroll button after loading a session (bug: the Loading placeholder innerHTML wipes it)', async () => {
+  it('keeps its resume-scroll button after loading a session', async () => {
     const { mount } = await selectWith([ev({})]);
+    expect(mount.querySelector('.scroll-lock-btn')).not.toBeNull();
+  });
+
+  it('keeps its resume-scroll button once the all-sessions feed hits its cap', async () => {
+    const { mount, push } = await setup();
+    for (let i = 0; i < 501; i++) push(ev({ contentPreview: `m${i}` }));
+    expect(entries(mount)).toHaveLength(500);
     expect(mount.querySelector('.scroll-lock-btn')).not.toBeNull();
   });
 });
