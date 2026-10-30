@@ -37,8 +37,21 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Scratch HOME: otherwise the server migrates and writes to the developer's
+	// real ~/.claude-monitor/history.db and replays all of ~/.claude first.
+	home, err := os.MkdirTemp("", "claude-monitor-e2e-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "scratch home: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(home+"/.claude/projects", 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "scratch home: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Start the server.
 	srv := exec.Command(testBinary, "--port", fmt.Sprintf("%d", testPort))
+	srv.Env = append(os.Environ(), "HOME="+home, "CLAUDE_MONITOR_NO_UPDATE_CHECK=1")
 	srv.Stderr = os.Stderr
 	if err := srv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start server: %v\n", err)
@@ -71,6 +84,7 @@ func TestMain(m *testing.M) {
 	// Kill the server and clean up.
 	_ = srv.Process.Kill()
 	os.Remove(testBinary)
+	os.RemoveAll(home)
 
 	os.Exit(code)
 }
