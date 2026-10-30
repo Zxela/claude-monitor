@@ -93,4 +93,29 @@ describe('global arrow keys', () => {
     key(card('b'), 'ArrowDown');
     expect(document.activeElement).toBe(card('c'));
   });
+
+  it('skips cards in collapsed time groups', () => {
+    const active = { ...session('z', 0), isActive: true };
+    state.sessions.set('z', active);
+    state.sessions.set('d', session('d', 60 * 24 * 30));
+    update({ selectedSessionId: null });
+    document
+      .querySelector<HTMLElement>('#sessions-mount [data-filter="all"]')!
+      .click();
+    const header = (label: string) =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '#sessions-mount .time-group-header',
+        ),
+      ).find((h) => h.textContent?.startsWith(label))!;
+    header('LAST HOUR').click();
+    header('OLDER').click();
+
+    card('z').focus();
+    key(card('z'), 'ArrowDown');
+    expect(state.focusedSessionId).toBe('d');
+    expect(document.activeElement).toBe(card('d'));
+    key(card('d'), 'ArrowUp');
+    expect(state.focusedSessionId).toBe('z');
+  });
 });

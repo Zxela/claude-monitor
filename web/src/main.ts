@@ -84,6 +84,7 @@ function getVisibleSessionIds(): string[] {
   const cards =
     sessionsMount.querySelectorAll<HTMLElement>('[data-session-id]');
   return Array.from(cards)
+    .filter((c) => !c.closest('.time-group-collapsed'))
     .map((c) => c.dataset.sessionId!)
     .filter(Boolean);
 }
