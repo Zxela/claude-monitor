@@ -349,7 +349,7 @@
   gap: 8px;
   margin-top: 2px;
   font-size: var(--fs-sm);
-  color: #44445a;
+  color: var(--text-dim);
 }
 
 /* ======= Compact card (timeline groups) ======= */
@@ -433,7 +433,7 @@
   opacity: 0.6;
 }
 .session-card-compact .duration {
-  color: #44445a;
+  color: var(--text-dim);
   font-size: var(--fs-sm);
 }
 .session-card-compact .model {

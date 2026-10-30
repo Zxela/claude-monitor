@@ -284,7 +284,7 @@
 
 .fe-time {
   flex: 0 0 85px;
-  color: #667788;
+  color: var(--color-result);
   font-size: var(--text-base);
   white-space: nowrap;
 }
@@ -669,7 +669,7 @@
   border-left-color: rgba(255, 204, 0, 0.15);
 }
 .feed-entry.tool-group-child .fe-time {
-  color: #556677;
+  color: var(--color-result);
 }
 .feed-entry.tool-group-child:last-child,
 .feed-entry.tool-group-child + .feed-entry:not(.tool-group-child) {
@@ -683,10 +683,10 @@
   font-size: 11px;
 }
 .feed-entry.type-tool_result .fe-time {
-  color: #556677;
+  color: var(--color-result);
 }
 .feed-entry.type-tool_result .fe-type {
-  color: #446666;
+  color: #669999;
 }
 
 /* Feed header button classes (replacing inline styles) */
