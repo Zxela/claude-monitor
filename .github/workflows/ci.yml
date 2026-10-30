@@ -52,6 +52,19 @@ jobs:
       - name: Vet
         run: go vet $(go list ./... | grep -v /node_modules/)
 
+  # build-and-test runs Node 24; this holds the documented Node 22 floor.
+  frontend-node-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.22.2'
+
+      - name: Install, build and test frontend
+        run: cd web && npm ci && npm run build && npm test
+
   # Boots the server and checks api/openapi.yaml against it in both directions:
   # responses that violate the spec, and responses carrying fields the spec does
   # not document. Also asserts every route registered in main.go is documented,
@@ -158,7 +171,7 @@ jobs:
       contents: write
       pull-requests: write
     if: github.ref == 'refs/heads/main'
-    needs: [build-and-test, lint, api-spec]
+    needs: [build-and-test, frontend-node-floor, lint, api-spec]
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
