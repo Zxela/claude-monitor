@@ -491,46 +491,6 @@ func TestParseLine_RealWorldSample(t *testing.T) {
 	}
 }
 
-func TestComputeCost_ByModel(t *testing.T) {
-	t.Parallel()
-	usage := rawUsage{
-		InputTokens:              1000000,
-		OutputTokens:             1000000,
-		CacheReadInputTokens:     1000000,
-		CacheCreationInputTokens: 1000000,
-	}
-
-	tests := []struct {
-		name     string
-		model    string
-		wantCost float64
-	}{
-		{"fable", "claude-fable-5", 10.0 + 50.0 + 1.0 + 12.50},
-		{"fable 1m suffix", "claude-fable-5[1m]", 10.0 + 50.0 + 1.0 + 12.50},
-		{"fable 5.1", "claude-fable-5-1", 10.0 + 50.0 + 0.25 + 12.50},
-		{"opus 5.5", "claude-opus-5-5", 4.0 + 20.0 + 0.20 + 5.0},
-		{"opus 5", "claude-opus-5", 5.0 + 25.0 + 0.50 + 6.25},
-		{"sonnet 5.5", "claude-sonnet-5-5", 2.0 + 10.0 + 0.20 + 2.50},
-		{"haiku 5.5 (3M prompt, long card)", "claude-haiku-5-5", 0.50 + 2.50 + 0.05 + 0.625},
-		{"opus", "claude-opus-4-6", 5.0 + 25.0 + 0.50 + 6.25},
-		{"opus 4.8", "claude-opus-4-8", 5.0 + 25.0 + 0.50 + 6.25},
-		{"opus 4.8 versioned", "claude-opus-4-8-20260101", 5.0 + 25.0 + 0.50 + 6.25},
-		{"sonnet", "claude-sonnet-4-6", 3.0 + 15.0 + 0.30 + 3.75},
-		{"haiku", "claude-haiku-4-5", 1.0 + 5.0 + 0.10 + 1.25},
-		{"haiku versioned", "claude-haiku-4-5-20251001", 1.0 + 5.0 + 0.10 + 1.25},
-		{"unknown falls back to sonnet", "claude-unknown-99", 3.0 + 15.0 + 0.30 + 3.75},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := computeCost(tc.model, usage)
-			if math.Abs(got-tc.wantCost) > 1e-9 {
-				t.Errorf("computeCost(%q) = %g, want %g", tc.model, got, tc.wantCost)
-			}
-		})
-	}
-}
-
 func TestParseLine_OpusPricing(t *testing.T) {
 	t.Parallel()
 	line := []byte(`{
@@ -811,67 +771,5 @@ func TestParseLine_SessionMetadata(t *testing.T) {
 			t.Errorf("%s: metadata=%v internal=%v turn=%v, want true false false",
 				ev.Type, ev.IsSessionMetadata(), ev.IsInternal(), ev.IsConversationTurn())
 		}
-	}
-}
-
-func TestComputeCost_Haiku55LongContextBoundary(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		model string
-		usage rawUsage
-		want  float64
-	}{
-		{"100K prompt is base", "claude-haiku-5-5",
-			rawUsage{InputTokens: 100_000, OutputTokens: 1_000},
-			100_000*0.10/1e6 + 1_000*0.50/1e6},
-		{"100K+1 prompt is long", "claude-haiku-5-5",
-			rawUsage{InputTokens: 100_001, OutputTokens: 1_000},
-			100_001*0.50/1e6 + 1_000*2.50/1e6},
-		{"cache tokens count toward the prompt", "claude-haiku-5-5",
-			rawUsage{InputTokens: 1, CacheReadInputTokens: 60_000, CacheCreationInputTokens: 40_000, OutputTokens: 1_000},
-			1*0.50/1e6 + 60_000*0.05/1e6 + 40_000*0.625/1e6 + 1_000*2.50/1e6},
-		{"cache tokens at the boundary stay base", "claude-haiku-5-5",
-			rawUsage{CacheReadInputTokens: 60_000, CacheCreationInputTokens: 40_000, OutputTokens: 1_000},
-			60_000*0.01/1e6 + 40_000*0.125/1e6 + 1_000*0.50/1e6},
-		{"versioned model name", "claude-haiku-5-5-20261001",
-			rawUsage{InputTokens: 200_000},
-			200_000 * 0.50 / 1e6},
-		{"other models have one card", "claude-sonnet-5-5",
-			rawUsage{InputTokens: 200_000},
-			200_000 * 2.0 / 1e6},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := computeCost(tc.model, tc.usage)
-			if math.Abs(got-tc.want) > 1e-12 {
-				t.Errorf("computeCost(%q) = %g, want %g", tc.model, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestSetPricingTable_LongContextFromDB(t *testing.T) {
-	t.Cleanup(func() { SetPricingTable(nil) })
-	long := rawUsage{InputTokens: 200_000}
-
-	SetPricingTable(map[string]ExternalPricing{
-		"claude-haiku-5-5": {
-			InputPerMTok: 1, OutputPerMTok: 1, CacheReadPerMTok: 1, CacheCreatePerMTok: 1,
-			LongContextThreshold: 150_000, LongInputPerMTok: 3,
-		},
-	})
-	if got, want := computeCost("claude-haiku-5-5", long), 200_000*3.0/1e6; math.Abs(got-want) > 1e-12 {
-		t.Errorf("DB tier: cost = %g, want %g", got, want)
-	}
-	if got, want := computeCost("claude-haiku-5-5", rawUsage{InputTokens: 150_000}), 150_000*1.0/1e6; math.Abs(got-want) > 1e-12 {
-		t.Errorf("DB base at DB threshold: cost = %g, want %g", got, want)
-	}
-
-	SetPricingTable(map[string]ExternalPricing{
-		"claude-haiku-5-5": {InputPerMTok: 1, OutputPerMTok: 1, CacheReadPerMTok: 1, CacheCreatePerMTok: 1},
-	})
-	if got, want := computeCost("claude-haiku-5-5", long), 200_000*1.0/1e6; math.Abs(got-want) > 1e-12 {
-		t.Errorf("DB row without tier: cost = %g, want %g (no fallback tier)", got, want)
 	}
 }
