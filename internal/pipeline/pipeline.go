@@ -10,7 +10,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -789,7 +788,7 @@ func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
 	}
 }
 
-// applyStatusUpdate updates timestamps, handles summary resets, and sets session status.
+// applyStatusUpdate updates timestamps, handles summary resets, and records the turn.
 func (p *Pipeline) applyStatusUpdate(s *session.Session, msg *parser.Event, ev watcher.Event) {
 	// Timestamps
 	if !msg.Timestamp.IsZero() {
@@ -801,21 +800,12 @@ func (p *Pipeline) applyStatusUpdate(s *session.Session, msg *parser.Event, ev w
 		s.LastActive = time.Now()
 	}
 
-	// Status
-	switch {
-	case msg.Type == "summary":
-		s.Status = "thinking" // session stays active through compact
-	case msg.StopReason == "end_turn":
-		s.Status = "waiting"
-	case msg.StopReason == "tool_use":
-		s.Status = "tool_use"
-	case msg.ToolName != "":
-		s.Status = "tool_use"
-	case msg.Role == "assistant":
-		s.Status = "thinking"
-	case msg.Role == "user":
-		s.Status = "thinking"
-	}
+	s.RecordTurn(session.Turn{
+		Summary:    msg.Type == "summary",
+		StopReason: msg.StopReason,
+		ToolName:   msg.ToolName,
+		Role:       msg.Role,
+	})
 }
 
 func (p *Pipeline) loadMeta(ev watcher.Event) {

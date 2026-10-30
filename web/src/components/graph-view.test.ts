@@ -16,6 +16,7 @@ const waiting: Session = {
   isActive: true,
   startedAt: new Date().toISOString(),
   status: 'waiting',
+  needsAttention: true,
   costRate: 0,
   errorCount: 0,
   taskDescription: '',

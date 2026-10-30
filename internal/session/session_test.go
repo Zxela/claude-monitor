@@ -4,7 +4,6 @@ import (
 	"math"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestNewStore_CreatesEmptyStore(t *testing.T) {
@@ -136,28 +135,6 @@ func TestGet_ReturnsFalseForUnknownSession(t *testing.T) {
 	_, ok := s.Get("nonexistent")
 	if ok {
 		t.Error("expected false for nonexistent session, got true")
-	}
-}
-
-func TestIsActive_TrueWhenRecentlyActive(t *testing.T) {
-	t.Parallel()
-	s := NewStore()
-	sess := s.Upsert("active-session", func(sess *Session) {
-		sess.LastActive = time.Now() // just now
-	})
-	if !sess.IsActive {
-		t.Error("expected IsActive = true for session active just now")
-	}
-}
-
-func TestIsActive_FalseWhenOldLastActive(t *testing.T) {
-	t.Parallel()
-	s := NewStore()
-	sess := s.Upsert("inactive-session", func(sess *Session) {
-		sess.LastActive = time.Now().Add(-60 * time.Second) // 60s ago
-	})
-	if sess.IsActive {
-		t.Error("expected IsActive = false for session active 60s ago")
 	}
 }
 

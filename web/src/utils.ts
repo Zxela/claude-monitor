@@ -72,7 +72,7 @@ export function stripInternalTags(text: string): string {
   return s.trim();
 }
 
-// Mirror the server's active threshold (session.go activeThreshold = 30s) so the
+// Mirror the server's active threshold (state.go activeThreshold = 30s) so the
 // client never has a third, divergent definition of "active". Active-group
 // membership now flows from the server's isActive flag; this helper only powers
 // the defensive stale-to-idle decay of a server-flagged-active session whose

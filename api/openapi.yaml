@@ -1038,6 +1038,7 @@ components:
         - isActive
         - startedAt
         - status
+        - needsAttention
         - costRate
         - errorCount
         - taskDescription
@@ -1124,6 +1125,12 @@ components:
             becomes false. Parents with active children show "waiting".
           enum: [idle, thinking, tool_use, waiting]
           example: "thinking"
+        needsAttention:
+          type: boolean
+          description: >
+            True when status is "waiting". Clients also flag errors the viewer
+            has not seen. Always false for sessions served from SQLite.
+          example: false
         parentId:
           type: string
           description: >
