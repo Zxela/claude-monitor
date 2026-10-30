@@ -1245,6 +1245,12 @@ components:
             pretty-printed JSON input for tool_use blocks. Omitted when not
             applicable. May be empty for warm/cold events (retention compaction).
           example: "I'll refactor the auth module to use JWT tokens. First, let me..."
+        thinkingContent:
+          type: string
+          description: >
+            Text of the message's thinking block. Omitted when the message had
+            none, and dropped for cold events (retention compaction).
+          example: "The user wants JWT; check how sessions are stored first."
         toolName:
           type: string
           description: Name of the tool called (e.g. Bash, Read, Agent). Omitted when not a tool call.
