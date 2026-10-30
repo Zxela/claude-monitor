@@ -222,8 +222,8 @@ function renderFeedPanel(): void {
   feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
 
-  // Scroll lock button — recreate on each render since container.innerHTML
-  // clearing detaches any previously appended button from the DOM.
+  // Outside feedContent: session loads replace its innerHTML and the
+  // MAX_ENTRIES cap trims its first child.
   scrollLockBtn = document.createElement('button');
   scrollLockBtn.className = 'scroll-lock-btn';
   scrollLockBtn.textContent = '▼ RESUME SCROLL';
@@ -234,7 +234,7 @@ function renderFeedPanel(): void {
       scrollLockBtn?.classList.remove('visible');
     }
   });
-  feedContent.appendChild(scrollLockBtn);
+  container.appendChild(scrollLockBtn);
 }
 
 function updateHeader(): void {
