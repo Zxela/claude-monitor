@@ -38,6 +38,20 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 curl -fsSL "$URL" -o "${TMPDIR}/${BINARY}.tar.gz"
+
+# Verify against the release's checksums.txt before extracting anything.
+curl -fsSL "https://github.com/${REPO}/releases/download/${TAG}/checksums.txt" -o "${TMPDIR}/checksums.txt"
+EXPECTED=$(awk -v f="${BINARY}.tar.gz" '$2 == f {print $1}' "${TMPDIR}/checksums.txt")
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL=$(sha256sum "${TMPDIR}/${BINARY}.tar.gz" | awk '{print $1}')
+else
+  ACTUAL=$(shasum -a 256 "${TMPDIR}/${BINARY}.tar.gz" | awk '{print $1}')
+fi
+if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
+  echo "Error: checksum mismatch for ${BINARY}.tar.gz (expected '${EXPECTED}', got '${ACTUAL}')"
+  exit 1
+fi
+
 tar xzf "${TMPDIR}/${BINARY}.tar.gz" -C "$TMPDIR"
 
 # Install — tarball may contain the binary as 'claude-monitor' (Homebrew-style)
