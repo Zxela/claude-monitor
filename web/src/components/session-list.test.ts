@@ -216,7 +216,7 @@ describe('session list filtering', () => {
     expect(count(mount, 'all')).toBe('2');
   });
 
-  it.skip('ACTIVE count honours the repo filter (bug: #fc-active counts every repo)', async () => {
+  it('ACTIVE count honours the repo filter', async () => {
     const { mount, update } = await setup([
       makeSession({
         id: 'a',
@@ -238,7 +238,7 @@ describe('session list filtering', () => {
     expect(count(mount, 'active')).toBe('1');
   });
 
-  it.skip('RECENT count matches the cards RECENT shows (bug: count drops today sessions older than 4h)', async () => {
+  it('RECENT count matches the cards RECENT shows', async () => {
     const { mount } = await setup([
       makeSession({ id: 'hour', lastActive: ago(10 * MIN) }),
       makeSession({ id: 'morning', lastActive: ago(6 * HOUR) }),
