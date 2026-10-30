@@ -768,3 +768,18 @@ func TestParseLine_ThinkingKey(t *testing.T) {
 		t.Errorf("ThinkingContent = %q, want %q", msg.ThinkingContent, "weighing options")
 	}
 }
+
+func TestParseLine_ThinkingBeforeToolUseKeepsToolInput(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"assistant","uuid":"u","message":{"role":"assistant","content":[{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls -la"}}]}}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.ThinkingContent != "plan" {
+		t.Errorf("ThinkingContent = %q, want plan", msg.ThinkingContent)
+	}
+	if !strings.Contains(msg.FullContent, "ls -la") {
+		t.Errorf("FullContent = %q, want the tool input", msg.FullContent)
+	}
+}

@@ -590,13 +590,9 @@ func extractContent(raw json.RawMessage) contentInfo {
 			if thought == "" {
 				thought = b.Text
 			}
-			if thought != "" {
-				if info.thinkingContent == "" {
-					info.thinkingContent = thought
-				}
-				if info.fullText == "" {
-					info.fullText = thought
-				}
+			// Not fullText: a later tool_use block fills that with its arguments.
+			if thought != "" && info.thinkingContent == "" {
+				info.thinkingContent = thought
 			}
 			if info.text == "" {
 				info.text = "[thinking...]"
