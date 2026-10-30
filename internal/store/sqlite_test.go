@@ -564,7 +564,7 @@ func TestSearchFTS(t *testing.T) {
 			Event: &parser.Event{
 				Type: "assistant", ContentText: "reading parser.go",
 				ToolName: "Read", ToolDetail: "/home/user/parser.go",
-				Timestamp: time.Now(),
+				Timestamp: time.Now(), UUID: "u-read",
 			},
 		},
 		{
@@ -572,7 +572,7 @@ func TestSearchFTS(t *testing.T) {
 			Event: &parser.Event{
 				Type: "assistant", ContentText: "running tests",
 				ToolName: "Bash", ToolDetail: "go test ./...",
-				Timestamp: time.Now().Add(time.Second),
+				Timestamp: time.Now().Add(time.Second), UUID: "u-bash",
 			},
 		},
 	}}

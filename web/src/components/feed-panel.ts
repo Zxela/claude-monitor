@@ -22,6 +22,8 @@ let headerEl: HTMLElement | null = null;
 let scrollLockBtn: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
+// Bumped per load so a superseded request for the same session can't append.
+let loadSeq = 0;
 const scrollPositions = new Map<string, number>();
 const MAX_ENTRIES = 500;
 
@@ -91,6 +93,8 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
     if (state.selectedSessionId) {
       renderFeedPanel();
+      // renderFeedPanel emptied the feed, so the load guard must not skip.
+      currentLoadSessionId = null;
       loadRecentMessages(state.selectedSessionId);
     } else {
       // Back to multi-session mode
@@ -99,6 +103,11 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       multiSessionLoaded = false;
       loadMultiSessionEvents();
     }
+  }
+
+  if (changed.has('feedTypeFilters')) {
+    updateFilterButtons();
+    applyFilters();
   }
 }
 
@@ -218,8 +227,8 @@ function renderFeedPanel(): void {
   feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
 
-  // Scroll lock button — recreate on each render since container.innerHTML
-  // clearing detaches any previously appended button from the DOM.
+  // Outside feedContent: session loads replace its innerHTML and the
+  // MAX_ENTRIES cap trims its first child.
   scrollLockBtn = document.createElement('button');
   scrollLockBtn.className = 'scroll-lock-btn';
   scrollLockBtn.textContent = '▼ RESUME SCROLL';
@@ -230,7 +239,7 @@ function renderFeedPanel(): void {
       scrollLockBtn?.classList.remove('visible');
     }
   });
-  feedContent.appendChild(scrollLockBtn);
+  container.appendChild(scrollLockBtn);
 }
 
 function updateHeader(): void {
@@ -341,8 +350,6 @@ function handleFilterClick(type: string, e: MouseEvent): void {
     }
     update({ feedTypeFilters: filters });
   }
-  updateFilterButtons();
-  applyFilters();
 }
 
 function updateFilterButtons(): void {
@@ -358,12 +365,21 @@ function updateFilterButtons(): void {
     });
 }
 
+// A tool result takes its call's type, so it has to pass both filters.
+function isEntryVisible(entry: HTMLElement): boolean {
+  const filters = state.feedTypeFilters;
+  if (!(filters[entry.dataset.type || 'system'] ?? true)) return false;
+  return (
+    !entry.classList.contains('type-tool_result') ||
+    (filters.tool_result ?? true)
+  );
+}
+
 function applyFilters(): void {
   if (!feedContent) return;
   let visibleCount = 0;
   feedContent.querySelectorAll<HTMLElement>('.feed-entry').forEach((entry) => {
-    const type = entry.dataset.type || 'system';
-    const visible = state.feedTypeFilters[type] ?? true;
+    const visible = isEntryVisible(entry);
     entry.style.display = visible ? '' : 'none';
     if (visible) visibleCount++;
   });
@@ -386,6 +402,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
   currentLoadSessionId = sessionId;
+  const seq = ++loadSeq;
   feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
@@ -393,7 +410,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       fetchSessionEvents(sessionId, 200),
       fetchPinnedEvents(sessionId),
     ]);
-    if (currentLoadSessionId !== sessionId) return;
+    if (seq !== loadSeq || currentLoadSessionId !== sessionId) return;
 
     // Deduplicate: DB may contain duplicate rows from re-bootstraps.
     // Use timestamp + content as a fingerprint since IDs aren't stable.
@@ -448,7 +465,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       update({ searchHighlightEventId: null });
     }
   } catch {
-    if (currentLoadSessionId === sessionId) {
+    if (seq === loadSeq && currentLoadSessionId === sessionId) {
       feedContent.innerHTML =
         '<div class="feed-empty">Failed to load messages</div>';
     }
@@ -578,8 +595,7 @@ function appendMessage(
   }
 
   const type = msgType;
-  const visible = state.feedTypeFilters[type] ?? true;
-  if (!visible) entry.style.display = 'none';
+  if (!isEntryVisible(entry)) entry.style.display = 'none';
 
   if (type === 'tool_use') {
     entry.classList.add('tool-group-start');

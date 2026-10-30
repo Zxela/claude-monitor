@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Install and build frontend
         run: cd web && npm ci && npm run build
@@ -51,6 +51,19 @@ jobs:
 
       - name: Vet
         run: go vet $(go list ./... | grep -v /node_modules/)
+
+  # build-and-test runs Node 24; this holds the documented Node 22 floor.
+  frontend-node-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.22.2'
+
+      - name: Install, build and test frontend
+        run: cd web && npm ci && npm run build && npm test
 
   # Boots the server and checks api/openapi.yaml against it in both directions:
   # responses that violate the spec, and responses carrying fields the spec does

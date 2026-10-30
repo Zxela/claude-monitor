@@ -25,6 +25,8 @@ const (
 	flushInterval = 2 * time.Second
 	maxBatchSize  = 200
 	maxMetaCache  = 500
+	// Events held for retry after PersistBatch fails.
+	maxRetainedEvents = 10 * maxBatchSize
 )
 
 // BroadcastFunc is called for each processed event. It receives the event,
@@ -53,9 +55,13 @@ type Pipeline struct {
 	linkMu             sync.Mutex
 	pendingParentLinks map[string]string // childSessionID → parentUUID (not yet in session store)
 
-	bufMu  sync.Mutex
-	buffer []store.EventInsert
-	dirty  map[string]bool // sessions changed by metadata lines, which add nothing to buffer
+	// flushMu serializes whole flushes so a retried batch can't commit after a
+	// newer one for the same message (upserts are last-write-wins).
+	flushMu  sync.Mutex
+	bufMu    sync.Mutex
+	buffer   []store.EventInsert
+	retained int             // leading buffer events kept from a failed persist
+	dirty    map[string]bool // sessions changed by metadata lines, which add nothing to buffer
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -198,6 +204,16 @@ func (p *Pipeline) Process(ev watcher.Event) {
 			// Recompute error_count deterministically from events so the badge
 			// matches the feed and cannot accumulate across re-bootstraps.
 			errCount, errCountErr := p.db.CountSessionErrors(ev.SessionID)
+			// Same for event/message counts: seed the row keys so replayed lines
+			// are not counted again on top of the restored totals.
+			rowKeys, evCount, turnCount, rowErr := p.db.LoadRowKeys(ev.SessionID)
+			if rowErr == nil {
+				for id := range ids {
+					if strings.HasPrefix(id, "err:") {
+						rowKeys[id] = struct{}{}
+					}
+				}
+			}
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
 				s.SetDedupState(ids, costs)
 				s.TotalCost = tc
@@ -228,6 +244,11 @@ func (p *Pipeline) Process(ev watcher.Event) {
 				}
 				if errCountErr == nil {
 					s.ErrorCount = errCount
+				}
+				if rowErr == nil {
+					s.SetSeenRows(rowKeys)
+					s.EventCount = evCount
+					s.MessageCount = turnCount
 				}
 			})
 		}
@@ -286,8 +307,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		SessionID:   ev.SessionID,
 		Event:       event,
 		FullContent: fullContent,
+		Thinking:    event.ThinkingContent,
 	})
-	needFlush := len(p.buffer) >= maxBatchSize
+	needFlush := len(p.buffer)-p.retained >= maxBatchSize
 	p.bufMu.Unlock()
 
 	if needFlush {
@@ -297,6 +319,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 
 // flush persists buffered events and updates session aggregates.
 func (p *Pipeline) flush() {
+	p.flushMu.Lock()
+	defer p.flushMu.Unlock()
+
 	p.bufMu.Lock()
 	if len(p.buffer) == 0 && len(p.dirty) == 0 {
 		p.bufMu.Unlock()
@@ -304,14 +329,24 @@ func (p *Pipeline) flush() {
 	}
 	batch := p.buffer
 	p.buffer = nil
+	p.retained = 0
 	dirty := p.dirty
 	p.dirty = make(map[string]bool)
 	p.bufMu.Unlock()
 
-	// Persist events
+	// Persist events. On failure put the batch back for the next flush; past
+	// maxRetainedEvents give up so a dead database can't grow memory forever.
 	if len(batch) > 0 {
 		if err := p.db.PersistBatch(&store.EventBatch{Events: batch}); err != nil {
-			log.Printf("batch persist error: %v", err)
+			p.bufMu.Lock()
+			if len(batch)+len(p.buffer) <= maxRetainedEvents {
+				p.buffer = append(batch, p.buffer...)
+				p.retained = len(batch)
+				log.Printf("batch persist error, will retry %d events: %v", len(batch), err)
+			} else {
+				log.Printf("batch persist error, dropping %d events (retry buffer full): %v", len(batch), err)
+			}
+			p.bufMu.Unlock()
 		}
 	}
 
@@ -728,23 +763,15 @@ func isHarnessInjectedContent(text string) bool {
 }
 
 func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
-	// Error tracking. Dedup on the stable event identity (message_id, else the
-	// per-line uuid) so a re-emitted error line cannot be counted twice and an
-	// empty-message_id error is still deduped on restart/replay.
-	if msg.IsError {
-		errIdentity := msg.MessageID
-		if errIdentity == "" {
-			errIdentity = msg.UUID
-		}
-		if errIdentity != "" {
-			errKey := "err:" + errIdentity
-			if !s.HasSeenMessageID(errKey) {
-				s.MarkMessageIDSeen(errKey)
-				s.ErrorCount++
-			}
-		} else {
-			s.ErrorCount++
-		}
+	key := msg.MessageID
+	if key == "" {
+		key = msg.UUID
+	}
+
+	// Error tracking, deduped on the stable event identity so a re-emitted or
+	// replayed error line is counted once.
+	if msg.IsError && (key == "" || s.MarkRowSeen("err:"+key)) {
+		s.ErrorCount++
 	}
 
 	// Cost/token dedup
@@ -764,20 +791,14 @@ func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
 		})
 	}
 
-	// Message count (conversation turns only)
-	if msg.IsConversationTurn() {
-		if msg.MessageID != "" {
-			if !s.HasSeenMessageID(msg.MessageID) {
-				s.MarkMessageIDSeen(msg.MessageID)
-				s.MessageCount++
-			}
-		} else {
+	// One event row per dedup key: streamed chunks of a message share it, and
+	// the startup replay of persisted lines finds it already seen.
+	if key == "" || s.MarkRowSeen(key) {
+		s.EventCount++
+		if msg.IsConversationTurn() {
 			s.MessageCount++
 		}
 	}
-
-	// Event count (all JSONL lines)
-	s.EventCount++
 }
 
 // applyStatusUpdate updates timestamps, handles summary resets, and sets session status.

@@ -1,8 +1,10 @@
 package pipeline
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2048,5 +2050,83 @@ func TestProcess_SessionMetadataOnlyIsFlushed(t *testing.T) {
 	}
 	if row.AITitle != "Later title" {
 		t.Errorf("persisted AITitle = %q, want it flushed without a following event", row.AITitle)
+	}
+}
+
+func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: []byte(
+		`{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
+	db.Close() // every write now fails
+	p.flush()
+
+	p.bufMu.Lock()
+	n := len(p.buffer)
+	p.bufMu.Unlock()
+	if n != 1 {
+		t.Errorf("buffer holds %d events after a failed persist, want 1 kept for retry", n)
+	}
+}
+
+func TestProcess_RetainedEventsDontTriggerFlush(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+
+	line := func(i int) []byte {
+		return []byte(fmt.Sprintf(`{"type":"user","uuid":"u%d","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`, i))
+	}
+	for i := 0; i < maxBatchSize-1; i++ {
+		p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(i)})
+	}
+	db.Close()
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(maxBatchSize)}) // fills the batch; flush fails
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(maxBatchSize + 1)})
+
+	if n := strings.Count(logs.String(), "will retry"); n != 1 {
+		t.Errorf("got %d persist attempts, want 1: retained events must not count toward the next size-triggered flush", n)
+	}
+}
+
+// TestProcess_RestartReplayKeepsCounts replays the same file through a fresh
+// pipeline, as every startup does, and expects the counts not to move.
+func TestProcess_RestartReplayKeepsCounts(t *testing.T) {
+	db := openTestDB(t)
+	lines := [][]byte{
+		[]byte(`{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"go"}}`),
+		[]byte(`{"type":"assistant","uuid":"a1","sessionId":"s","timestamp":"2026-10-01T00:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"thinking","thinking":"hm"}]}}`),
+		[]byte(`{"type":"assistant","uuid":"a2","sessionId":"s","timestamp":"2026-10-01T00:00:02Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"done"}]}}`),
+		[]byte(`{"type":"summary","uuid":"sum1","sessionId":"s","timestamp":"2026-10-01T00:00:03Z","summary":"compacted"}`),
+		[]byte(`{"type":"user","uuid":"u2","sessionId":"s","timestamp":"2026-10-01T00:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","is_error":true,"content":"boom"}]}}`),
+	}
+
+	var want [3]int
+	for run := range 3 {
+		sessions := session.NewStore()
+		p := New(sessions, db, repo.NewResolver(), nil)
+		for _, l := range lines {
+			p.Process(watcher.Event{SessionID: "s", Line: l, Bootstrap: run > 0})
+		}
+		p.Stop()
+
+		sess, _ := sessions.Get("s")
+		got := [3]int{sess.EventCount, sess.MessageCount, sess.ErrorCount}
+		if run == 0 {
+			want = got
+			if got != [3]int{4, 3, 1} {
+				t.Fatalf("first pass counts = %v, want [4 3 1] (events, messages, errors)", got)
+			}
+			continue
+		}
+		if got != want {
+			t.Errorf("after restart %d counts = %v, want %v", run, got, want)
+		}
 	}
 }

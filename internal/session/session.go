@@ -56,6 +56,7 @@ type Session struct {
 	seenMessageIDs      map[string]bool         `json:"-"`      // tracks message IDs to deduplicate streaming chunks
 	seenMessageCosts    map[string]MessageCosts `json:"-"`      // tracks per-message cost/tokens for dedup
 	seenMessageOrder    []string                `json:"-"`      // insertion order for LRU eviction
+	seenRows            map[string]struct{}     `json:"-"`      // dedup keys of event rows already counted; never reset
 	ParentID            string                  `json:"parentId,omitempty"`
 	Children            []string                `json:"children,omitempty"`
 	CWD                 string                  `json:"cwd,omitempty"`
@@ -169,6 +170,25 @@ func (s *Session) ResetMessageIDs() {
 	s.seenMessageOrder = nil
 }
 
+// MarkRowSeen records an event row's dedup key and reports whether it was new.
+// Unlike seenMessageIDs this set is neither evicted nor cleared on summary, so
+// the startup replay of an already-persisted line does not count it again.
+func (s *Session) MarkRowSeen(key string) bool {
+	if _, ok := s.seenRows[key]; ok {
+		return false
+	}
+	if s.seenRows == nil {
+		s.seenRows = make(map[string]struct{})
+	}
+	s.seenRows[key] = struct{}{}
+	return true
+}
+
+// SetSeenRows replaces the row-key set, used when restoring from the database.
+func (s *Session) SetSeenRows(keys map[string]struct{}) {
+	s.seenRows = keys
+}
+
 // SetDedupState bulk-sets the dedup maps, used when restoring state from the database.
 func (s *Session) SetDedupState(ids map[string]bool, costs map[string]MessageCosts) {
 	s.seenMessageIDs = ids
@@ -268,6 +288,7 @@ func (s *Store) All() []*Session {
 		cp.seenMessageIDs = nil   // don't share internal dedup map
 		cp.seenMessageCosts = nil // don't share internal dedup map
 		cp.seenMessageOrder = nil // don't share internal dedup slice
+		cp.seenRows = nil
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
 		if cp.ParentID != "" && cp.Status == "waiting" {
@@ -326,5 +347,6 @@ func (s *Store) Get(id string) (*Session, bool) {
 	cp.seenMessageIDs = nil
 	cp.seenMessageCosts = nil
 	cp.seenMessageOrder = nil
+	cp.seenRows = nil
 	return &cp, true
 }

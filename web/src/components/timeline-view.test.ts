@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   buildSpansFrom,
   pickEventAt,
@@ -117,5 +117,45 @@ describe('timeline pickEventAt (hover hit-test)', () => {
     // Cursor at x=10 is nearest the first event (x=0).
     const near1 = pickEventAt(spans, geom, 10, 150);
     expect(near1?.contentPreview).toBe('first');
+  });
+});
+
+describe('timeline loading', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('loads the newly selected session when the selection changes mid-load', async () => {
+    vi.resetModules();
+    const releases = new Map<string, () => void>();
+    const fetchMock = vi.fn((url: string) => {
+      const sid = url.split('/')[3];
+      return new Promise((resolve) => {
+        releases.set(sid, () =>
+          resolve({
+            json: async () => ({
+              events: [ev({ tsMs: T0, contentPreview: sid })],
+            }),
+          }),
+        );
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { update } = await import('../state');
+    const { render } = await import('./timeline-view');
+    const mount = document.createElement('div');
+    render(mount);
+
+    update({ selectedSessionId: 's1', view: 'timeline' });
+    update({ selectedSessionId: 's2' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    releases.get('s2')!();
+    await vi.waitFor(() =>
+      expect(mount.querySelector('.timeline-container')).not.toBeNull(),
+    );
+    const shown = mount.firstElementChild;
+
+    releases.get('s1')!();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mount.firstElementChild).toBe(shown);
   });
 });

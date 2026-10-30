@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -368,6 +370,36 @@ Examples:
 		*bind = "0.0.0.0"
 	}
 
+	// Claim the port before touching the database. A second daemon (two Claude
+	// Code sessions starting at once, each running the SessionStart hook) would
+	// otherwise migrate and replay all history into the shared DB, then fail to
+	// bind and exit 0.
+	addr := fmt.Sprintf("%s:%d", *bind, *port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("cannot listen on %s (is claude-monitor already running?): %v", addr, err)
+	}
+	// Serve right away so clients get a fast 503 during startup (migrations,
+	// history replay) instead of a connection that hangs until it finishes.
+	var appHandler atomic.Value // http.Handler, stored once startup completes
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h, _ := appHandler.Load().(http.Handler)
+			if h == nil {
+				http.Error(w, "starting", http.StatusServiceUnavailable)
+				return
+			}
+			h.ServeHTTP(w, r)
+		}),
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 60 * time.Second,
+		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE
+		// streams need long-lived writes. Per-write deadlines are enforced
+		// by gorilla/websocket writeWait and http.ResponseController.
+	}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
 	// Auto-enable Docker discovery if the socket exists and --docker wasn't explicitly set.
 	if !*dockerEnabled {
 		if _, err := os.Stat(*dockerSocket); err == nil {
@@ -681,23 +713,21 @@ Examples:
 	// --swagger is retained for backward compatibility but has no effect; silence unused var.
 	_ = swaggerEnabled
 
-	addr := fmt.Sprintf("%s:%d", *bind, *port)
-	srv := &http.Server{
-		Addr:        addr,
-		Handler:     loggingMiddleware(hostGuard(allowedHosts, securityHeaders(mux))),
-		ReadTimeout: 15 * time.Second,
-		IdleTimeout: 60 * time.Second,
-		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE
-		// streams need long-lived writes. Per-write deadlines are enforced
-		// by gorilla/websocket writeWait and http.ResponseController.
-	}
+	appHandler.Store(loggingMiddleware(hostGuard(allowedHosts, securityHeaders(mux))))
 
-	// Graceful shutdown on SIGINT / SIGTERM.
+	// Graceful shutdown on SIGINT / SIGTERM; a second signal exits immediately.
+	shutdownDone := make(chan struct{})
 	go func() {
-		quit := make(chan os.Signal, 1)
+		defer close(shutdownDone)
+		quit := make(chan os.Signal, 2)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-quit
-		log.Printf("received signal %s, shutting down", sig)
+		log.Printf("received signal %s, shutting down (signal again to force)", sig)
+		go func() {
+			<-quit
+			log.Println("forced exit")
+			os.Exit(1)
+		}()
 
 		// 1. Cancel context — stops watcher (closes events channel), docker watcher, retention ticker.
 		cancel()
@@ -720,8 +750,12 @@ Examples:
 	}()
 
 	log.Printf("claude-monitor listening on http://%s", addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
 		log.Printf("http server error: %v", err)
+		return
 	}
+	// Serve returns as soon as Shutdown starts; wait for it to drain in-flight
+	// requests before the deferred historyDB.Close runs.
+	<-shutdownDone
 	log.Println("claude-monitor stopped")
 }

@@ -765,3 +765,45 @@ func appendToFile(path, data string) error {
 	}
 	return f.Close()
 }
+
+func TestEmit_BlocksInsteadOfDropping(t *testing.T) {
+	done := make(chan struct{})
+	w := &Watcher{
+		events: make(chan Event, 1),
+		labels: map[string]string{},
+		states: map[string]*fileState{},
+		done:   done,
+	}
+	sent := make(chan struct{})
+	go func() {
+		for i := range 3 {
+			w.emit("/x/projects/p/s.jsonl", []byte{byte('a' + i)})
+		}
+		close(sent)
+	}()
+	for i := range 3 {
+		select {
+		case ev := <-w.events:
+			if ev.Line[0] != byte('a'+i) {
+				t.Fatalf("line %d = %q", i, ev.Line)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("line %d never arrived", i)
+		}
+	}
+	<-sent
+	if n := w.DroppedEvents(); n != 0 {
+		t.Errorf("DroppedEvents = %d, want 0", n)
+	}
+
+	// On shutdown a blocked emit gives up instead of hanging under w.mu.
+	w.events <- Event{}
+	close(done)
+	finished := make(chan struct{})
+	go func() { w.emit("/x/projects/p/s.jsonl", []byte("z")); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("emit blocked after shutdown")
+	}
+}
