@@ -6,7 +6,11 @@ export function escapeHtml(s: string): string {
 }
 
 export function escapeAttr(s: string): string {
-  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 export function formatDurationSecs(secs: number): string {

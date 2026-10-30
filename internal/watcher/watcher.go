@@ -238,8 +238,12 @@ func (w *Watcher) run(ctx context.Context) {
 	w.mu.Lock()
 	w.bootstrapping = true
 	w.scanAll()
-	// After tracking files, read their existing content.
+	// After tracking files, read their existing content. Stop early on
+	// shutdown: this replay can take tens of seconds on a large history.
 	for _, state := range w.states {
+		if ctx.Err() != nil {
+			break
+		}
 		w.readNewLines(state.path)
 	}
 	w.bootstrapping = false

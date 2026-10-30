@@ -603,6 +603,35 @@ func (d *DB) LoadErrorDedup(sessionID string) ([]string, error) {
 	return ids, rows.Err()
 }
 
+// LoadRowKeys returns the dedup key of every persisted event in a session,
+// plus how many distinct event rows and conversation turns those keys cover.
+// These are the counts the live pipeline produces, since it counts a row once.
+func (d *DB) LoadRowKeys(sessionID string) (keys map[string]struct{}, events, turns int, err error) {
+	rows, err := d.rdb.Query(`SELECT COALESCE(NULLIF(message_id,''), uuid, '') AS k,
+		MAX(type IN ('assistant','user','human'))
+		FROM events WHERE session_id = ? GROUP BY k`, sessionID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer rows.Close()
+	keys = make(map[string]struct{})
+	for rows.Next() {
+		var k string
+		var isTurn bool
+		if err := rows.Scan(&k, &isTurn); err != nil {
+			return nil, 0, 0, err
+		}
+		events++
+		if isTurn {
+			turns++
+		}
+		if k != "" {
+			keys[k] = struct{}{}
+		}
+	}
+	return keys, events, turns, rows.Err()
+}
+
 // CountSessionErrors returns the number of distinct error events for a session,
 // deduped by the stable event identity (message_id, else uuid) so re-emitted
 // error lines are counted once. This is the deterministic source of truth for
@@ -1461,8 +1490,11 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 	}
 	defer eventStmt.Close()
 
+	// Startup re-ingest replays every line, so only a still-hot row may take new
+	// content; warm and cold rows keep what retention left them.
 	contentStmt, err := tx.Prepare(`INSERT INTO event_content (event_id, tier, content) VALUES (?, 'hot', ?)
-		ON CONFLICT(event_id) DO UPDATE SET content=excluded.content`)
+		ON CONFLICT(event_id) DO UPDATE SET content=excluded.content
+		WHERE event_content.tier = 'hot'`)
 	if err != nil {
 		return fmt.Errorf("prepare content stmt: %w", err)
 	}
@@ -1932,6 +1964,13 @@ func decompressContent(data []byte) (string, error) {
 func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -hotDays).Format(time.RFC3339)
 
+	// Earlier versions let re-ingest write plaintext back into warm rows next to
+	// their gzip copy. Drop that duplicate.
+	if _, err := d.db.Exec(`UPDATE event_content SET content = NULL
+		WHERE tier = 'warm' AND content IS NOT NULL AND compressed IS NOT NULL`); err != nil {
+		return 0, err
+	}
+
 	rows, err := d.rdb.Query(`SELECT ec.event_id, ec.content FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE ec.tier = 'hot' AND ec.content IS NOT NULL AND e.timestamp < ?`, cutoff)
@@ -1997,10 +2036,12 @@ func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	return int64(len(entries)), nil
 }
 
-// CompactWarmToCold deletes event_content older than warmDays.
+// CompactWarmToCold drops event_content older than warmDays, leaving a 'cold'
+// row with no content so a later re-ingest cannot bring it back as hot.
 func (d *DB) CompactWarmToCold(warmDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -warmDays).Format(time.RFC3339)
-	result, err := d.db.Exec(`DELETE FROM event_content WHERE event_id IN (
+	result, err := d.db.Exec(`UPDATE event_content SET tier = 'cold', content = NULL, compressed = NULL
+		WHERE tier != 'cold' AND event_id IN (
 		SELECT ec.event_id FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE e.timestamp < ?)`, cutoff)

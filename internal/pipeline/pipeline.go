@@ -202,6 +202,16 @@ func (p *Pipeline) Process(ev watcher.Event) {
 			// Recompute error_count deterministically from events so the badge
 			// matches the feed and cannot accumulate across re-bootstraps.
 			errCount, errCountErr := p.db.CountSessionErrors(ev.SessionID)
+			// Same for event/message counts: seed the row keys so replayed lines
+			// are not counted again on top of the restored totals.
+			rowKeys, evCount, turnCount, rowErr := p.db.LoadRowKeys(ev.SessionID)
+			if rowErr == nil {
+				for id := range ids {
+					if strings.HasPrefix(id, "err:") {
+						rowKeys[id] = struct{}{}
+					}
+				}
+			}
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
 				s.SetDedupState(ids, costs)
 				s.TotalCost = tc
@@ -230,6 +240,11 @@ func (p *Pipeline) Process(ev watcher.Event) {
 				}
 				if errCountErr == nil {
 					s.ErrorCount = errCount
+				}
+				if rowErr == nil {
+					s.SetSeenRows(rowKeys)
+					s.EventCount = evCount
+					s.MessageCount = turnCount
 				}
 			})
 		}
@@ -703,23 +718,15 @@ func isHarnessInjectedContent(text string) bool {
 }
 
 func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
-	// Error tracking. Dedup on the stable event identity (message_id, else the
-	// per-line uuid) so a re-emitted error line cannot be counted twice and an
-	// empty-message_id error is still deduped on restart/replay.
-	if msg.IsError {
-		errIdentity := msg.MessageID
-		if errIdentity == "" {
-			errIdentity = msg.UUID
-		}
-		if errIdentity != "" {
-			errKey := "err:" + errIdentity
-			if !s.HasSeenMessageID(errKey) {
-				s.MarkMessageIDSeen(errKey)
-				s.ErrorCount++
-			}
-		} else {
-			s.ErrorCount++
-		}
+	key := msg.MessageID
+	if key == "" {
+		key = msg.UUID
+	}
+
+	// Error tracking, deduped on the stable event identity so a re-emitted or
+	// replayed error line is counted once.
+	if msg.IsError && (key == "" || s.MarkRowSeen("err:"+key)) {
+		s.ErrorCount++
 	}
 
 	// Cost/token dedup
@@ -739,20 +746,14 @@ func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
 		})
 	}
 
-	// Message count (conversation turns only)
-	if msg.IsConversationTurn() {
-		if msg.MessageID != "" {
-			if !s.HasSeenMessageID(msg.MessageID) {
-				s.MarkMessageIDSeen(msg.MessageID)
-				s.MessageCount++
-			}
-		} else {
+	// One event row per dedup key: streamed chunks of a message share it, and
+	// the startup replay of persisted lines finds it already seen.
+	if key == "" || s.MarkRowSeen(key) {
+		s.EventCount++
+		if msg.IsConversationTurn() {
 			s.MessageCount++
 		}
 	}
-
-	// Event count (all JSONL lines)
-	s.EventCount++
 }
 
 // applyStatusUpdate updates timestamps, handles summary resets, and sets session status.

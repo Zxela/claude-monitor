@@ -21,6 +21,8 @@ let headerEl: HTMLElement | null = null;
 let scrollLockBtn: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
+// Bumped per load so a superseded request for the same session can't append.
+let loadSeq = 0;
 const scrollPositions = new Map<string, number>();
 const MAX_ENTRIES = 500;
 
@@ -90,6 +92,8 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
     if (state.selectedSessionId) {
       renderFeedPanel();
+      // renderFeedPanel emptied the feed, so the load guard must not skip.
+      currentLoadSessionId = null;
       loadRecentMessages(state.selectedSessionId);
     } else {
       // Back to multi-session mode
@@ -166,7 +170,9 @@ function renderFeedPanel(): void {
   // Feed content area
   feedContent = document.createElement('div');
   feedContent.className = 'feed-content';
-  feedContent.setAttribute('aria-live', 'polite');
+  // Not a live region: a busy agent emits several events a second, and
+  // announcing each one drowns out everything else.
+  feedContent.setAttribute('role', 'region');
   const sess = state.selectedSessionId
     ? state.sessions.get(state.selectedSessionId)
     : null;
@@ -381,6 +387,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
   currentLoadSessionId = sessionId;
+  const seq = ++loadSeq;
   feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
 
   try {
@@ -388,7 +395,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       fetchSessionEvents(sessionId, 200),
       fetchPinnedEvents(sessionId),
     ]);
-    if (currentLoadSessionId !== sessionId) return;
+    if (seq !== loadSeq || currentLoadSessionId !== sessionId) return;
 
     // Deduplicate: DB may contain duplicate rows from re-bootstraps.
     // Use timestamp + content as a fingerprint since IDs aren't stable.
@@ -443,7 +450,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       update({ searchHighlightEventId: null });
     }
   } catch {
-    if (currentLoadSessionId === sessionId) {
+    if (seq === loadSeq && currentLoadSessionId === sessionId) {
       feedContent.innerHTML =
         '<div class="feed-empty">Failed to load messages</div>';
     }

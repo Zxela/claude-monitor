@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -37,8 +40,21 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Scratch HOME: otherwise the server migrates and writes to the developer's
+	// real ~/.claude-monitor/history.db and replays all of ~/.claude first.
+	home, err := os.MkdirTemp("", "claude-monitor-e2e-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "scratch home: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(home+"/.claude/projects", 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "scratch home: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Start the server.
 	srv := exec.Command(testBinary, "--port", fmt.Sprintf("%d", testPort))
+	srv.Env = append(os.Environ(), "HOME="+home, "CLAUDE_MONITOR_NO_UPDATE_CHECK=1")
 	srv.Stderr = os.Stderr
 	if err := srv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start server: %v\n", err)
@@ -71,6 +87,7 @@ func TestMain(m *testing.M) {
 	// Kill the server and clean up.
 	_ = srv.Process.Kill()
 	os.Remove(testBinary)
+	_ = os.RemoveAll(home)
 
 	os.Exit(code)
 }
@@ -667,5 +684,108 @@ func TestRepoStatsRequiresEncodedID(t *testing.T) {
 	if _, ok := agg["totalCost"]; !ok {
 		t.Errorf("encoded id %q: response missing totalCost, got keys %v",
 			url.PathEscape(id), agg)
+	}
+}
+
+// TestSecondInstanceExitsBeforeTouchingDB: the shared test server holds
+// testPort, so another instance must fail fast without creating a database.
+func TestSecondInstanceExitsBeforeTouchingDB(t *testing.T) {
+	home := t.TempDir()
+	cmd := exec.Command(testBinary, "--port", fmt.Sprintf("%d", testPort))
+	cmd.Env = append(os.Environ(), "HOME="+home, "CLAUDE_MONITOR_NO_UPDATE_CHECK=1")
+	done := make(chan error, 1)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("second instance exited 0, want a failure exit")
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("second instance did not exit")
+	}
+	if _, err := os.Stat(home + "/.claude-monitor"); !os.IsNotExist(err) {
+		t.Errorf("second instance created a data directory (stat err: %v)", err)
+	}
+}
+
+// TestShutdownDrainsInFlightRequest: SIGTERM while a request body is still
+// arriving must not exit until that request has been answered.
+func TestShutdownDrainsInFlightRequest(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+
+	cmd := exec.Command(testBinary, "--port", fmt.Sprintf("%d", port))
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "CLAUDE_MONITOR_NO_UPDATE_CHECK=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill() }()
+
+	addr := fmt.Sprintf("localhost:%d", port)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		resp, err := http.Get("http://" + addr + "/health")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server did not become ready")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	body := `{"value":"300"}`
+	fmt.Fprintf(conn, "PUT /api/settings/preview_max_length HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
+		addr, len(body), body[:5])
+	// Let the handler start blocking on the body before the signal arrives.
+	time.Sleep(300 * time.Millisecond)
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("process exited with a request in flight: %v", err)
+	case <-time.After(time.Second):
+	}
+
+	if _, err := io.WriteString(conn, body[5:]); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("in-flight request got no response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("in-flight request status = %d, want 200", resp.StatusCode)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("process exited with %v, want clean exit", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("process did not exit after the request finished")
 	}
 }
