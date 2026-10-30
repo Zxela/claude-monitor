@@ -873,6 +873,7 @@ func TestRecountSessionEvents(t *testing.T) {
 	rollDownTo(t, db, "recount_session_events")
 	for _, q := range []string{
 		`INSERT INTO sessions (id, event_count, message_count) VALUES ('s', 99, 42)`,
+		`INSERT INTO sessions (id, event_count, message_count) VALUES ('empty', 7, 5)`,
 		`INSERT INTO events (session_id, uuid, message_id, type, timestamp) VALUES ('s', 'a1', 'm1', 'assistant', '2026-10-01T00:00:00Z')`,
 		`INSERT INTO events (session_id, uuid, type, timestamp) VALUES ('s', 'u1', 'user', '2026-10-01T00:00:01Z')`,
 		`INSERT INTO events (session_id, uuid, type, timestamp) VALUES ('s', 'x1', 'system', '2026-10-01T00:00:02Z')`,
@@ -890,5 +891,11 @@ func TestRecountSessionEvents(t *testing.T) {
 	}
 	if ev != 3 || msg != 2 {
 		t.Errorf("counts = %d events, %d messages; want 3, 2", ev, msg)
+	}
+	if err := db.QueryRow(`SELECT event_count, message_count FROM sessions WHERE id='empty'`).Scan(&ev, &msg); err != nil {
+		t.Fatal(err)
+	}
+	if ev != 0 || msg != 0 {
+		t.Errorf("empty session counts = %d events, %d messages; want 0, 0", ev, msg)
 	}
 }

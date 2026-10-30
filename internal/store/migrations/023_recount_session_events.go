@@ -24,6 +24,13 @@ func init() {
 					GROUP BY session_id
 				) AS c
 				WHERE sessions.id = c.sid`)
+			if err != nil {
+				return err
+			}
+			// Migration 022 can leave a session with no events at all.
+			_, err = tx.Exec(`
+				UPDATE sessions SET event_count = 0, message_count = 0
+				WHERE NOT EXISTS (SELECT 1 FROM events WHERE events.session_id = sessions.id)`)
 			return err
 		},
 		Down: func(tx *sql.Tx) error {
