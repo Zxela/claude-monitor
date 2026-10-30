@@ -310,6 +310,8 @@ func main() {
 	broadcast := flag.Bool("broadcast", false, "listen on all interfaces (shorthand for --bind 0.0.0.0)")
 	var extraPaths repeatable
 	flag.Var(&extraPaths, "watch", "additional directory to watch (repeatable)")
+	var allowedHosts repeatable
+	flag.Var(&allowedHosts, "allowed-host", "extra hostname the UI may be reached by, besides localhost and IP addresses (repeatable)")
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	swaggerEnabled := flag.Bool("swagger", false, "deprecated: API docs are always served at /api (flag retained for backward compatibility, no effect)")
@@ -680,7 +682,7 @@ Examples:
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	srv := &http.Server{
 		Addr:        addr,
-		Handler:     loggingMiddleware(mux),
+		Handler:     loggingMiddleware(hostGuard(allowedHosts, mux)),
 		ReadTimeout: 15 * time.Second,
 		IdleTimeout: 60 * time.Second,
 		// WriteTimeout intentionally omitted: WebSocket (54s ping) and SSE

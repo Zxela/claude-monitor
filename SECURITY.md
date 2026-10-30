@@ -13,9 +13,13 @@ claude-monitor is a **local-only** development tool. It is designed to run on
   default, which limits access to the local machine.
 - **`--broadcast` flag (0.0.0.0).** When enabled, the server binds to all
   interfaces. Anyone on the same network can connect and view session data.
-- **WebSocket origin check.** Connections are accepted only from `same-origin`
-  and `localhost` origins, which mitigates drive-by browser attacks but is not
-  a substitute for real authentication.
+- **Host check.** Requests are refused (403) unless the `Host` header is
+  `localhost`, an IP address, or a name passed with `--allowed-host`. This
+  blocks DNS-rebinding attacks, where a website re-points its own hostname at
+  127.0.0.1 to read the API from the victim's browser.
+- **WebSocket origin check.** Connections are accepted only from the same
+  origin as the `Host` header. Neither check is a substitute for real
+  authentication.
 
 ## Recommendations
 
