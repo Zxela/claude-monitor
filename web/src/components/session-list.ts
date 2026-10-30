@@ -239,6 +239,7 @@ function renderList(): void {
   const focusedId = listEl.contains(activeEl)
     ? activeEl?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId
     : undefined;
+  const focusedErr = !!activeEl?.classList.contains('session-error-count');
   listEl.innerHTML = '';
 
   const filter = state.repoFilter;
@@ -331,7 +332,7 @@ function renderList(): void {
       listEl.appendChild(empty);
     }
     listEl.scrollTop = scrollTop;
-    restoreFocus(focusedId);
+    restoreFocus(focusedId, focusedErr);
     return;
   }
 
@@ -438,7 +439,7 @@ function renderList(): void {
   }
 
   listEl.scrollTop = scrollTop;
-  restoreFocus(focusedId);
+  restoreFocus(focusedId, focusedErr);
 
   // Scroll focused element into view
   if (state.focusedSessionId) {
@@ -453,9 +454,13 @@ function renderList(): void {
   }
 }
 
-function restoreFocus(sessionId: string | undefined): void {
+function restoreFocus(sessionId: string | undefined, errCount: boolean): void {
   if (!sessionId || !listEl) return;
-  listEl
-    .querySelector<HTMLElement>(`[data-session-id="${CSS.escape(sessionId)}"]`)
-    ?.focus({ preventScroll: true });
+  const card = listEl.querySelector<HTMLElement>(
+    `[data-session-id="${CSS.escape(sessionId)}"]`,
+  );
+  const target =
+    (errCount && card?.querySelector<HTMLElement>('.session-error-count')) ||
+    card;
+  target?.focus({ preventScroll: true });
 }
