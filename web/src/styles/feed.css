@@ -32,7 +32,8 @@
   overflow: hidden;
 }
 
-.search-result:hover {
+.search-result:hover,
+.search-result[aria-selected="true"] {
   background: var(--bg-hover);
 }
 
