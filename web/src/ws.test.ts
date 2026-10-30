@@ -71,7 +71,10 @@ describe('ws connect', () => {
   it('marks connected and reconciles every session group on open', async () => {
     const groups = emptyGroups();
     groups.active = [session('a')];
+    groups.lastHour = [session('h')];
     groups.today = [session('t')];
+    groups.yesterday = [session('y')];
+    groups.thisWeek = [session('w')];
     groups.older = [session('o')];
     fetchGroupedSessions.mockResolvedValue(groups);
     const { connect, state } = await load();
@@ -81,7 +84,14 @@ describe('ws connect', () => {
     expect(state.connected).toBe(true);
     await flush();
 
-    expect([...state.sessions.keys()].sort()).toEqual(['a', 'o', 't']);
+    expect([...state.sessions.keys()].sort()).toEqual([
+      'a',
+      'h',
+      'o',
+      't',
+      'w',
+      'y',
+    ]);
     expect(state.grouped).toBe(groups);
   });
 

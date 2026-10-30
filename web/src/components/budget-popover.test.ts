@@ -18,6 +18,8 @@ const flush = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };
 
+let dismissPanel: (() => void) | undefined;
+
 async function setup() {
   vi.resetModules();
   document.body.innerHTML = `
@@ -28,7 +30,8 @@ async function setup() {
     </div>
     <div id="banner-mount"></div>`;
   const st = await import('../state');
-  const { render } = await import('./budget-popover');
+  const { render, dismiss } = await import('./budget-popover');
+  dismissPanel = dismiss;
   const gear = document.querySelector<HTMLElement>('.gear')!;
   const costEl = document.querySelector<HTMLElement>('.cost')!;
   const rateStat = document.querySelector<HTMLElement>('[data-stat="rate"]')!;
@@ -46,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  dismissPanel?.();
   vi.useRealTimers();
 });
 
