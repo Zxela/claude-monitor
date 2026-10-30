@@ -3309,3 +3309,41 @@ func TestTrendBySession_RollsUpSubagents(t *testing.T) {
 		t.Errorf("standalone session root-2 missing from BySession")
 	}
 }
+
+// TestPersistBatch_UpsertContentLandsOnOwnRow covers the case where an upsert
+// of an existing row is followed by content: LastInsertId named the previously
+// inserted row, so the content overwrote an unrelated event.
+func TestPersistBatch_UpsertContentLandsOnOwnRow(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ts := time.Now()
+	persist := func(uuid, full string) {
+		t.Helper()
+		if err := db.PersistBatch(&EventBatch{Events: []EventInsert{{
+			SessionID:   "s1",
+			Event:       &parser.Event{UUID: uuid, Type: "user", ContentText: full[:4], Timestamp: ts},
+			FullContent: full,
+		}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	persist("", "queued prompt one")
+	persist("u2", "the real user message")
+	persist("", "queued prompt two") // empty key: upserts the first row
+
+	var got string
+	if err := db.db.QueryRow(`SELECT ec.content FROM event_content ec JOIN events e ON e.id = ec.event_id
+		WHERE e.uuid = 'u2'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "the real user message" {
+		t.Errorf("u2 content = %q, overwritten by another row's upsert", got)
+	}
+	if err := db.db.QueryRow(`SELECT ec.content FROM event_content ec JOIN events e ON e.id = ec.event_id
+		WHERE e.uuid = ''`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "queued prompt two" {
+		t.Errorf("q content = %q, want the upserted value", got)
+	}
+}

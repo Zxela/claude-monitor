@@ -4,6 +4,8 @@
 package pipeline
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"os"
@@ -133,6 +135,13 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	}
 	if event.IsInternal() {
 		return
+	}
+	// Lines with neither uuid nor message.id (queue-operation, custom-title,
+	// agent-name, ...) would all share the empty dedup key and overwrite one
+	// row per session. Key them by content so a re-read upserts the same row.
+	if event.UUID == "" && event.MessageID == "" {
+		sum := sha256.Sum256(ev.Line)
+		event.UUID = "line-" + hex.EncodeToString(sum[:16])
 	}
 
 	// Stage 2: Resolve Repo

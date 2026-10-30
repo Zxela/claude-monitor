@@ -1936,3 +1936,29 @@ func TestProcess_IgnoresInternalLines(t *testing.T) {
 		t.Errorf("broadcasts = %d, want 1", broadcasts)
 	}
 }
+
+func TestProcess_KeylessLinesGetOwnRows(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	lines := [][]byte{
+		[]byte(`{"type":"queue-operation","operation":"enqueue","content":"first","sessionId":"s","timestamp":"2026-10-01T00:00:00Z"}`),
+		[]byte(`{"type":"queue-operation","operation":"enqueue","content":"second","sessionId":"s","timestamp":"2026-10-01T00:00:01Z"}`),
+	}
+	// Process each twice: a re-read must upsert, not duplicate.
+	for range 2 {
+		for _, l := range lines {
+			p.Process(watcher.Event{SessionID: "s", Line: l, Bootstrap: true})
+		}
+		p.flush()
+	}
+
+	events, err := db.ListEvents("s", 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("got %d rows, want 2 (one per distinct keyless line)", len(events))
+	}
+}

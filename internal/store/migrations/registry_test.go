@@ -832,3 +832,35 @@ func TestClaude5xPricing_SeedsAndRecomputes(t *testing.T) {
 		t.Errorf("custom sonnet-5-5 row should survive rollback, found %d", n)
 	}
 }
+
+func TestDropCollapsedKeylessEvents(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "drop_collapsed_keyless_events")
+
+	for _, q := range []string{
+		`INSERT INTO events (id, session_id, uuid, type, content_preview, timestamp) VALUES (1, 's', '', 'mode', 'collapsed', '2026-10-01T00:00:00Z')`,
+		`INSERT INTO events (id, session_id, uuid, type, content_preview, timestamp) VALUES (2, 's', 'u2', 'user', 'kept', '2026-10-01T00:00:01Z')`,
+		`INSERT INTO event_content (event_id, tier, content) VALUES (1, 'hot', 'x')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("events = %d (err %v), want 1", n, err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM event_content`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("event_content = %d (err %v), want 0", n, err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'kept'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("fts match for kept row = %d (err %v), want 1", n, err)
+	}
+}
