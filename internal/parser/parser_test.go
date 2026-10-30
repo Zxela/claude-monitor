@@ -507,6 +507,11 @@ func TestComputeCost_ByModel(t *testing.T) {
 	}{
 		{"fable", "claude-fable-5", 10.0 + 50.0 + 1.0 + 12.50},
 		{"fable 1m suffix", "claude-fable-5[1m]", 10.0 + 50.0 + 1.0 + 12.50},
+		{"fable 5.1", "claude-fable-5-1", 10.0 + 50.0 + 0.25 + 12.50},
+		{"opus 5.5", "claude-opus-5-5", 4.0 + 20.0 + 0.20 + 5.0},
+		{"opus 5", "claude-opus-5", 5.0 + 25.0 + 0.50 + 6.25},
+		{"sonnet 5.5", "claude-sonnet-5-5", 2.0 + 10.0 + 0.20 + 2.50},
+		{"haiku 5.5", "claude-haiku-5-5", 0.10 + 0.50 + 0.01 + 0.125},
 		{"opus", "claude-opus-4-6", 5.0 + 25.0 + 0.50 + 6.25},
 		{"opus 4.8", "claude-opus-4-8", 5.0 + 25.0 + 0.50 + 6.25},
 		{"opus 4.8 versioned", "claude-opus-4-8-20260101", 5.0 + 25.0 + 0.50 + 6.25},

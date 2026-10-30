@@ -756,3 +756,79 @@ func TestFixOpus48Pricing_PreservesCustomPricing(t *testing.T) {
 		t.Errorf("event cost_usd = %v, want 12.0 untouched (custom pricing)", evCost)
 	}
 }
+
+// TestClaude5xPricing_SeedsAndRecomputes verifies migration 021 seeds the 5.x
+// rows, reprices events that fell back to the default rate (longest prefix
+// wins), re-syncs session totals, and leaves a pre-existing custom row and its
+// events alone.
+func TestClaude5xPricing_SeedsAndRecomputes(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "claude_5x_pricing")
+
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO model_pricing (model_prefix, input_per_mtok, output_per_mtok,
+		cache_read_per_mtok, cache_create_per_mtok) VALUES ('claude-sonnet-5-5', 1.0, 1.0, 1.0, 1.0)`)
+	mustExec(`INSERT INTO sessions (id, model, total_cost) VALUES ('s-021', 'claude-opus-5-5', 6.0)`)
+	// 1M input tokens each, costed at the Sonnet 4.6 fallback ($3).
+	for _, ev := range []struct{ uuid, msg, model string }{
+		{"u1", "m1", "claude-opus-5-5[1m]"},
+		{"u2", "m2", "claude-opus-5"},
+		{"u3", "m3", "claude-sonnet-5-5"},
+	} {
+		mustExec(`INSERT INTO events (session_id, uuid, message_id, model, cost_usd, input_tokens, timestamp)
+			VALUES ('s-021', ?, ?, ?, 3.0, 1000000, '2026-10-01T00:00:00Z')`, ev.uuid, ev.msg, ev.model)
+	}
+
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+
+	for msg, want := range map[string]float64{"m1": 4.0, "m2": 5.0, "m3": 3.0} {
+		var got float64
+		if err := db.QueryRow(`SELECT cost_usd FROM events WHERE message_id=?`, msg).Scan(&got); err != nil {
+			t.Fatalf("event %s: %v", msg, err)
+		}
+		if got != want {
+			t.Errorf("event %s cost_usd = %v, want %v", msg, got, want)
+		}
+	}
+
+	var sessCost float64
+	if err := db.QueryRow(`SELECT total_cost FROM sessions WHERE id='s-021'`).Scan(&sessCost); err != nil {
+		t.Fatalf("session row: %v", err)
+	}
+	if sessCost != 12.0 {
+		t.Errorf("session total_cost = %v, want 12.0", sessCost)
+	}
+
+	var in float64
+	if err := db.QueryRow(`SELECT input_per_mtok FROM model_pricing WHERE model_prefix='claude-sonnet-5-5'`).Scan(&in); err != nil {
+		t.Fatalf("sonnet-5-5 row: %v", err)
+	}
+	if in != 1.0 {
+		t.Errorf("custom sonnet-5-5 input_per_mtok = %v, want 1.0 untouched", in)
+	}
+
+	rollDownTo(t, db, "claude_5x_pricing")
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix IN ('claude-opus-5-5','claude-opus-5')`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("seeded rows should be removed on rollback, found %d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM model_pricing WHERE model_prefix='claude-sonnet-5-5'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("custom sonnet-5-5 row should survive rollback, found %d", n)
+	}
+}
