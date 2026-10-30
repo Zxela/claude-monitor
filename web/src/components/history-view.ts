@@ -11,8 +11,7 @@ import {
 import '../styles/views.css';
 
 function sessionIdentifier(s: Session): string {
-  if (s.sessionName) return s.sessionName;
-  return s.id.slice(0, 8);
+  return s.sessionName || s.aiTitle || s.id.slice(0, 8);
 }
 
 function projectLabel(s: Session): string {

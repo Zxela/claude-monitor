@@ -9,6 +9,7 @@ import { escapeHtml, sessionDisplayName } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
 import { open as openReplay } from './replay';
+import { renderPrLinks } from './pr-links';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -18,11 +19,16 @@ let lastToolUseId: string | null = null;
 let currentHighlightGroup: string | null = null;
 let filterBar: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
+let renderedHeaderKey = '';
 let scrollLockBtn: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
-// Bumped per load so a superseded request for the same session can't append.
+// Bumped by every backfill so a slower, older response is discarded.
 let loadSeq = 0;
+type FeedItem = { msg: Event; opts: { showSessionId?: string } };
+// Live events shown since the pending backfill began. The backfill replaces
+// the feed, so these are merged back in rather than lost or duplicated.
+let liveSinceBackfill: FeedItem[] | null = null;
 const scrollPositions = new Map<string, number>();
 const MAX_ENTRIES = 500;
 
@@ -52,14 +58,37 @@ export function render(mount: HTMLElement): void {
 
   // Start with the feed panel showing (multi-session mode)
   renderFeedPanel();
+  liveSinceBackfill = [];
 
   subscribe(onStateChange);
   onMessage(onWsMessage);
 }
 
+let everConnected = false;
+
 function onStateChange(_state: AppState, changed: Set<string>): void {
   const sessionChanged = changed.has('selectedSessionId');
   const viewChanged = changed.has('view');
+
+  // Events broadcast while the socket was down never reach this feed; reload
+  // it from the API after a reconnect.
+  if (changed.has('connected') && state.connected) {
+    const reconnected = everConnected;
+    everConnected = true;
+    if (reconnected && state.view === 'list' && feedContent) {
+      if (state.selectedSessionId) {
+        currentLoadSessionId = null;
+        loadRecentMessages(state.selectedSessionId, true);
+      } else {
+        // Wait for the session list refresh that follows the reconnect, so
+        // sessions that became active during the outage are included.
+        loadSeq++;
+        liveSinceBackfill ??= [];
+        multiSessionLoaded = false;
+      }
+      return;
+    }
+  }
 
   // When sessions first load, populate multi-session feed
   if (
@@ -103,6 +132,21 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       loadMultiSessionEvents();
     }
   }
+
+  // Every event updates sessions; rebuild the header only when what it shows
+  // changed, so header buttons keep focus.
+  if (
+    changed.has('sessions') &&
+    state.view === 'list' &&
+    headerKey() !== renderedHeaderKey
+  ) {
+    updateHeader();
+  }
+
+  if (changed.has('feedTypeFilters')) {
+    updateFilterButtons();
+    applyFilters();
+  }
 }
 
 function onWsMessage(event: WsEvent): void {
@@ -134,11 +178,16 @@ function onWsMessage(event: WsEvent): void {
   const sessionName = sessionDisplayName(event.session);
   const opts = state.selectedSessionId ? {} : { showSessionId: sessionName };
   appendMessage(msg as Event, opts);
+  if (liveSinceBackfill) {
+    liveSinceBackfill.push({ msg: msg as Event, opts });
+    if (liveSinceBackfill.length > MAX_ENTRIES) liveSinceBackfill.shift();
+  }
 }
 
 function renderFeedPanel(): void {
   if (!container) return;
   container.innerHTML = '';
+  liveSinceBackfill = null;
 
   // Header
   headerEl = document.createElement('div');
@@ -221,8 +270,8 @@ function renderFeedPanel(): void {
   feedContent.addEventListener('mouseleave', clearGroupHighlight);
   container.appendChild(feedContent);
 
-  // Scroll lock button — recreate on each render since container.innerHTML
-  // clearing detaches any previously appended button from the DOM.
+  // Outside feedContent: session loads replace its innerHTML and the
+  // MAX_ENTRIES cap trims its first child.
   scrollLockBtn = document.createElement('button');
   scrollLockBtn.className = 'scroll-lock-btn';
   scrollLockBtn.textContent = '▼ RESUME SCROLL';
@@ -233,11 +282,24 @@ function renderFeedPanel(): void {
       scrollLockBtn?.classList.remove('visible');
     }
   });
-  feedContent.appendChild(scrollLockBtn);
+  container.appendChild(scrollLockBtn);
+}
+
+function headerKey(): string {
+  const sess = state.selectedSessionId
+    ? state.sessions.get(state.selectedSessionId)
+    : undefined;
+  return JSON.stringify([
+    state.selectedSessionId,
+    sess && sessionDisplayName(sess),
+    sess?.isActive,
+    sess?.prLinks,
+  ]);
 }
 
 function updateHeader(): void {
   if (!headerEl) return;
+  renderedHeaderKey = headerKey();
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
     const name = sess ? sessionDisplayName(sess) : state.selectedSessionId;
@@ -249,7 +311,9 @@ function updateHeader(): void {
       <span class="replay-btn" role="button" tabindex="0" aria-label="Open session replay" style="margin-left:6px;color:var(--green);font-size:9px;cursor:pointer;border:1px solid rgba(63,185,80,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">REPLAY</span>
       <span class="autopsy-btn" role="button" tabindex="0" aria-label="Download session autopsy markdown" style="margin-left:6px;color:var(--purple, #aa77dd);font-size:9px;cursor:pointer;border:1px solid rgba(170,119,221,0.4);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">AUTOPSY</span>
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
+    const prLinks = renderPrLinks(sess?.prLinks);
     const backBtn = headerEl.querySelector('.back-to-feed');
+    if (prLinks) headerEl.insertBefore(prLinks, backBtn);
     backBtn?.addEventListener('click', () => {
       update({ selectedSessionId: null });
     });
@@ -342,8 +406,6 @@ function handleFilterClick(type: string, e: MouseEvent): void {
     }
     update({ feedTypeFilters: filters });
   }
-  updateFilterButtons();
-  applyFilters();
 }
 
 function updateFilterButtons(): void {
@@ -359,12 +421,21 @@ function updateFilterButtons(): void {
     });
 }
 
+// A tool result takes its call's type, so it has to pass both filters.
+function isEntryVisible(entry: HTMLElement): boolean {
+  const filters = state.feedTypeFilters;
+  if (!(filters[entry.dataset.type || 'system'] ?? true)) return false;
+  return (
+    !entry.classList.contains('type-tool_result') ||
+    (filters.tool_result ?? true)
+  );
+}
+
 function applyFilters(): void {
   if (!feedContent) return;
   let visibleCount = 0;
   feedContent.querySelectorAll<HTMLElement>('.feed-entry').forEach((entry) => {
-    const type = entry.dataset.type || 'system';
-    const visible = state.feedTypeFilters[type] ?? true;
+    const visible = isEntryVisible(entry);
     entry.style.display = visible ? '' : 'none';
     if (visible) visibleCount++;
   });
@@ -383,12 +454,54 @@ function applyFilters(): void {
   }
 }
 
-async function loadRecentMessages(sessionId: string): Promise<void> {
+function beginBackfill(): number {
+  liveSinceBackfill ??= [];
+  return ++loadSeq;
+}
+
+// Replaces the feed with the backfill plus live events shown while it was in
+// flight, deduplicated and in time order. Returns how many were rendered.
+function renderBackfill(items: FeedItem[]): number {
+  const live = liveSinceBackfill ?? [];
+  liveSinceBackfill = null;
+  if (!feedContent) return 0;
+
+  // DB may contain duplicate rows from re-bootstraps, and a live event may also
+  // be in the response. Use timestamp + content since IDs aren't stable.
+  const seen = new Set<string>();
+  const merged = [...items, ...live]
+    .filter(({ msg }) => {
+      const key = `${msg.timestamp}|${msg.contentPreview ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.msg.timestamp).getTime() -
+        new Date(b.msg.timestamp).getTime(),
+    );
+  if (merged.length === 0) return 0;
+
+  feedContent.replaceChildren(...(scrollLockBtn ? [scrollLockBtn] : []));
+  lastToolEntry = null;
+  lastToolUseId = null;
+  for (const { msg, opts } of merged) appendMessage(msg, opts);
+  return merged.length;
+}
+
+// A refresh keeps the current feed visible until the replacement loads.
+async function loadRecentMessages(
+  sessionId: string,
+  refresh = false,
+): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
   currentLoadSessionId = sessionId;
-  const seq = ++loadSeq;
-  feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
+  const seq = beginBackfill();
+  if (!refresh) {
+    feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
+  }
 
   try {
     const [messages, pinned] = await Promise.all([
@@ -397,33 +510,14 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
     ]);
     if (seq !== loadSeq || currentLoadSessionId !== sessionId) return;
 
-    // Deduplicate: DB may contain duplicate rows from re-bootstraps.
-    // Use timestamp + content as a fingerprint since IDs aren't stable.
-    const seen = new Set<string>();
-    const dedup = (events: typeof messages) =>
-      events.filter((e) => {
-        const key = `${e.timestamp}|${e.contentPreview ?? ''}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
-    // Merge pinned events (errors + agents) that aren't in the recent window.
-    const recentDeduped = dedup(messages);
-    const missingPinned = dedup(pinned);
-    const merged = [...missingPinned, ...recentDeduped].sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    // Pinned events (errors + agents) fill in what the recent window misses.
+    const rendered = renderBackfill(
+      [...messages, ...pinned].map((msg) => ({ msg, opts: {} })),
     );
-
-    if (merged.length === 0) {
+    if (rendered === 0) {
       feedContent.innerHTML =
         '<div class="feed-empty">No events in this session yet</div>';
       return;
-    }
-
-    for (const msg of merged) {
-      appendMessage(msg as Event);
     }
 
     // Restore saved scroll position for this session
@@ -450,7 +544,11 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       update({ searchHighlightEventId: null });
     }
   } catch {
-    if (seq === loadSeq && currentLoadSessionId === sessionId) {
+    if (seq !== loadSeq || currentLoadSessionId !== sessionId) return;
+    if (refresh) {
+      // Live events were appended to the kept feed as they arrived.
+      liveSinceBackfill = null;
+    } else if (renderBackfill([]) === 0) {
       feedContent.innerHTML =
         '<div class="feed-empty">Failed to load messages</div>';
     }
@@ -465,44 +563,28 @@ async function loadMultiSessionEvents(): Promise<void> {
   const activeSessions = Array.from(state.sessions.values()).filter(
     (s) => s.isActive,
   );
-  if (activeSessions.length === 0) return;
+  const seq = beginBackfill();
 
   try {
     // Fetch last 20 events from each active session (max 5 concurrent)
     const MAX_CONCURRENT = 5;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const perSession: any[][] = [];
+    const perSession: FeedItem[][] = [];
     for (let i = 0; i < activeSessions.length; i += MAX_CONCURRENT) {
       const chunk = activeSessions.slice(i, i + MAX_CONCURRENT);
       const results = await Promise.all(
         chunk.map(async (sess) => {
           const events = await fetchSessionEvents(sess.id, 20);
-          return events.map((e) => ({
-            ...e,
-            _sessionName: sessionDisplayName(sess),
-          }));
+          const opts = { showSessionId: sessionDisplayName(sess) };
+          return events.map((msg) => ({ msg, opts }));
         }),
       );
       perSession.push(...results);
     }
-
-    const allEvents = perSession
-      .flat()
-      .sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
-
-    // Deduplicate
-    const seen = new Set<string>();
-    for (const evt of allEvents) {
-      const key = `${evt.timestamp}|${evt.contentPreview ?? ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      appendMessage(evt as Event, { showSessionId: (evt as any)._sessionName });
-    }
+    if (seq !== loadSeq) return;
+    renderBackfill(perSession.flat());
   } catch {
-    // Silently fail — live events will still flow in via WebSocket
+    // Live events still flow in via WebSocket and are already shown.
+    if (seq === loadSeq) liveSinceBackfill = null;
   }
 }
 
@@ -580,8 +662,7 @@ function appendMessage(
   }
 
   const type = msgType;
-  const visible = state.feedTypeFilters[type] ?? true;
-  if (!visible) entry.style.display = 'none';
+  if (!isEntryVisible(entry)) entry.style.display = 'none';
 
   if (type === 'tool_use') {
     entry.classList.add('tool-group-start');

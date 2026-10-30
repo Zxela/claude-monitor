@@ -138,7 +138,8 @@ func TestResume_MatchesFullReplay(t *testing.T) {
 	active := filepath.Join(dir, "active.jsonl")
 	untouched := filepath.Join(dir, "untouched.jsonl")
 
-	write(parent, user("parent", "p1", ts(0), "build it"), asst("parent", "p2", "pm1", ts(1), "tool_use", 5))
+	write(parent, user("parent", "p1", ts(0), "build it"), asst("parent", "p2", "pm1", "2026-10-01T00:00:01.5Z", "tool_use", 5),
+		`{"type":"ai-title","aiTitle":"Build it","sessionId":"parent"}`)
 	write(agent, side("parent", "a1", ts(2)), asst("parent", "a2", "am1", ts(3), "end_turn", 7))
 	write(quietAgent, side("parent", "b1", ts(5)))
 	write(lateAgent, side("late", "c1", ts(6)))
@@ -150,7 +151,7 @@ func TestResume_MatchesFullReplay(t *testing.T) {
 		asst("streamed", "s4", "sm1", ts(12), "", 3)) // first chunk; the rest arrives after the restart
 	write(active, user("active", "x1", recent(0), "hi"), asst("active", "x2", "xm1", recent(1), "tool_use", 4))
 	write(untouched, user("untouched", "u1", ts(20), "hello"), `not json`, asst("untouched", "u2", "um1", ts(21), "end_turn", 2))
-	firstRun := 2 + 2 + 1 + 1 + 4 + 2 + 3
+	firstRun := 3 + 2 + 1 + 1 + 4 + 2 + 3
 
 	db := openTestDB(t)
 	runIngest(t, db, dir, false, firstRun)
@@ -182,9 +183,11 @@ func TestResume_MatchesFullReplay(t *testing.T) {
 	// Written while the daemon was down.
 	write(streamed, asst("streamed", "s5", "sm1", ts(13), "end_turn", 9), errLine("streamed", "s2", ts(11)), user("streamed", "s6", ts(14), "again"))
 	write(agent, asst("parent", "a3", "am2", ts(4), "end_turn", 1))
+	// A restored session whose only new line is metadata.
+	write(parent, `{"type":"pr-link","sessionId":"parent","prNumber":7,"prUrl":"https://example/7","prRepository":"g/r","timestamp":"2026-10-01T00:00:09Z"}`)
 	// The parent of an already-persisted subagent shows up only now.
 	write(filepath.Join(dir, "late.jsonl"), user("late", "l1", ts(30), "fresh"))
-	appended := 3 + 1 + 1
+	appended := 3 + 1 + 1 + 1
 	reread := 3
 
 	sessResumed := runIngest(t, db, dir, true, appended+reread)
@@ -202,6 +205,12 @@ func TestResume_MatchesFullReplay(t *testing.T) {
 	}
 
 	p, _ := sessResumed.Get("parent")
+	if p.AITitle != "Build it" || len(p.PRLinks) != 1 {
+		t.Errorf("parent ai title %q, pr links %v; want both kept", p.AITitle, p.PRLinks)
+	}
+	if o := offsetFor(t, db, parent); o != fileSize(t, parent) {
+		t.Errorf("parent offset %d after a metadata-only line, want %d", o, fileSize(t, parent))
+	}
 	slices.Sort(p.Children)
 	if !slices.Equal(p.Children, []string{"agent-a1", "agent-b1"}) {
 		t.Errorf("parent children = %v, want [agent-a1 agent-b1]", p.Children)
@@ -348,4 +357,27 @@ func TestRestoredSession_FailedDedupLoad(t *testing.T) {
 			t.Errorf("saved offset %d, want 10 so the skipped line is re-read", o.Offset)
 		}
 	}
+}
+
+func offsetFor(t *testing.T, db *store.DB, path string) int64 {
+	t.Helper()
+	saved, err := db.LoadFileOffsets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range saved {
+		if o.Path == path {
+			return o.Offset
+		}
+	}
+	return -1
+}
+
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Size()
 }

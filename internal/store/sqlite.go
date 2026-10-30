@@ -23,6 +23,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const contentSelectCols = `COALESCE(ec.content,''), ec.compressed, COALESCE(ec.thinking,''), ec.thinking_compressed`
+
 // eventSelectCols is the column list used by all event SELECT queries.
 // Must match the scan order in scanEventRows().
 const eventSelectCols = `e.id, e.session_id, COALESCE(e.uuid,''), COALESCE(e.message_id,''),
@@ -48,33 +50,36 @@ const sessionSelectCols = `id, COALESCE(repo_id,''), COALESCE(parent_id,''), COA
 	total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 	message_count, event_count, error_count,
 	COALESCE(version,''), COALESCE(entrypoint,''),
-	COALESCE(workflow_id,''), COALESCE(agent_id,''), COALESCE(agent_kind,'')`
+	COALESCE(workflow_id,''), COALESCE(agent_id,''), COALESCE(agent_kind,''),
+	COALESCE(ai_title,''), COALESCE(pr_links,'')`
 
 // SessionRow represents a session as stored in the database.
 type SessionRow struct {
-	ID                  string  `json:"id"`
-	RepoID              string  `json:"repoId"`
-	ParentID            string  `json:"parentId"`
-	SessionName         string  `json:"sessionName"`
-	TaskDescription     string  `json:"taskDescription"`
-	CWD                 string  `json:"cwd"`
-	Branch              string  `json:"branch"`
-	Model               string  `json:"model"`
-	StartedAt           string  `json:"startedAt"`
-	EndedAt             string  `json:"endedAt"`
-	TotalCost           float64 `json:"totalCost"`
-	InputTokens         int64   `json:"inputTokens"`
-	OutputTokens        int64   `json:"outputTokens"`
-	CacheReadTokens     int64   `json:"cacheReadTokens"`
-	CacheCreationTokens int64   `json:"cacheCreationTokens"`
-	MessageCount        int     `json:"messageCount"`
-	EventCount          int     `json:"eventCount"`
-	ErrorCount          int     `json:"errorCount"`
-	Version             string  `json:"version,omitempty"`
-	Entrypoint          string  `json:"entrypoint,omitempty"`
-	WorkflowID          string  `json:"workflowId,omitempty"`
-	AgentID             string  `json:"agentId,omitempty"`
-	AgentKind           string  `json:"agentKind,omitempty"`
+	ID                  string           `json:"id"`
+	RepoID              string           `json:"repoId"`
+	ParentID            string           `json:"parentId"`
+	SessionName         string           `json:"sessionName"`
+	TaskDescription     string           `json:"taskDescription"`
+	CWD                 string           `json:"cwd"`
+	Branch              string           `json:"branch"`
+	Model               string           `json:"model"`
+	StartedAt           string           `json:"startedAt"`
+	EndedAt             string           `json:"endedAt"`
+	TotalCost           float64          `json:"totalCost"`
+	InputTokens         int64            `json:"inputTokens"`
+	OutputTokens        int64            `json:"outputTokens"`
+	CacheReadTokens     int64            `json:"cacheReadTokens"`
+	CacheCreationTokens int64            `json:"cacheCreationTokens"`
+	MessageCount        int              `json:"messageCount"`
+	EventCount          int              `json:"eventCount"`
+	ErrorCount          int              `json:"errorCount"`
+	Version             string           `json:"version,omitempty"`
+	Entrypoint          string           `json:"entrypoint,omitempty"`
+	WorkflowID          string           `json:"workflowId,omitempty"`
+	AgentID             string           `json:"agentId,omitempty"`
+	AgentKind           string           `json:"agentKind,omitempty"`
+	AITitle             string           `json:"aiTitle,omitempty"`
+	PRLinks             []session.PRLink `json:"prLinks,omitempty"`
 }
 
 // ToSession converts a SessionRow to a session.Session with default runtime fields.
@@ -101,6 +106,8 @@ func (r *SessionRow) ToSession() *session.Session {
 		WorkflowID:          r.WorkflowID,
 		AgentID:             r.AgentID,
 		AgentKind:           r.AgentKind,
+		AITitle:             r.AITitle,
+		PRLinks:             r.PRLinks,
 		IsActive:            false,
 		Status:              "idle",
 		CostRate:            0,
@@ -137,6 +144,7 @@ type EventRow struct {
 	Role                string  `json:"role"`
 	ContentPreview      string  `json:"contentPreview"`
 	FullContent         string  `json:"fullContent,omitempty"`
+	ThinkingContent     string  `json:"thinkingContent,omitempty"`
 	ToolName            string  `json:"toolName,omitempty"`
 	ToolDetail          string  `json:"toolDetail,omitempty"`
 	CostUSD             float64 `json:"costUSD"`
@@ -399,9 +407,9 @@ const sessionUpsertSQL = `INSERT INTO sessions
 	(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
 	 started_at, ended_at, total_cost, input_tokens, output_tokens,
 	 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-	 version, entrypoint, workflow_id, agent_id, agent_kind,
+	 version, entrypoint, workflow_id, agent_id, agent_kind, ai_title, pr_links,
 	 status, last_active_exact, started_at_exact, repo_source_rank, repo_toplevel, repo_inherited)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 	 repo_id=excluded.repo_id,
 	 parent_id=excluded.parent_id,
@@ -425,6 +433,8 @@ const sessionUpsertSQL = `INSERT INTO sessions
 	 workflow_id=excluded.workflow_id,
 	 agent_id=excluded.agent_id,
 	 agent_kind=excluded.agent_kind,
+	 ai_title=excluded.ai_title,
+	 pr_links=excluded.pr_links,
 	 status=excluded.status,
 	 last_active_exact=excluded.last_active_exact,
 	 started_at_exact=excluded.started_at_exact,
@@ -453,6 +463,7 @@ func sessionUpsertArgs(s *session.Session) []any {
 		s.MessageCount, s.EventCount, s.ErrorCount,
 		s.Version, s.Entrypoint,
 		s.WorkflowID, s.AgentID, s.AgentKind,
+		s.AITitle, encodePRLinks(s.PRLinks),
 		s.Status, lastActiveExact, startedAtExact,
 		s.RepoSourceRank(), s.RepoToplevel(), s.RepoInherited(),
 	}
@@ -597,12 +608,11 @@ func (d *DB) RestoreSessions(ids []string) ([]*session.Session, error) {
 			return nil, err
 		}
 		for rows.Next() {
-			var r SessionRow
 			var status, lastActive, startedAt, toplevel string
 			var rank int
 			var inherited bool
-			dest := append(r.scanDest(), &status, &lastActive, &startedAt, &rank, &toplevel, &inherited)
-			if err := rows.Scan(dest...); err != nil {
+			r, err := scanSessionRow(rows, &status, &lastActive, &startedAt, &rank, &toplevel, &inherited)
+			if err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -919,9 +929,22 @@ func (d *DB) RepoExists(id string) (bool, error) {
 	}
 }
 
-// scanDest returns scan targets in sessionSelectCols order.
-func (r *SessionRow) scanDest() []any {
-	return []any{
+func encodePRLinks(links []session.PRLink) string {
+	if len(links) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(links)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// scanSessionRow scans one row of sessionSelectCols, then any extra columns.
+func scanSessionRow(rows *sql.Rows, extra ...any) (SessionRow, error) {
+	var r SessionRow
+	var prLinks string
+	dest := append([]any{
 		&r.ID, &r.RepoID, &r.ParentID, &r.SessionName,
 		&r.TaskDescription, &r.CWD, &r.Branch, &r.Model,
 		&r.StartedAt, &r.EndedAt,
@@ -930,14 +953,24 @@ func (r *SessionRow) scanDest() []any {
 		&r.MessageCount, &r.EventCount, &r.ErrorCount,
 		&r.Version, &r.Entrypoint,
 		&r.WorkflowID, &r.AgentID, &r.AgentKind,
+		&r.AITitle, &prLinks,
+	}, extra...)
+	if err := rows.Scan(dest...); err != nil {
+		return r, err
 	}
+	if prLinks != "" {
+		if err := json.Unmarshal([]byte(prLinks), &r.PRLinks); err != nil {
+			log.Printf("session %s: bad pr_links: %v", r.ID, err)
+		}
+	}
+	return r, nil
 }
 
 func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 	var result []SessionRow
 	for rows.Next() {
-		var r SessionRow
-		if err := rows.Scan(r.scanDest()...); err != nil {
+		r, err := scanSessionRow(rows)
+		if err != nil {
 			return result, err
 		}
 		result = append(result, r)
@@ -1436,7 +1469,7 @@ func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
 			SELECT s.id, a.root FROM sessions s JOIN anc a ON s.parent_id = a.id
 		)
 		SELECT COALESCE(a.root, s.id) AS root_id,
-		       COALESCE(rt.session_name, ''),
+		       COALESCE(NULLIF(rt.session_name, ''), rt.ai_title, ''),
 		       COALESCE(rt.task_description, ''),
 		       COALESCE(SUM(s.total_cost), 0),
 		       COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens), 0),
@@ -1462,7 +1495,7 @@ func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
 		if err := rows.Scan(&st.SessionID, &name, &task, &st.Cost, &st.Tokens, &st.Agents); err != nil {
 			return nil, fmt.Errorf("trendBySession: scan: %w", err)
 		}
-		// Prefer an explicit session name, then the task/prompt; the frontend
+		// Prefer an explicit session name, then the AI title, then the task/prompt; the frontend
 		// falls back to the id when both are empty.
 		st.SessionName = name
 		if st.SessionName == "" {
@@ -1511,6 +1544,7 @@ type EventInsert struct {
 	SessionID   string
 	Event       *parser.Event
 	FullContent string // goes to event_content table
+	Thinking    string
 }
 
 // PersistBatch inserts a batch of events, upserts the batch's sessions and
@@ -1545,6 +1579,10 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		        ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, COALESCE(message_id, uuid)) DO UPDATE SET
 		 content_preview=excluded.content_preview,
+		 tool_name=COALESCE(NULLIF(excluded.tool_name,''), events.tool_name),
+		 tool_detail=COALESCE(NULLIF(excluded.tool_detail,''), events.tool_detail),
+		 tool_use_id=COALESCE(NULLIF(excluded.tool_use_id,''), events.tool_use_id),
+		 is_agent=(events.is_agent OR excluded.is_agent),
 		 cost_usd=excluded.cost_usd,
 		 input_tokens=excluded.input_tokens,
 		 output_tokens=excluded.output_tokens,
@@ -1576,16 +1614,21 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 is_sidechain=excluded.is_sidechain,
 		 agent_name=excluded.agent_name,
 		 team_name=excluded.team_name
-		RETURNING id`)
+		RETURNING id, COALESCE(content_preview,''), COALESCE(tool_name,''), COALESCE(tool_detail,'')`)
 	if err != nil {
 		return fmt.Errorf("prepare event stmt: %w", err)
 	}
 	defer eventStmt.Close()
 
 	// Startup re-ingest replays every line, so only a still-hot row may take new
-	// content; warm and cold rows keep what retention left them.
-	contentStmt, err := tx.Prepare(`INSERT INTO event_content (event_id, tier, content) VALUES (?, 'hot', ?)
-		ON CONFLICT(event_id) DO UPDATE SET content=excluded.content
+	// content; warm and cold rows keep what retention left them. A message's
+	// blocks arrive as separate lines sharing one row, so an empty value from a
+	// later line must not erase an earlier line's text or thinking.
+	contentStmt, err := tx.Prepare(`INSERT INTO event_content (event_id, tier, content, thinking)
+		VALUES (?, 'hot', NULLIF(?,''), NULLIF(?,''))
+		ON CONFLICT(event_id) DO UPDATE SET
+		 content=COALESCE(excluded.content, event_content.content),
+		 thinking=COALESCE(excluded.thinking, event_content.thinking)
 		WHERE event_content.tier = 'hot'`)
 	if err != nil {
 		return fmt.Errorf("prepare content stmt: %w", err)
@@ -1660,6 +1703,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		// RETURNING yields the row's id whether it was inserted or updated;
 		// LastInsertId is stale after an ON CONFLICT update.
 		var eventID int64
+		var newPreview, newToolName, newToolDetail string
 		err := eventStmt.QueryRow(
 			ei.SessionID, ev.UUID, messageID, ev.Type, ev.Role,
 			ev.ContentText, ev.ToolName, ev.ToolDetail,
@@ -1674,14 +1718,13 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			ev.Subtype, ev.TurnMessageCount, ev.HookCount, ev.HookInfos, ev.Level,
 			ev.IsMeta, ev.Version, ev.Entrypoint,
 			toolUseIDsJSON, ev.CWD, ev.GitBranch, ev.IsSidechain, ev.AgentName, ev.TeamName,
-		).Scan(&eventID)
+		).Scan(&eventID, &newPreview, &newToolName, &newToolDetail)
 		if err != nil {
 			return fmt.Errorf("insert event: %w", err)
 		}
 
-		// Insert/update full content if present
-		if ei.FullContent != "" {
-			if _, err := contentStmt.Exec(eventID, ei.FullContent); err != nil {
+		if ei.FullContent != "" || ei.Thinking != "" {
+			if _, err := contentStmt.Exec(eventID, ei.FullContent, ei.Thinking); err != nil {
 				return fmt.Errorf("insert content: %w", err)
 			}
 		}
@@ -1696,7 +1739,8 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 				return fmt.Errorf("delete stale fts: %w", err)
 			}
 		}
-		if _, err := ftsInsertStmt.Exec(eventID, ev.ContentText, ev.ToolName, ev.ToolDetail); err != nil {
+		// Index the merged row, not this line: the next purge reads the row back.
+		if _, err := ftsInsertStmt.Exec(eventID, newPreview, newToolName, newToolDetail); err != nil {
 			return fmt.Errorf("insert fts: %w", err)
 		}
 	}
@@ -1716,7 +1760,7 @@ func (d *DB) ListEvents(sessionID string, limit, offset int) ([]EventRow, error)
 		limit = 100
 	}
 	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,''), ec.compressed
+		`+contentSelectCols+`
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
 		ORDER BY e.timestamp ASC
@@ -1747,7 +1791,7 @@ func (d *DB) ListReplayEvents(sessionID string, limit, offset int) ([]EventRow, 
 		offset = 0
 	}
 	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,''), ec.compressed
+		`+contentSelectCols+`
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
 		   OR e.session_id IN (SELECT id FROM sessions WHERE parent_id = ?)
@@ -1780,7 +1824,7 @@ func (d *DB) CountReplayEvents(sessionID string) (int, error) {
 // These are "pinned" because they should always be visible regardless of the recent-events window.
 func (d *DB) ListPinnedEvents(sessionID string) ([]EventRow, error) {
 	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,''), ec.compressed
+		`+contentSelectCols+`
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ? AND (e.is_error = 1 OR e.is_agent = 1 OR e.content_preview LIKE '[agent%')
 		ORDER BY e.timestamp ASC`, sessionID)
@@ -1797,7 +1841,7 @@ func (d *DB) ListRecentEvents(sessionID string, n int) ([]EventRow, error) {
 		n = 50
 	}
 	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,''), ec.compressed
+		`+contentSelectCols+`
 		FROM events e LEFT JOIN event_content ec ON ec.event_id = e.id
 		WHERE e.session_id = ?
 		ORDER BY e.timestamp DESC
@@ -1821,8 +1865,8 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 	var result []EventRow
 	for rows.Next() {
 		var r EventRow
-		var fullContent string
-		var compressed []byte
+		var fullContent, thinking string
+		var compressed, thinkingCompressed []byte
 		var durationMs, agentDurationMs, agentTokens sql.NullInt64
 		var agentToolUseCount, turnMessageCount, hookCount sql.NullInt64
 		var success sql.NullBool
@@ -1841,7 +1885,7 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 			&r.Subtype, &turnMessageCount, &hookCount, &r.HookInfos, &r.Level,
 			&r.IsMeta, &r.Version, &r.Entrypoint,
 			&r.ToolUseIDs, &r.CWD, &r.GitBranch, &r.IsSidechain, &r.AgentName, &r.TeamName,
-			&fullContent, &compressed,
+			&fullContent, &compressed, &thinking, &thinkingCompressed,
 		); err != nil {
 			return result, err
 		}
@@ -1850,6 +1894,13 @@ func scanEventRows(rows *sql.Rows) ([]EventRow, error) {
 		} else if len(compressed) > 0 {
 			if s, err := decompressContent(compressed); err == nil {
 				r.FullContent = s
+			}
+		}
+		if thinking != "" {
+			r.ThinkingContent = thinking
+		} else if len(thinkingCompressed) > 0 {
+			if s, err := decompressContent(thinkingCompressed); err == nil {
+				r.ThinkingContent = s
 			}
 		}
 		if durationMs.Valid {
@@ -1922,7 +1973,7 @@ func (d *DB) SearchFTS(query string, limit int) ([]EventRow, error) {
 		return []EventRow{}, nil
 	}
 	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
-		'', NULL
+		'', NULL, '', NULL
 		FROM events_fts fts
 		JOIN events e ON e.id = fts.rowid
 		WHERE events_fts MATCH ?
@@ -1943,7 +1994,7 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 	// Escape LIKE wildcards to prevent injection of % and _ characters.
 	escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(query)
 	rows, err := d.rdb.Query(`SELECT `+eventSelectCols+`,
-		COALESCE(ec.content,''), ec.compressed
+		`+contentSelectCols+`
 		FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE ec.content LIKE ? ESCAPE '\'
@@ -1958,17 +2009,26 @@ func (d *DB) SearchFullContent(query string, limit int) ([]EventRow, error) {
 
 // --- Model Pricing ---
 
-// ModelPricing holds per-million-token pricing for a model prefix.
+// ModelPricing holds per-million-token pricing for a model prefix. The Long*
+// rates apply to requests whose prompt exceeds LongContextThreshold tokens;
+// a zero threshold means the model has one rate card.
 type ModelPricing struct {
-	InputPerMTok       float64 `json:"input_per_mtok"`
-	OutputPerMTok      float64 `json:"output_per_mtok"`
-	CacheReadPerMTok   float64 `json:"cache_read_per_mtok"`
-	CacheCreatePerMTok float64 `json:"cache_create_per_mtok"`
+	InputPerMTok           float64 `json:"input_per_mtok"`
+	OutputPerMTok          float64 `json:"output_per_mtok"`
+	CacheReadPerMTok       float64 `json:"cache_read_per_mtok"`
+	CacheCreatePerMTok     float64 `json:"cache_create_per_mtok"`
+	LongContextThreshold   int64   `json:"long_context_threshold,omitempty"`
+	LongInputPerMTok       float64 `json:"long_input_per_mtok,omitempty"`
+	LongOutputPerMTok      float64 `json:"long_output_per_mtok,omitempty"`
+	LongCacheReadPerMTok   float64 `json:"long_cache_read_per_mtok,omitempty"`
+	LongCacheCreatePerMTok float64 `json:"long_cache_create_per_mtok,omitempty"`
 }
 
 // AllModelPricing returns all rows from the model_pricing table as a map keyed by model_prefix.
 func (d *DB) AllModelPricing() (map[string]ModelPricing, error) {
-	rows, err := d.rdb.Query(`SELECT model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok FROM model_pricing`)
+	rows, err := d.rdb.Query(`SELECT model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok,
+		long_context_threshold, long_input_per_mtok, long_output_per_mtok, long_cache_read_per_mtok, long_cache_create_per_mtok
+		FROM model_pricing`)
 	if err != nil {
 		return nil, err
 	}
@@ -1977,7 +2037,8 @@ func (d *DB) AllModelPricing() (map[string]ModelPricing, error) {
 	for rows.Next() {
 		var prefix string
 		var p ModelPricing
-		if err := rows.Scan(&prefix, &p.InputPerMTok, &p.OutputPerMTok, &p.CacheReadPerMTok, &p.CacheCreatePerMTok); err != nil {
+		if err := rows.Scan(&prefix, &p.InputPerMTok, &p.OutputPerMTok, &p.CacheReadPerMTok, &p.CacheCreatePerMTok,
+			&p.LongContextThreshold, &p.LongInputPerMTok, &p.LongOutputPerMTok, &p.LongCacheReadPerMTok, &p.LongCacheCreatePerMTok); err != nil {
 			return nil, err
 		}
 		result[prefix] = p
@@ -1985,7 +2046,8 @@ func (d *DB) AllModelPricing() (map[string]ModelPricing, error) {
 	return result, rows.Err()
 }
 
-// UpsertModelPricing inserts or replaces a pricing row for the given model prefix.
+// UpsertModelPricing inserts or replaces the base rates for the given model
+// prefix. An existing long-context tier is kept.
 func (d *DB) UpsertModelPricing(prefix string, p ModelPricing) error {
 	_, err := d.db.Exec(
 		`INSERT INTO model_pricing (model_prefix, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_create_per_mtok) VALUES (?, ?, ?, ?, ?)
@@ -2058,6 +2120,23 @@ func decompressContent(data []byte) (string, error) {
 	return string(out), nil
 }
 
+// compressContent gzips s, returning nil for a NULL value.
+func compressContent(s sql.NullString) ([]byte, error) {
+	if !s.Valid {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := io.WriteString(w, s.String); err != nil {
+		w.Close()
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // CompactHotToWarm compresses event_content older than hotDays into gzip BLOBs.
 func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -hotDays).Format(time.RFC3339)
@@ -2069,34 +2148,37 @@ func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 		return 0, err
 	}
 
-	rows, err := d.rdb.Query(`SELECT ec.event_id, ec.content FROM event_content ec
+	rows, err := d.rdb.Query(`SELECT ec.event_id, ec.content, ec.thinking FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
-		WHERE ec.tier = 'hot' AND ec.content IS NOT NULL AND e.timestamp < ?`, cutoff)
+		WHERE ec.tier = 'hot' AND (ec.content IS NOT NULL OR ec.thinking IS NOT NULL)
+		AND e.timestamp < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
 
 	type compactEntry struct {
-		eventID int64
-		data    []byte
+		eventID  int64
+		data     []byte
+		thinking []byte
 	}
 	var entries []compactEntry
 
 	for rows.Next() {
 		var eventID int64
-		var content string
-		if err := rows.Scan(&eventID, &content); err != nil {
+		var content, thinking sql.NullString
+		if err := rows.Scan(&eventID, &content, &thinking); err != nil {
 			return 0, err
 		}
-		var buf bytes.Buffer
-		w := gzip.NewWriter(&buf)
-		if _, err := io.WriteString(w, content); err != nil {
-			w.Close()
+		data, err := compressContent(content)
+		if err != nil {
 			continue
 		}
-		w.Close()
-		entries = append(entries, compactEntry{eventID: eventID, data: buf.Bytes()})
+		thinkingData, err := compressContent(thinking)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, compactEntry{eventID: eventID, data: data, thinking: thinkingData})
 	}
 	if err := rows.Err(); err != nil {
 		return 0, err
@@ -2116,14 +2198,15 @@ func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 		}
 	}()
 
-	stmt, err := tx.Prepare(`UPDATE event_content SET tier='warm', content=NULL, compressed=? WHERE event_id=?`)
+	stmt, err := tx.Prepare(`UPDATE event_content SET tier='warm', content=NULL, compressed=?,
+		thinking=NULL, thinking_compressed=? WHERE event_id=?`)
 	if err != nil {
 		return 0, err
 	}
 	defer stmt.Close()
 
 	for _, e := range entries {
-		if _, err := stmt.Exec(e.data, e.eventID); err != nil {
+		if _, err := stmt.Exec(e.data, e.thinking, e.eventID); err != nil {
 			return 0, err
 		}
 	}
@@ -2138,7 +2221,8 @@ func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 // row with no content so a later re-ingest cannot bring it back as hot.
 func (d *DB) CompactWarmToCold(warmDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -warmDays).Format(time.RFC3339)
-	result, err := d.db.Exec(`UPDATE event_content SET tier = 'cold', content = NULL, compressed = NULL
+	result, err := d.db.Exec(`UPDATE event_content SET tier = 'cold', content = NULL, compressed = NULL,
+		thinking = NULL, thinking_compressed = NULL
 		WHERE tier != 'cold' AND event_id IN (
 		SELECT ec.event_id FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
@@ -2162,10 +2246,10 @@ func (d *DB) StorageInfo() (*StorageInfo, error) {
 	if err := d.rdb.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&info.EventCount); err != nil {
 		return nil, fmt.Errorf("count events: %w", err)
 	}
-	if err := d.rdb.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes); err != nil {
+	if err := d.rdb.QueryRow(`SELECT COALESCE(SUM(LENGTH(content)),0) + COALESCE(SUM(LENGTH(thinking)),0) FROM event_content WHERE tier='hot'`).Scan(&info.HotContentBytes); err != nil {
 		return nil, fmt.Errorf("hot content size: %w", err)
 	}
-	if err := d.rdb.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes); err != nil {
+	if err := d.rdb.QueryRow(`SELECT COALESCE(SUM(LENGTH(compressed)),0) + COALESCE(SUM(LENGTH(thinking_compressed)),0) FROM event_content WHERE tier='warm'`).Scan(&info.WarmContentBytes); err != nil {
 		return nil, fmt.Errorf("warm content size: %w", err)
 	}
 

@@ -206,6 +206,34 @@ describe('feed panel, one session', () => {
     expect(state.selectedSessionId).toBe('old');
   });
 
+  it('refreshes the header when the selected session gains a title or PR link', async () => {
+    const { mount, update, updateSession } = await setup([
+      sess({ id: 's1', sessionName: '', cwd: '/w/repo', isActive: true }),
+    ]);
+    update({ selectedSessionId: 's1' });
+    const timeline = mount.querySelector('.timeline-btn');
+
+    updateSession(
+      sess({ id: 's1', sessionName: '', cwd: '/w/repo', isActive: true }),
+    );
+    expect(mount.querySelector('.timeline-btn')).toBe(timeline);
+
+    updateSession(
+      sess({
+        id: 's1',
+        sessionName: '',
+        aiTitle: 'Fix login',
+        isActive: true,
+        prLinks: [{ number: 7, url: 'https://example/7', repository: 'g/r' }],
+      }),
+    );
+    expect(header(mount)).toContain('Fix login');
+    const link = mount.querySelector<HTMLAnchorElement>(
+      '.feed-header .pr-links a',
+    );
+    expect(link?.href).toBe('https://example/7');
+  });
+
   it('says so when the session has no events or the load fails', async () => {
     const empty = await selectWith([]);
     expect(empty.mount.querySelector('.feed-empty')?.textContent).toBe(
@@ -335,7 +363,7 @@ describe('feed panel filters', () => {
     expect(visibleTypes(mount)).toEqual(['user', 'assistant']);
   });
 
-  it.skip('TOOL_RESULT hides results of tool calls in the feed (bug: they inherit the tool_use type and stay visible)', async () => {
+  it('TOOL_RESULT hides results of tool calls in the feed', async () => {
     const { mount } = await selectWith(mixed());
 
     filterBtn(mount, 'tool_result').click();
@@ -391,7 +419,7 @@ describe('feed panel filters', () => {
     expect(visibleTypes(mount)).toEqual(['assistant']);
   });
 
-  it.skip('the err badge re-filters an already-selected session (bug: feed ignores a feedTypeFilters-only change)', async () => {
+  it('the err badge re-filters an already-selected session', async () => {
     const { mount, update } = await selectWith(mixed());
     const { errorsOnlyFilters } = await import('./session-card');
 
@@ -400,7 +428,7 @@ describe('feed panel filters', () => {
     expect(visibleTypes(mount)).toEqual([]);
   });
 
-  it.skip('errors-only view hides skill entries (bug: errorsOnlyFilters has no skill key)', async () => {
+  it('errors-only view hides skill entries', async () => {
     mocks.fetchSessionEvents.mockResolvedValue([
       ev({ role: 'assistant', toolName: 'Skill', contentPreview: 'sk' }),
       ev({ isError: true, contentPreview: 'boom', timestamp: at(1) }),
@@ -465,8 +493,15 @@ describe('feed panel scroll lock', () => {
     expect(mount.querySelector('.scroll-lock-btn')).not.toBeNull();
   });
 
-  it.skip('keeps its resume-scroll button after loading a session (bug: the Loading placeholder innerHTML wipes it)', async () => {
+  it('keeps its resume-scroll button after loading a session', async () => {
     const { mount } = await selectWith([ev({})]);
+    expect(mount.querySelector('.scroll-lock-btn')).not.toBeNull();
+  });
+
+  it('keeps its resume-scroll button once the all-sessions feed hits its cap', async () => {
+    const { mount, push } = await setup();
+    for (let i = 0; i < 501; i++) push(ev({ contentPreview: `m${i}` }));
+    expect(entries(mount)).toHaveLength(500);
     expect(mount.querySelector('.scroll-lock-btn')).not.toBeNull();
   });
 });

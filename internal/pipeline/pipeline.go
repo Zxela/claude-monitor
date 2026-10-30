@@ -67,7 +67,7 @@ type Pipeline struct {
 	// theirs was dropped; the next start re-reads them from the last saved
 	// offset.
 	offsetHold map[string]bool
-	dirty      map[string]bool // sessions changed without an event of their own in buffer
+	dirty      map[string]bool // sessions changed without an event in buffer: metadata lines, late parent links
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -305,6 +305,18 @@ func (p *Pipeline) Process(ev watcher.Event) {
 					s.WorkflowID = dbSess.WorkflowID
 					s.AgentID = dbSess.AgentID
 					s.AgentKind = dbSess.AgentKind
+					s.AITitle = dbSess.AITitle
+					s.PRLinks = dbSess.PRLinks
+					// A restored session already holds the full row, with exact times.
+					if isNew && event.IsSessionMetadata() {
+						// A metadata line sets nothing else, and Docker sources start at
+						// EOF, so without these the flush writes blanks over the saved row.
+						saved := dbSess.ToSession()
+						s.RepoID, s.SessionName, s.CWD = saved.RepoID, saved.SessionName, saved.CWD
+						s.GitBranch, s.Model, s.TaskDescription = saved.GitBranch, saved.Model, saved.TaskDescription
+						s.Version, s.Entrypoint = saved.Version, saved.Entrypoint
+						s.StartedAt, s.LastActive = saved.StartedAt, saved.LastActive
+					}
 				}
 				if errCountErr == nil {
 					s.ErrorCount = errCount
@@ -344,6 +356,17 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	// Must run AFTER the Upsert above so the current session is visible to lookups.
 	p.resolvePendingLinks()
 
+	if event.IsSessionMetadata() {
+		if p.broadcast != nil && !ev.Bootstrap {
+			p.broadcast(event, sess, isNew, false)
+		}
+		p.bufMu.Lock()
+		p.dirty[ev.SessionID] = true
+		p.noteOffsetLocked(ev)
+		p.bufMu.Unlock()
+		return
+	}
+
 	// Stage 4a: Broadcast (immediate)
 	if p.broadcast != nil && !ev.Bootstrap {
 		sendDetail := !skipDetail(event)
@@ -361,6 +384,7 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		SessionID:   ev.SessionID,
 		Event:       event,
 		FullContent: fullContent,
+		Thinking:    event.ThinkingContent,
 	})
 	p.noteOffsetLocked(ev)
 	needFlush := len(p.buffer)-p.retained >= maxBatchSize
@@ -488,6 +512,10 @@ func (p *Pipeline) flushLoop() {
 // parentRepoID is the pre-resolved repo_id of that parent (may be empty); when
 // set, a child session inherits it instead of resolving its own (worktree) cwd.
 func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo, resolvedParentID, parentRepoID string) {
+	if msg.IsSessionMetadata() {
+		applySessionMetadata(s, msg)
+		return
+	}
 	p.applyRepoResolution(s, msg, r, parentRepoID)
 	p.applySessionMeta(s, msg, ev)
 	p.applyParentDetection(s, msg, ev, resolvedParentID)
@@ -693,6 +721,21 @@ func (p *Pipeline) applySessionMeta(s *session.Session, msg *parser.Event, ev wa
 				aid = aid[:8]
 			}
 			s.SessionName = "agent " + aid
+		}
+	}
+}
+
+// applySessionMetadata records ai-title and pr-link lines. It deliberately
+// skips cost, counts, status and timestamps so they never show as activity.
+func applySessionMetadata(s *session.Session, msg *parser.Event) {
+	switch msg.Type {
+	case "ai-title":
+		if msg.AITitle != "" {
+			s.AITitle = msg.AITitle
+		}
+	case "pr-link":
+		if msg.PRNumber > 0 && msg.PRURL != "" {
+			s.SetPRLink(session.PRLink{Number: msg.PRNumber, URL: msg.PRURL, Repository: msg.PRRepository})
 		}
 	}
 }

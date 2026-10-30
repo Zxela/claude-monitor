@@ -158,6 +158,13 @@ function renderTable(): void {
 
   const sessions = sortSessions(getAllSessions());
 
+  // Every rebuild replaces the focused header or row, so find it again after.
+  const focused = tableEl.contains(document.activeElement)
+    ? (document.activeElement as HTMLElement)
+    : null;
+  const focusedSort = focused?.dataset.sort;
+  const focusedRow = focused?.dataset.sessionId;
+
   const cols: { key: SortKey; label: string; align?: string }[] = [
     { key: 'name', label: 'SESSION' },
     { key: 'status', label: 'STATUS' },
@@ -245,7 +252,23 @@ function renderTable(): void {
 
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
+    th.setAttribute('tabindex', '0');
+    th.setAttribute(
+      'aria-sort',
+      sortKey !== th.dataset.sort
+        ? 'none'
+        : sortDir === 'asc'
+          ? 'ascending'
+          : 'descending',
+    );
     th.addEventListener('click', () => handleSort(th.dataset.sort as SortKey));
+    th.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleSort(th.dataset.sort as SortKey);
+      }
+    });
+    if (th.dataset.sort === focusedSort) th.focus({ preventScroll: true });
     th.addEventListener('mouseenter', () => {
       th.style.color = 'var(--text)';
     });
@@ -276,5 +299,14 @@ function renderTable(): void {
           view: 'list',
         });
       });
+      row.setAttribute('tabindex', '0');
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          update({ selectedSessionId: row.dataset.sessionId!, view: 'list' });
+        }
+      });
+      if (row.dataset.sessionId === focusedRow)
+        row.focus({ preventScroll: true });
     });
 }

@@ -944,12 +944,7 @@ func applyDBPricingToParser(historyDB *store.DB) error {
 	}
 	converted := make(map[string]parser.ExternalPricing, len(dbPricing))
 	for k, v := range dbPricing {
-		converted[k] = parser.ExternalPricing{
-			InputPerMTok:       v.InputPerMTok,
-			OutputPerMTok:      v.OutputPerMTok,
-			CacheReadPerMTok:   v.CacheReadPerMTok,
-			CacheCreatePerMTok: v.CacheCreatePerMTok,
-		}
+		converted[k] = parser.ExternalPricing(v)
 	}
 	parser.SetPricingTable(converted)
 	return nil

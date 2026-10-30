@@ -87,6 +87,32 @@ function showDroppedEventsBanner(delta: number, total: number): void {
   droppedBanner.style.display = 'flex';
 }
 
+// Re-fetch sessions to reconcile state missed during disconnect. Retried while
+// the socket stays open: the feed's reconnect backfill waits for `grouped`.
+function reconcileSessions(sock: WebSocket, delay: number): void {
+  fetchGroupedSessions()
+    .then((grouped) => {
+      const allSessions = [
+        ...grouped.active,
+        ...grouped.lastHour,
+        ...grouped.today,
+        ...grouped.yesterday,
+        ...grouped.thisWeek,
+        ...grouped.older,
+      ];
+      for (const sess of allSessions) {
+        updateSession(sess);
+      }
+      update({ grouped });
+    })
+    .catch(() => {
+      setTimeout(() => {
+        if (ws === sock)
+          reconcileSessions(sock, Math.min(delay * 2, MAX_RECONNECT_DELAY));
+      }, delay);
+    });
+}
+
 export function connect(): void {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${location.host}/ws`;
@@ -97,25 +123,7 @@ export function connect(): void {
     update({ connected: true });
     reconnectDelay = 2000; // Reset backoff on successful connection
 
-    // Re-fetch sessions to reconcile state missed during disconnect
-    fetchGroupedSessions()
-      .then((grouped) => {
-        const allSessions = [
-          ...grouped.active,
-          ...grouped.lastHour,
-          ...grouped.today,
-          ...grouped.yesterday,
-          ...grouped.thisWeek,
-          ...grouped.older,
-        ];
-        for (const sess of allSessions) {
-          updateSession(sess);
-        }
-        update({ grouped });
-      })
-      .catch(() => {
-        /* ignore — WS is connected, sessions will arrive via events */
-      });
+    if (ws) reconcileSessions(ws, 2000);
   };
 
   ws.onclose = () => {

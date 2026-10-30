@@ -119,8 +119,8 @@ func RunDown(db *sql.DB) (string, error) {
 		return "", fmt.Errorf("no migrations to roll back (version 0)")
 	}
 
-	// Find the migration at current version. Versions need not be contiguous
-	// (branches reserve numbers), so step back to the previous registered one.
+	// Find the migration at current version. Versions can have gaps (numbers
+	// reserved by unmerged branches), so step back to the previous registered one.
 	prev := 0
 	for _, rm := range sorted() {
 		if rm.Version < current {

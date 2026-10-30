@@ -150,7 +150,7 @@
 }
 
 .search-box input::placeholder {
-  color: #44445a;
+  color: var(--text-dim);
   letter-spacing: 0.5px;
 }
 
@@ -212,4 +212,9 @@
 
 .win-btn:hover {
   border-color: var(--text-dim);
+}
+
+/* Last stats refresh failed: dim the figures rather than present them as current. */
+.topbar.stats-stale .topbar-stat .val {
+  opacity: 0.45;
 }
