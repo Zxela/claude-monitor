@@ -59,6 +59,8 @@ let loadError = false;
 // True when the backend reported more events than we loaded (hasMore), so the
 // timeline can note it is showing a partial view.
 let loadTruncated = false;
+// Bumped per load and on close so a superseded fetch can't write or show.
+let loadSeq = 0;
 
 // View state
 let offsetX = 0;
@@ -73,7 +75,9 @@ export function render(mount: HTMLElement): void {
 }
 
 function onStateChange(_state: AppState, changed: Set<string>): void {
-  if (changed.has('view')) {
+  const sessionChanged =
+    changed.has('selectedSessionId') && state.view === 'timeline';
+  if (changed.has('view') || sessionChanged) {
     if (state.view === 'timeline') {
       const sid = state.selectedSessionId;
       if (sid) {
@@ -89,9 +93,10 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 }
 
 async function open(sid: string): Promise<void> {
-  await loadEvents(sid);
-  // The user may have left the timeline while events loaded.
-  if (state.view !== 'timeline' || state.selectedSessionId !== sid) return;
+  const seq = ++loadSeq;
+  const result = await loadEvents(sid);
+  if (seq !== loadSeq) return;
+  ({ events, loadError, loadTruncated } = result);
   show();
 }
 
@@ -106,6 +111,7 @@ export function close(): void {
   }
   window.removeEventListener('resize', resizeCanvas);
   document.removeEventListener('keydown', onKeyDown);
+  loadSeq++;
   canvas = null;
   ctx = null;
   tooltip = null;
@@ -114,9 +120,11 @@ export function close(): void {
   loadTruncated = false;
 }
 
-async function loadEvents(sid: string): Promise<void> {
-  loadError = false;
-  loadTruncated = false;
+async function loadEvents(sid: string): Promise<{
+  events: TimelineEvent[];
+  loadError: boolean;
+  loadTruncated: boolean;
+}> {
   try {
     // Request the full window explicitly (server hard-caps at 10000) instead of
     // the silent default of 1000 so the waterfall covers as many events as the
@@ -128,19 +136,21 @@ async function loadEvents(sid: string): Promise<void> {
     // zero-time "0001-01-01", which parses to ~-6.2e13ms and otherwise poisons
     // t0/span — making the waterfall an unreadable sliver for ~1/4 of sessions.
     const raw = (data.events ?? []) as TimelineEvent[];
-    events = raw.filter((e) => {
-      const t = new Date(e.timestamp).getTime();
-      return Number.isFinite(t) && t > 0;
-    });
-    // The manifest reports the true count (total) and a hasMore flag; record
-    // truncation so draw() can note the timeline is partial.
-    loadTruncated =
-      data.hasMore === true ||
-      (typeof data.total === 'number' && data.total > raw.length);
+    return {
+      events: raw.filter((e) => {
+        const t = new Date(e.timestamp).getTime();
+        return Number.isFinite(t) && t > 0;
+      }),
+      // The manifest reports the true count (total) and a hasMore flag; record
+      // truncation so draw() can note the timeline is partial.
+      loadTruncated:
+        data.hasMore === true ||
+        (typeof data.total === 'number' && data.total > raw.length),
+      loadError: false,
+    };
   } catch (err) {
     console.error('Failed to load timeline events:', err);
-    events = [];
-    loadError = true;
+    return { events: [], loadError: true, loadTruncated: false };
   }
 }
 
