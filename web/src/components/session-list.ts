@@ -249,15 +249,16 @@ function renderList(): void {
     s.totalCost === 0 &&
     s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
     s.messageCount < 4;
+  const matchesRepo = (s: Session) =>
+    !filter || s.cwd === filter || s.sessionName === filter;
   const topLevelFilter = (s: Session) =>
-    !s.parentId &&
-    !isTrivial(s) &&
-    (!filter || s.cwd === filter || s.sessionName === filter);
+    !s.parentId && !isTrivial(s) && matchesRepo(s);
+  // ACTIVE NOW renders trivial sessions too, so they count here.
+  const activeCount = active.filter(
+    (s) => !s.parentId && matchesRepo(s),
+  ).length;
   const recentCount =
-    // Count top-level active sessions only — subagents are inlined under their
-    // parent, never rendered as standalone cards. This matches #fc-active (line
-    // below) and the rendered ACTIVE NOW / RECENT card set.
-    active.filter((s) => !s.parentId).length +
+    activeCount +
     [...lastHour, ...today].filter(
       (s) =>
         topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
@@ -268,8 +269,7 @@ function renderList(): void {
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
-  if (fcActive)
-    fcActive.textContent = String(active.filter((s) => !s.parentId).length);
+  if (fcActive) fcActive.textContent = String(activeCount);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
   const topLevel = (sessions: Session[], includeTrivial = false) =>
