@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25" />
-  <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27" />
+  <img src="https://img.shields.io/badge/TypeScript-7-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite" />
   <a href="https://github.com/Zxela/claude-monitor/actions/workflows/ci.yml"><img src="https://github.com/Zxela/claude-monitor/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/Zxela/claude-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/Zxela/claude-monitor?color=green" alt="Release" /></a>
   <img src="https://img.shields.io/github/license/Zxela/claude-monitor" alt="License" />
@@ -31,8 +31,8 @@ claude-monitor hook install             # (optional) auto-start with Claude Code
 
 ## Requirements
 
-- **Go** >= 1.25
-- **Node.js** >= 18
+- **Go** >= 1.27.3
+- **Node.js** >= 22
 - **npm**
 - **make**
 
@@ -254,8 +254,8 @@ Docker containers ───┘                    │
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Go 1.25, stdlib `net/http`, gorilla/websocket |
-| Frontend | TypeScript 5.7, Vite 6, vanilla DOM (no framework) |
+| Backend | Go 1.27, stdlib `net/http`, gorilla/websocket |
+| Frontend | TypeScript 7, Vite 8, vanilla DOM (no framework) |
 | Database | modernc.org/sqlite (pure Go, WAL mode) |
 | File watching | fsnotify + 5s polling fallback |
 | Graphs | Canvas 2D (no D3) |
