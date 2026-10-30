@@ -150,7 +150,7 @@
 }
 
 .search-box input::placeholder {
-  color: #44445a;
+  color: var(--text-dim);
   letter-spacing: 0.5px;
 }
 
