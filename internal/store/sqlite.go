@@ -1461,8 +1461,11 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 	}
 	defer eventStmt.Close()
 
+	// Startup re-ingest replays every line, so only a still-hot row may take new
+	// content; warm and cold rows keep what retention left them.
 	contentStmt, err := tx.Prepare(`INSERT INTO event_content (event_id, tier, content) VALUES (?, 'hot', ?)
-		ON CONFLICT(event_id) DO UPDATE SET content=excluded.content`)
+		ON CONFLICT(event_id) DO UPDATE SET content=excluded.content
+		WHERE event_content.tier = 'hot'`)
 	if err != nil {
 		return fmt.Errorf("prepare content stmt: %w", err)
 	}
@@ -1932,6 +1935,13 @@ func decompressContent(data []byte) (string, error) {
 func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -hotDays).Format(time.RFC3339)
 
+	// Earlier versions let re-ingest write plaintext back into warm rows next to
+	// their gzip copy. Drop that duplicate.
+	if _, err := d.db.Exec(`UPDATE event_content SET content = NULL
+		WHERE tier = 'warm' AND content IS NOT NULL AND compressed IS NOT NULL`); err != nil {
+		return 0, err
+	}
+
 	rows, err := d.rdb.Query(`SELECT ec.event_id, ec.content FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE ec.tier = 'hot' AND ec.content IS NOT NULL AND e.timestamp < ?`, cutoff)
@@ -1997,10 +2007,12 @@ func (d *DB) CompactHotToWarm(hotDays int) (int64, error) {
 	return int64(len(entries)), nil
 }
 
-// CompactWarmToCold deletes event_content older than warmDays.
+// CompactWarmToCold drops event_content older than warmDays, leaving a 'cold'
+// row with no content so a later re-ingest cannot bring it back as hot.
 func (d *DB) CompactWarmToCold(warmDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -warmDays).Format(time.RFC3339)
-	result, err := d.db.Exec(`DELETE FROM event_content WHERE event_id IN (
+	result, err := d.db.Exec(`UPDATE event_content SET tier = 'cold', content = NULL, compressed = NULL
+		WHERE tier != 'cold' AND event_id IN (
 		SELECT ec.event_id FROM event_content ec
 		JOIN events e ON e.id = ec.event_id
 		WHERE e.timestamp < ?)`, cutoff)
