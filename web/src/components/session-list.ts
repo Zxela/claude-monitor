@@ -3,7 +3,7 @@ import type { Session } from '../types';
 import type { AppState } from '../state';
 import { state, subscribe, update } from '../state';
 import { renderCompact } from './session-card';
-import { isSessionActive } from '../utils';
+import { type ActivityGroup, activityGroup, isSessionActive } from '../utils';
 import '../styles/sessions.css';
 
 let el: HTMLElement | null = null;
@@ -140,7 +140,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 function renderList(): void {
   if (!listEl) return;
 
-  const now = Date.now();
+  const now = new Date();
 
   // Build a local snapshot of sessions with stale-to-idle transitions applied.
   // We must NOT mutate the canonical state.sessions objects — create shallow copies instead.
@@ -161,20 +161,15 @@ function renderList(): void {
     }
   }
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const yesterdayStart = new Date(todayStart);
-  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-  const weekStart = new Date(todayStart);
-  weekStart.setDate(weekStart.getDate() - 7);
-
-  // Group sessions
   const active: Session[] = [];
-  const lastHour: Session[] = [];
-  const today: Session[] = [];
-  const yesterday: Session[] = [];
-  const thisWeek: Session[] = [];
-  const older: Session[] = [];
+  const timeGroups: Record<ActivityGroup, Session[]> = {
+    lastHour: [],
+    today: [],
+    yesterday: [],
+    thisWeek: [],
+    older: [],
+  };
+  const { lastHour, today, yesterday, thisWeek, older } = timeGroups;
 
   for (const sess of localSessions.values()) {
     // Bucket as active using the same effective-activity signal the card renders
@@ -186,12 +181,7 @@ function renderList(): void {
       active.push(sess);
       continue;
     }
-    const ms = new Date(sess.lastActive).getTime();
-    if (now - ms < 3600_000) lastHour.push(sess);
-    else if (ms >= todayStart.getTime()) today.push(sess);
-    else if (ms >= yesterdayStart.getTime()) yesterday.push(sess);
-    else if (ms >= weekStart.getTime()) thisWeek.push(sess);
-    else older.push(sess);
+    timeGroups[activityGroup(sess.lastActive, now)].push(sess);
   }
 
   // Auto-reveal: if a session is selected, ensure its group is visible
@@ -204,17 +194,7 @@ function renderList(): void {
     // Mirror the active-group test above: an active (incl. waiting) target lives in
     // the always-visible ACTIVE NOW section, so only time-grouped targets need reveal.
     if (target && !target.isActive) {
-      const ms = new Date(target.lastActive).getTime();
-      const groupKey =
-        now - ms < 3600_000
-          ? 'lastHour'
-          : ms >= todayStart.getTime()
-            ? 'today'
-            : ms >= yesterdayStart.getTime()
-              ? 'yesterday'
-              : ms >= weekStart.getTime()
-                ? 'thisWeek'
-                : 'older';
+      const groupKey = activityGroup(target.lastActive, now);
 
       // Switch to 'all' filter if the group isn't visible under current filter
       if (

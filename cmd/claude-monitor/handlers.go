@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/zxela/claude-monitor/internal/parser"
 	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
+	"github.com/zxela/claude-monitor/internal/sessionquery"
 	"github.com/zxela/claude-monitor/internal/store"
 	"github.com/zxela/claude-monitor/internal/watcher"
 )
@@ -35,233 +37,62 @@ func handleWs(h *hub.Hub) http.HandlerFunc {
 }
 
 // handleSessions serves the unified sessions endpoint.
-func handleSessions(sessionStore *session.Store, historyDB *store.DB) http.HandlerFunc {
+func handleSessions(queries *sessionquery.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-
-		// ?active=true — return only live active sessions
 		if q.Get("active") == "true" {
-			sessions := sessionStore.All()
-			var active []*session.Session
-			for _, s := range sessions {
-				if s.IsActive {
-					active = append(active, s)
-				}
-			}
-			if active == nil {
-				active = []*session.Session{}
-			}
-			writeJSON(w, active)
+			writeJSON(w, queries.Active())
 			return
 		}
-
-		// ?group=activity — return time-bucketed sessions
 		if q.Get("group") == "activity" {
-			now := time.Now()
-			hourAgo := now.Add(-1 * time.Hour)
-			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-			yesterdayStart := todayStart.Add(-24 * time.Hour)
-			weekStart := store.WeekStart(now)
-
-			type grouped struct {
-				Active    []*session.Session `json:"active"`
-				LastHour  []*session.Session `json:"lastHour"`
-				Today     []*session.Session `json:"today"`
-				Yesterday []*session.Session `json:"yesterday"`
-				ThisWeek  []*session.Session `json:"thisWeek"`
-				Older     []*session.Session `json:"older"`
-			}
-			g := grouped{
-				Active: []*session.Session{}, LastHour: []*session.Session{},
-				Today: []*session.Session{}, Yesterday: []*session.Session{},
-				ThisWeek: []*session.Session{}, Older: []*session.Session{},
-			}
-
-			// Start with live sessions (have real-time status).
-			seen := make(map[string]bool)
-			for _, s := range sessionStore.All() {
-				seen[s.ID] = true
-				if s.IsActive {
-					g.Active = append(g.Active, s)
-					continue
-				}
-				la := s.LastActive
-				switch {
-				case la.After(hourAgo):
-					g.LastHour = append(g.LastHour, s)
-				case la.After(todayStart):
-					g.Today = append(g.Today, s)
-				case la.After(yesterdayStart):
-					g.Yesterday = append(g.Yesterday, s)
-				case la.After(weekStart):
-					g.ThisWeek = append(g.ThisWeek, s)
-				default:
-					g.Older = append(g.Older, s)
-				}
-			}
-
-			// Fill in from DB for sessions not in the live store. Page through the
-			// whole table rather than capping at 500 rows, so older buckets are
-			// complete (the previous single 500-row slice silently dropped ~1100+
-			// older sessions from the grouped sidebar).
-			const groupPageSize = 1000
-			for off := 0; ; off += groupPageSize {
-				dbRows, err := historyDB.ListSessions(groupPageSize, off)
-				if err != nil {
-					break
-				}
-				for _, row := range dbRows {
-					if seen[row.ID] {
-						continue
-					}
-					s := row.ToSession()
-					la := s.LastActive
-					switch {
-					case la.After(hourAgo):
-						g.LastHour = append(g.LastHour, s)
-					case la.After(todayStart):
-						g.Today = append(g.Today, s)
-					case la.After(yesterdayStart):
-						g.Yesterday = append(g.Yesterday, s)
-					case la.After(weekStart):
-						g.ThisWeek = append(g.ThisWeek, s)
-					default:
-						g.Older = append(g.Older, s)
-					}
-				}
-				if len(dbRows) < groupPageSize {
-					break
-				}
-			}
-
-			writeJSON(w, g)
+			writeJSON(w, queries.ByActivity(time.Now()))
 			return
 		}
-
-		// Default: paginated list from DB, with optional ?repo= filter
-		limit := defaultPageLimit
-		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-		offset := 0
-		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
-			offset = n
-		}
-		var rows []store.SessionRow
-		var err error
-		switch {
-		case q.Get("workflow") != "":
-			rows, err = historyDB.ListSessionsByWorkflow(q.Get("workflow"), limit, offset)
-		case q.Get("repo") != "":
-			rows, err = historyDB.ListSessionsByRepo(q.Get("repo"), limit, offset)
-		default:
-			rows, err = historyDB.ListSessions(limit, offset)
-		}
+		limit, offset := pageParams(q, defaultPageLimit, 500)
+		sessions, err := queries.List(sessionquery.Filter{Workflow: q.Get("workflow"), Repo: q.Get("repo")}, limit, offset)
 		if err != nil {
 			log.Printf("list sessions error: %v", err)
 			writeJSONError(w, "failed to list sessions", http.StatusInternalServerError)
 			return
-		}
-		sessions := store.SessionRowsToSessions(rows)
-		if sessions == nil {
-			sessions = []*session.Session{}
 		}
 		writeJSON(w, sessions)
 	}
 }
 
 // handleSessionByID serves GET /api/sessions/{id}.
-func handleSessionByID(sessionStore *session.Store, historyDB *store.DB) http.HandlerFunc {
+func handleSessionByID(queries *sessionquery.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		// Try live store first
-		if sess, ok := sessionStore.Get(id); ok {
-			writeJSON(w, sess)
-			return
-		}
-		// Fall back to DB
-		row, err := historyDB.GetSession(id)
+		sess, err := queries.Get(r.PathValue("id"))
 		if err != nil {
 			writeJSONError(w, "failed to get session", http.StatusInternalServerError)
 			return
 		}
-		if row == nil {
+		if sess == nil {
 			writeJSONError(w, "session not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, row.ToSession())
+		writeJSON(w, sess)
 	}
 }
 
 // handleStats serves GET /api/stats.
-func handleStats(sessionStore *session.Store, historyDB *store.DB, fw *watcher.Watcher) http.HandlerFunc {
+func handleStats(queries *sessionquery.Queries, fw *watcher.Watcher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		type statsResponse struct {
-			TotalCost           float64            `json:"totalCost"`
-			InputTokens         int64              `json:"inputTokens"`
-			OutputTokens        int64              `json:"outputTokens"`
-			CacheReadTokens     int64              `json:"cacheReadTokens"`
-			CacheCreationTokens int64              `json:"cacheCreationTokens"`
-			SessionCount        int                `json:"sessionCount"`
-			AgentCount          int                `json:"agentCount"`
-			ActiveSessions      int                `json:"activeSessions"`
-			CacheHitPct         float64            `json:"cacheHitPct"`
-			CostRate            float64            `json:"costRate"`
-			CostByModel         map[string]float64 `json:"costByModel"`
-			CostByRepo          map[string]float64 `json:"costByRepo"`
-			DroppedEvents       int64              `json:"droppedEvents"`
-		}
-
 		since, ok := store.WindowStart(r.URL.Query().Get("window"), time.Now())
 		if !ok {
 			writeJSONError(w, "window must be today, week, month, 24h, 7d, 30d, or all", http.StatusBadRequest)
 			return
 		}
-
-		agg, err := historyDB.AggregateStats(since)
+		st, err := queries.Stats(since)
 		if err != nil {
 			log.Printf("stats aggregate error: %v", err)
 			writeJSONError(w, "failed to compute stats", http.StatusInternalServerError)
 			return
 		}
-
-		// Count active sessions and compute cost rate from live store.
-		var activeSessions int
-		var costRate float64
-		for _, sess := range sessionStore.All() {
-			if sess.IsActive {
-				activeSessions++
-				costRate += sess.CostRate
-			}
-		}
-
-		resp := statsResponse{
-			TotalCost:           agg.TotalCost,
-			InputTokens:         agg.InputTokens,
-			OutputTokens:        agg.OutputTokens,
-			CacheReadTokens:     agg.CacheReadTokens,
-			CacheCreationTokens: agg.CacheCreationTokens,
-			SessionCount:        agg.SessionCount,
-			AgentCount:          agg.AgentCount,
-			ActiveSessions:      activeSessions,
-			CostRate:            costRate,
-			CostByModel:         agg.CostByModel,
-			CostByRepo:          agg.CostByRepo,
-			DroppedEvents:       fw.DroppedEvents(),
-		}
-		if resp.CostByModel == nil {
-			resp.CostByModel = make(map[string]float64)
-		}
-		if resp.CostByRepo == nil {
-			resp.CostByRepo = make(map[string]float64)
-		}
-
-		totalInput := resp.InputTokens + resp.CacheReadTokens + resp.CacheCreationTokens
-		if totalInput > 0 {
-			resp.CacheHitPct = float64(resp.CacheReadTokens) / float64(totalInput) * 100
-		}
-
-		writeJSON(w, resp)
+		writeJSON(w, struct {
+			sessionquery.Stats
+			DroppedEvents int64 `json:"droppedEvents"`
+		}{st, fw.DroppedEvents()})
 	}
 }
 
@@ -367,7 +198,7 @@ func handleRepoStats(historyDB *store.DB) http.HandlerFunc {
 }
 
 // handleRepoSessions serves GET /api/repos/{id}/sessions.
-func handleRepoSessions(historyDB *store.DB) http.HandlerFunc {
+func handleRepoSessions(historyDB *store.DB, queries *sessionquery.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		repoID := r.PathValue("id")
 		exists, err := historyDB.RepoExists(repoID)
@@ -379,22 +210,11 @@ func handleRepoSessions(historyDB *store.DB) http.HandlerFunc {
 			writeJSONError(w, "repo not found", http.StatusNotFound)
 			return
 		}
-		limit := defaultPageLimit
-		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-		offset := 0
-		if n, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && n >= 0 {
-			offset = n
-		}
-		rows, err := historyDB.ListSessionsByRepo(repoID, limit, offset)
+		limit, offset := pageParams(r.URL.Query(), defaultPageLimit, 500)
+		sessions, err := queries.List(sessionquery.Filter{Repo: repoID}, limit, offset)
 		if err != nil {
 			writeJSONError(w, "failed to list repo sessions", http.StatusInternalServerError)
 			return
-		}
-		sessions := store.SessionRowsToSessions(rows)
-		if sessions == nil {
-			sessions = []*session.Session{}
 		}
 		writeJSON(w, sessions)
 	}
@@ -425,10 +245,7 @@ func handleSearch(historyDB *store.DB) http.HandlerFunc {
 			_, _ = w.Write([]byte("[]"))
 			return
 		}
-		limit := defaultPageLimit
-		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
+		limit, _ := pageParams(r.URL.Query(), defaultPageLimit, 200)
 		results, err := historyDB.SearchFTS(query, limit)
 		if err != nil {
 			log.Printf("search error: %v", err)
@@ -451,10 +268,7 @@ func handleSearchFull(historyDB *store.DB) http.HandlerFunc {
 			_, _ = w.Write([]byte("[]"))
 			return
 		}
-		limit := defaultPageLimit
-		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
+		limit, _ := pageParams(r.URL.Query(), defaultPageLimit, 200)
 		results, err := historyDB.SearchFullContent(query, limit)
 		if err != nil {
 			log.Printf("full search error: %v", err)
@@ -481,10 +295,7 @@ func handleSearchCombined(historyDB *store.DB) http.HandlerFunc {
 			_, _ = w.Write([]byte(`{"results":[],"meta":{"searchedFull":false}}`))
 			return
 		}
-		limit := defaultPageLimit
-		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
+		limit, _ := pageParams(r.URL.Query(), defaultPageLimit, 200)
 
 		ftsResults, err := historyDB.SearchFTS(query, limit)
 		if err != nil {
@@ -526,6 +337,19 @@ func handleSearchCombined(historyDB *store.DB) http.HandlerFunc {
 	}
 }
 
+// pageParams parses ?limit= and ?offset=. A missing, non-positive or over-max
+// limit falls back to def; a missing or negative offset is 0.
+func pageParams(q url.Values, def, maxLimit int) (limit, offset int) {
+	limit = def
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= maxLimit {
+		limit = n
+	}
+	if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
+		offset = n
+	}
+	return limit, offset
+}
+
 // handleSessionEvents serves GET /api/sessions/{id}/events.
 func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -565,14 +389,7 @@ func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 			return
 		}
 
-		limit := 100
-		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-		offset := 0
-		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
-			offset = n
-		}
+		limit, offset := pageParams(q, 100, 500)
 		events, err := historyDB.ListEvents(id, limit, offset)
 		if err != nil {
 			writeJSONError(w, "failed to list events", http.StatusInternalServerError)
@@ -586,7 +403,7 @@ func handleSessionEvents(historyDB *store.DB) http.HandlerFunc {
 }
 
 // handleSessionAutopsy serves GET /api/sessions/{id}/autopsy as markdown.
-func handleSessionAutopsy(sessionStore *session.Store, historyDB *store.DB) http.HandlerFunc {
+func handleSessionAutopsy(queries *sessionquery.Queries, historyDB *store.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimSpace(r.PathValue("id"))
 		if id == "" {
@@ -594,20 +411,14 @@ func handleSessionAutopsy(sessionStore *session.Store, historyDB *store.DB) http
 			return
 		}
 
-		var sess *session.Session
-		if live, ok := sessionStore.Get(id); ok {
-			sess = live
-		} else {
-			row, err := historyDB.GetSession(id)
-			if err != nil {
-				writeJSONError(w, "failed to get session", http.StatusInternalServerError)
-				return
-			}
-			if row == nil {
-				writeJSONError(w, "session not found", http.StatusNotFound)
-				return
-			}
-			sess = row.ToSession()
+		sess, err := queries.Get(id)
+		if err != nil {
+			writeJSONError(w, "failed to get session", http.StatusInternalServerError)
+			return
+		}
+		if sess == nil {
+			writeJSONError(w, "session not found", http.StatusNotFound)
+			return
 		}
 
 		events, err := historyDB.ListEvents(id, autopsyEventLimit, 0)
@@ -789,19 +600,10 @@ func handleSessionReplay(historyDB *store.DB) http.HandlerFunc {
 		id := r.PathValue("id")
 		q := r.URL.Query()
 		const maxReplayLimit = 10000
-		limit := 1000
-		// Clamp an out-of-range limit to the max instead of silently reverting
-		// to the default, so a client can request the full set.
-		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
-			limit = n
-			if limit > maxReplayLimit {
-				limit = maxReplayLimit
-			}
-		}
-		offset := 0
-		if n, err := strconv.Atoi(q.Get("offset")); err == nil && n >= 0 {
-			offset = n
-		}
+		// Clamp an over-max limit instead of reverting to the default, so a
+		// client can request the full set.
+		limit, offset := pageParams(q, 1000, math.MaxInt)
+		limit = min(limit, maxReplayLimit)
 		events, err := historyDB.ListReplayEvents(id, limit, offset)
 		if err != nil {
 			writeJSONError(w, "failed to list events", http.StatusInternalServerError)

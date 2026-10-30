@@ -28,6 +28,7 @@ import (
 	"github.com/zxela/claude-monitor/internal/pipeline"
 	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
+	"github.com/zxela/claude-monitor/internal/sessionquery"
 	"github.com/zxela/claude-monitor/internal/store"
 	"github.com/zxela/claude-monitor/internal/store/migrations"
 	"github.com/zxela/claude-monitor/internal/update"
@@ -658,6 +659,7 @@ Examples:
 	}()
 
 	// HTTP routes — handlers are defined in handlers.go.
+	queries := sessionquery.New(sessionStore, historyDB)
 	mux := http.NewServeMux()
 
 	// Static files — strip the "static/" prefix from embedded FS.
@@ -676,21 +678,21 @@ Examples:
 	mux.Handle("/", apiMethodGuard(mux, fileServer))
 
 	mux.HandleFunc("GET /ws", handleWs(h))
-	mux.HandleFunc("GET /api/sessions", handleSessions(sessionStore, historyDB))
-	mux.HandleFunc("GET /api/sessions/{id}", handleSessionByID(sessionStore, historyDB))
-	mux.HandleFunc("GET /api/stats", handleStats(sessionStore, historyDB, fw))
+	mux.HandleFunc("GET /api/sessions", handleSessions(queries))
+	mux.HandleFunc("GET /api/sessions/{id}", handleSessionByID(queries))
+	mux.HandleFunc("GET /api/stats", handleStats(queries, fw))
 	mux.HandleFunc("GET /api/stats/trends", handleStatsTrends(historyDB))
 	mux.HandleFunc("GET /api/stats/tools", handleToolUsage(historyDB))
 	mux.HandleFunc("GET /api/skills/sessions", handleSessionSkills(historyDB))
 	mux.HandleFunc("GET /api/repos", handleRepos(historyDB))
 	mux.HandleFunc("GET /api/repos/{id}/stats", handleRepoStats(historyDB))
-	mux.HandleFunc("GET /api/repos/{id}/sessions", handleRepoSessions(historyDB))
+	mux.HandleFunc("GET /api/repos/{id}/sessions", handleRepoSessions(historyDB, queries))
 	mux.HandleFunc("GET /api/workflows", handleWorkflows(historyDB))
 	mux.HandleFunc("GET /api/search", handleSearch(historyDB))
 	mux.HandleFunc("GET /api/search/full", handleSearchFull(historyDB))
 	mux.HandleFunc("GET /api/search/combined", handleSearchCombined(historyDB))
 	mux.HandleFunc("GET /api/sessions/{id}/events", handleSessionEvents(historyDB))
-	mux.HandleFunc("GET /api/sessions/{id}/autopsy", handleSessionAutopsy(sessionStore, historyDB))
+	mux.HandleFunc("GET /api/sessions/{id}/autopsy", handleSessionAutopsy(queries, historyDB))
 	mux.HandleFunc("GET /api/sessions/{id}/replay", handleSessionReplay(historyDB))
 	mux.HandleFunc("GET /api/settings", handleSettings(historyDB))
 	mux.HandleFunc("PUT /api/settings/{key}", handleSettingsUpdate(historyDB))

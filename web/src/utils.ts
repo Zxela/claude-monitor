@@ -93,3 +93,27 @@ export function timeAgo(ts: string): string {
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
   return `${Math.floor(secs / 86400)}d ago`;
 }
+
+export type ActivityGroup =
+  | 'lastHour'
+  | 'today'
+  | 'yesterday'
+  | 'thisWeek'
+  | 'older';
+
+// Same rule as the server's sessionquery.ByActivity: thisWeek starts at the
+// ISO-week Monday in local time, so it is empty on Mondays and Tuesdays.
+export function activityGroup(lastActive: string, now: Date): ActivityGroup {
+  const ms = new Date(lastActive).getTime();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  if (ms > now.getTime() - 3600_000) return 'lastHour';
+  if (ms > todayStart.getTime()) return 'today';
+  if (ms > yesterdayStart.getTime()) return 'yesterday';
+  if (ms > weekStart.getTime()) return 'thisWeek';
+  return 'older';
+}
