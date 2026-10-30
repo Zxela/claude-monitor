@@ -9,6 +9,7 @@ import { escapeHtml, sessionDisplayName } from '../utils';
 import { setLastTool } from '../tool-tracker';
 import { notify } from '../notifications';
 import { open as openReplay } from './replay';
+import { renderPrLinks } from './pr-links';
 import '../styles/feed.css';
 
 let container: HTMLElement | null = null;
@@ -245,7 +246,9 @@ function updateHeader(): void {
       <span class="replay-btn" role="button" tabindex="0" aria-label="Open session replay" style="margin-left:6px;color:var(--green);font-size:9px;cursor:pointer;border:1px solid rgba(63,185,80,0.3);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">REPLAY</span>
       <span class="autopsy-btn" role="button" tabindex="0" aria-label="Download session autopsy markdown" style="margin-left:6px;color:var(--purple, #aa77dd);font-size:9px;cursor:pointer;border:1px solid rgba(170,119,221,0.4);padding:1px 6px;border-radius:2px;letter-spacing:0.5px">AUTOPSY</span>
       <span class="back-to-feed" role="button" tabindex="0" aria-label="Back to all sessions" style="margin-left:auto;color:var(--cyan);font-size:10px;cursor:pointer;letter-spacing:0.5px">← ALL</span>`;
+    const prLinks = renderPrLinks(sess?.prLinks);
     const backBtn = headerEl.querySelector('.back-to-feed');
+    if (prLinks) headerEl.insertBefore(prLinks, backBtn);
     backBtn?.addEventListener('click', () => {
       update({ selectedSessionId: null });
     });

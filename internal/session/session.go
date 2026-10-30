@@ -28,11 +28,20 @@ type MessageCosts struct {
 	CacheCreationTokens int64
 }
 
+// PRLink is a pull/merge request Claude Code linked to the session.
+type PRLink struct {
+	Number     int    `json:"number"`
+	URL        string `json:"url"`
+	Repository string `json:"repository,omitempty"`
+}
+
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
 	ID                  string                  `json:"id"`
 	RepoID              string                  `json:"repoId,omitempty"`
 	SessionName         string                  `json:"sessionName,omitempty"`
+	AITitle             string                  `json:"aiTitle,omitempty"` // Claude Code's generated title; shown when SessionName is empty
+	PRLinks             []PRLink                `json:"prLinks,omitempty"`
 	TotalCost           float64                 `json:"totalCost"`
 	InputTokens         int64                   `json:"inputTokens"`
 	OutputTokens        int64                   `json:"outputTokens"`
@@ -64,6 +73,23 @@ type Session struct {
 	repoSourceRank      int                     `json:"-"`                    // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 	repoToplevel        string                  `json:"-"`                    // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
 	repoInherited       bool                    `json:"-"`                    // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
+}
+
+// SetPRLink records l, replacing any earlier link with the same number.
+// It builds a new slice because Get/All snapshots share the old one.
+func (s *Session) SetPRLink(l PRLink) {
+	links := make([]PRLink, 0, len(s.PRLinks)+1)
+	replaced := false
+	for _, cur := range s.PRLinks {
+		if cur.Number == l.Number {
+			cur, replaced = l, true
+		}
+		links = append(links, cur)
+	}
+	if !replaced {
+		links = append(links, l)
+	}
+	s.PRLinks = links
 }
 
 // RepoSourceRank reports the resolution-authority rank of the current RepoID

@@ -1962,3 +1962,91 @@ func TestProcess_KeylessLinesGetOwnRows(t *testing.T) {
 		t.Fatalf("got %d rows, want 2 (one per distinct keyless line)", len(events))
 	}
 }
+
+func TestProcess_SessionMetadataLines(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	var details, updates int
+	p := New(sessions, db, repo.NewResolver(), func(_ *parser.Event, _ *session.Session, _, sendDetail bool) {
+		if sendDetail {
+			details++
+		} else {
+			updates++
+		}
+	})
+	defer p.Stop()
+
+	lines := []string{
+		`{"type":"assistant","sessionId":"s","uuid":"u1","timestamp":"2026-10-07T22:00:00Z","message":{"id":"m1","role":"assistant","content":"hi","stop_reason":"end_turn"}}`,
+		`{"type":"ai-title","aiTitle":"Multi-repo support","sessionId":"s"}`,
+		`{"type":"pr-link","sessionId":"s","prNumber":7,"prUrl":"https://old.example/7","prRepository":"g/r","timestamp":"2026-10-07T22:07:43Z"}`,
+		`{"type":"pr-link","sessionId":"s","prNumber":8,"prUrl":"https://example/8","prRepository":"g/r","timestamp":"2026-10-07T22:08:00Z"}`,
+		`{"type":"pr-link","sessionId":"s","prNumber":7,"prUrl":"https://example/7","prRepository":"g/r","timestamp":"2026-10-07T22:09:00Z"}`,
+	}
+	for _, l := range lines {
+		p.Process(watcher.Event{SessionID: "s", Line: []byte(l)})
+	}
+
+	sess, _ := sessions.Get("s")
+	if sess.AITitle != "Multi-repo support" {
+		t.Errorf("AITitle = %q", sess.AITitle)
+	}
+	if sess.SessionName != "" {
+		t.Errorf("SessionName = %q, want empty (AI title is kept apart)", sess.SessionName)
+	}
+	wantLinks := []session.PRLink{
+		{Number: 7, URL: "https://example/7", Repository: "g/r"},
+		{Number: 8, URL: "https://example/8", Repository: "g/r"},
+	}
+	if fmt.Sprint(sess.PRLinks) != fmt.Sprint(wantLinks) {
+		t.Errorf("PRLinks = %+v, want %+v", sess.PRLinks, wantLinks)
+	}
+	if sess.EventCount != 1 || sess.MessageCount != 1 {
+		t.Errorf("counts = events %d, messages %d; want 1, 1", sess.EventCount, sess.MessageCount)
+	}
+	if !sess.LastActive.Equal(time.Date(2026, 10, 7, 22, 0, 0, 0, time.UTC)) {
+		t.Errorf("LastActive = %v, metadata lines must not move it", sess.LastActive)
+	}
+	if details != 1 || updates != 4 {
+		t.Errorf("broadcasts = %d detail, %d update-only; want 1, 4", details, updates)
+	}
+
+	p.flush()
+	events, err := db.ListEvents("s", 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Errorf("stored events = %d, want 1", len(events))
+	}
+
+	// Restart: a fresh store must restore the metadata from the DB on the
+	// first line it sees, before any ai-title line is replayed.
+	sessions2 := session.NewStore()
+	p2 := New(sessions2, db, repo.NewResolver(), nil)
+	defer p2.Stop()
+	p2.Process(watcher.Event{SessionID: "s", Line: []byte(lines[0]), Bootstrap: true})
+	sess2, _ := sessions2.Get("s")
+	if sess2.AITitle != "Multi-repo support" || fmt.Sprint(sess2.PRLinks) != fmt.Sprint(wantLinks) {
+		t.Errorf("after restart: AITitle %q, PRLinks %+v", sess2.AITitle, sess2.PRLinks)
+	}
+}
+
+func TestProcess_SessionMetadataOnlyIsFlushed(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"assistant","sessionId":"s","uuid":"u1","message":{"id":"m1","role":"assistant","content":"hi"}}`)})
+	p.flush()
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"Later title","sessionId":"s"}`)})
+	p.flush()
+
+	row, err := db.GetSession("s")
+	if err != nil || row == nil {
+		t.Fatalf("GetSession: %v %v", row, err)
+	}
+	if row.AITitle != "Later title" {
+		t.Errorf("persisted AITitle = %q, want it flushed without a following event", row.AITitle)
+	}
+}

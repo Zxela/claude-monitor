@@ -864,3 +864,33 @@ func TestDropCollapsedKeylessEvents(t *testing.T) {
 		t.Errorf("fts match for kept row = %d (err %v), want 1", n, err)
 	}
 }
+
+func TestSessionAITitlePRLink_UpDown(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	for _, col := range []string{"ai_title", "pr_links"} {
+		if !columnExists(t, db, "sessions", col) {
+			t.Fatalf("after RunUp: sessions.%s missing", col)
+		}
+	}
+
+	rollDownTo(t, db, "session_ai_title_pr_link")
+	for _, col := range []string{"ai_title", "pr_links"} {
+		if columnExists(t, db, "sessions", col) {
+			t.Errorf("after RunDown: sessions.%s should be dropped", col)
+		}
+	}
+	// Versions may have gaps; the next Down must find a registered migration.
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown below 025: %v", err)
+	}
+
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+	if !columnExists(t, db, "sessions", "pr_links") {
+		t.Error("pr_links not restored after re-RunUp")
+	}
+}

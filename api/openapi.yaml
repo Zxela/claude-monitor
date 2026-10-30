@@ -1030,6 +1030,19 @@ components:
           description: >
             Optional session-level name from a custom-title or agent-name message.
           example: "Refactor auth module"
+        aiTitle:
+          type: string
+          description: >
+            Title Claude Code generated for the session (ai-title line). Clients
+            show it when sessionName is empty. Omitted when empty.
+          example: "Gitlab-statistics MR 7 multi-repo support"
+        prLinks:
+          type: array
+          description: >
+            Pull or merge requests Claude Code linked to the session (pr-link
+            lines), one entry per number holding the latest link. Omitted when empty.
+          items:
+            $ref: '#/components/schemas/PRLink'
         totalCost:
           type: number
           format: double
@@ -1146,6 +1159,21 @@ components:
           description: Origin of the session record.
           enum: [session, subagent, workflow_agent]
           example: "workflow_agent"
+
+    PRLink:
+      type: object
+      required: [number, url]
+      properties:
+        number:
+          type: integer
+          example: 14793
+        url:
+          type: string
+          example: "https://gitlab.example.com/group/repo/-/merge_requests/14793"
+        repository:
+          type: string
+          description: Repository path as Claude Code reported it. Omitted when empty.
+          example: "group/repo"
 
     GroupedSessions:
       type: object
@@ -1908,7 +1936,9 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         sessionName:
           type: string
-          description: Display name for the session.
+          description: >
+            Display name for the session: its sessionName, else its aiTitle,
+            else its task description.
           example: "claude-monitor"
         cost:
           type: number
