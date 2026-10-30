@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zxela/claude-monitor/internal/repo"
 )
 
 // activeThreshold is how recent lastActive must be for a session to be considered active.
@@ -71,9 +73,9 @@ type Session struct {
 	AgentID             string                  `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
 	AgentKind           string                  `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
 	SourceFile          string                  `json:"-"`                    // JSONL file path currently providing events (not serialized)
-	repoSourceRank      int                     `json:"-"`                    // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
-	repoToplevel        string                  `json:"-"`                    // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
-	repoInherited       bool                    `json:"-"`                    // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
+	repoSourceRank      int                     `json:"-"`                    // repo.Pin.Rank; see RepoPin
+	repoToplevel        string                  `json:"-"`                    // repo.Pin.Toplevel
+	repoInherited       bool                    `json:"-"`                    // repo.Pin.Inherited
 	dedupPending        bool                    `json:"-"`                    // restored from the DB without dedup state; load it before applying a line
 }
 
@@ -94,34 +96,19 @@ func (s *Session) SetPRLink(l PRLink) {
 	s.PRLinks = links
 }
 
-// RepoSourceRank reports the resolution-authority rank of the current RepoID
-// (see repo.Source* constants). Higher means more authoritative.
-func (s *Session) RepoSourceRank() int { return s.repoSourceRank }
+// RepoPin reports the Repo this session is attributed to and its provenance.
+func (s *Session) RepoPin() repo.Pin {
+	return repo.Pin{ID: s.RepoID, Rank: s.repoSourceRank, Toplevel: s.repoToplevel, Inherited: s.repoInherited}
+}
 
-// SetRepoSourceRank records the resolution-authority rank of the current RepoID.
-func (s *Session) SetRepoSourceRank(rank int) { s.repoSourceRank = rank }
-
-// RepoToplevel reports the git working-tree root that the current RepoID was
-// resolved from (empty for non-git fallbacks). Used to decide whether a later
-// resolution refers to the SAME repository as the start-pinned one.
-func (s *Session) RepoToplevel() string { return s.repoToplevel }
-
-// SetRepoToplevel records the git working-tree root of the current RepoID.
-func (s *Session) SetRepoToplevel(toplevel string) { s.repoToplevel = toplevel }
-
-// RepoInherited reports whether RepoID was inherited from this session's parent
-// (a child/subagent that took the parent's project) rather than resolved from
-// its own cwd. The flush path uses this to skip persisting the child's worktree
-// cwd → inherited repo_id in cwd_repos, which would otherwise mis-attribute
-// future unrelated sessions resolving the same directory.
-func (s *Session) RepoInherited() bool { return s.repoInherited }
-
-// SetRepoInherited records whether the current RepoID was inherited from a parent.
-func (s *Session) SetRepoInherited(v bool) { s.repoInherited = v }
+// SetRepoPin sets RepoID and its provenance.
+func (s *Session) SetRepoPin(p repo.Pin) {
+	s.RepoID, s.repoSourceRank, s.repoToplevel, s.repoInherited = p.ID, p.Rank, p.Toplevel, p.Inherited
+}
 
 // RepoFromGit reports whether the current RepoID came from an authoritative git
 // resolution (git remote or toplevel), as opposed to a non-git fallback.
-func (s *Session) RepoFromGit() bool { return s.repoSourceRank >= 2 }
+func (s *Session) RepoFromGit() bool { return s.repoSourceRank >= repo.SourceGitToplevel }
 
 // HasSeenMessageID reports whether the given key has been recorded.
 func (s *Session) HasSeenMessageID(key string) bool {

@@ -1,27 +1,25 @@
 package repo
 
 import (
-	"context"
 	"net/url"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
-const gitTimeout = 2 * time.Second
 const maxCacheSize = 1000
 
 // Resolver resolves git repository identity from a working directory path.
 type Resolver struct {
+	git   Git
 	mu    sync.RWMutex
 	cache map[string]*Repo
 }
 
-// NewResolver creates a new Resolver with an empty cache.
-func NewResolver() *Resolver {
+// NewResolver creates a Resolver with an empty cache that asks git about cwds.
+func NewResolver(git Git) *Resolver {
 	return &Resolver{
+		git:   git,
 		cache: make(map[string]*Repo),
 	}
 }
@@ -56,20 +54,18 @@ func (r *Resolver) Resolve(cwd, label string) (*Repo, error) {
 }
 
 func (r *Resolver) resolve(cwd, label string) *Repo {
-	// Try git remote origin. Also capture the working-tree root (toplevel) so
-	// callers can recognise when a later resolution refers to the SAME repo
-	// (used for start-pinned repo_id upgrades). A toplevel lookup failure is
-	// non-fatal — the remote URL still uniquely identifies the repo.
-	if rawURL, err := gitRemoteURL(cwd); err == nil && rawURL != "" {
+	// A toplevel lookup failure is non-fatal here: the remote URL still
+	// uniquely identifies the repo.
+	if rawURL, err := r.git.RemoteURL(cwd); err == nil && rawURL != "" {
 		id, name, fullURL := normalizeRemoteURL(rawURL)
-		toplevel, _ := gitToplevel(cwd)
-		return &Repo{ID: id, Name: name, URL: fullURL, FromGit: true, Toplevel: toplevel}
+		toplevel, _ := r.git.Toplevel(cwd)
+		return &Repo{ID: id, Name: name, URL: fullURL, Rank: SourceGitRemote, Toplevel: toplevel}
 	}
 
 	// Fallback: git toplevel basename
-	if toplevel, err := gitToplevel(cwd); err == nil && toplevel != "" {
+	if toplevel, err := r.git.Toplevel(cwd); err == nil && toplevel != "" {
 		base := filepath.Base(toplevel)
-		return &Repo{ID: base, Name: base, FromGit: true, Toplevel: toplevel}
+		return &Repo{ID: base, Name: base, Rank: SourceGitToplevel, Toplevel: toplevel}
 	}
 
 	// Container fallback: label + basename
@@ -80,26 +76,6 @@ func (r *Resolver) resolve(cwd, label string) *Repo {
 
 	// Final fallback: basename only
 	return &Repo{ID: base, Name: base}
-}
-
-func gitRemoteURL(cwd string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", cwd, "remote", "get-url", "origin").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func gitToplevel(cwd string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // normalizeRemoteURL parses a git remote URL and returns a normalized ID,
@@ -141,14 +117,13 @@ func normalizeRemoteURL(rawURL string) (id, name, fullURL string) {
 	return
 }
 
-// LoadCache populates the in-memory cache from persisted cwd→repoID mappings.
-// Loaded entries have only the ID set; Name and URL are expected to come from
-// the repos table.
-func (r *Resolver) LoadCache(entries map[string]string) {
+// LoadCache populates the in-memory cache from persisted cwd resolutions.
+// Loaded entries carry no Name or URL; those come from the repos table.
+func (r *Resolver) LoadCache(entries []CacheEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for cwd, repoID := range entries {
-		r.cache[cwd] = &Repo{ID: repoID}
+	for _, e := range entries {
+		r.cache[e.CWD] = &Repo{ID: e.RepoID, Rank: e.Rank, Toplevel: e.Toplevel}
 	}
 }
 
@@ -157,16 +132,4 @@ func (r *Resolver) ClearCache() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cache = make(map[string]*Repo)
-}
-
-// Cache returns a copy of the current in-memory cache.
-func (r *Resolver) Cache() map[string]*Repo {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make(map[string]*Repo, len(r.cache))
-	for k, v := range r.cache {
-		copied := *v
-		out[k] = &copied
-	}
-	return out
 }

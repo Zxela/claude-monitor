@@ -1123,6 +1123,29 @@ func TestResumeFromOffsets_UpDown(t *testing.T) {
 	}
 }
 
+func TestCwdRepoRank_UpDown(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	newCols := []string{"source_rank", "repo_toplevel"}
+	for _, col := range newCols {
+		if !columnExists(t, db, "cwd_repos", col) {
+			t.Fatalf("cwd_repos.%s missing", col)
+		}
+	}
+
+	rollDownTo(t, db, "cwd_repo_rank")
+	for _, col := range newCols {
+		if columnExists(t, db, "cwd_repos", col) {
+			t.Errorf("cwd_repos.%s still present after rollback", col)
+		}
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+}
+
 func TestRunDown_SkipsUnregisteredVersions(t *testing.T) {
 	saved := registry
 	defer func() { registry = saved }()

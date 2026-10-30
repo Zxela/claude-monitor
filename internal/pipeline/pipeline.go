@@ -150,22 +150,13 @@ func (p *Pipeline) resolvePendingLinks() {
 					s.ParentID = parentUUID
 					changed = true
 				}
-				// Back-fill repo inheritance for the child-before-parent ordering:
-				// when the child arrived first, its initial event resolved its own
-				// (worktree) cwd to a phantom repo because the parent was unknown.
-				// Now that the parent exists, re-point the child at the parent's
-				// project, mirroring applyRepoResolution's rule 1.
+				// The child arrived before its parent, so its first event pinned
+				// its own (worktree) cwd. Re-point it at the parent's project.
 				if parentRepoID != "" {
-					// The pin is now inherited — flag it so subsequent flushes don't
-					// persist this child's worktree cwd → parent repo in cwd_repos.
-					changed = changed || !s.RepoInherited()
-					s.SetRepoInherited(true)
-					if s.RepoID != parentRepoID {
-						s.RepoID = parentRepoID
-						s.SetRepoSourceRank(repo.SourceGitRemote)
-						s.SetRepoToplevel("")
-						changed = true
-					}
+					before := s.RepoPin()
+					after := before.Inherit(parentRepoID)
+					changed = changed || after != before
+					s.SetRepoPin(after)
 				}
 			})
 			// The child may have no further lines, so nothing else would persist
@@ -540,70 +531,23 @@ func (p *Pipeline) applyWorkflowIdentity(s *session.Session, ev watcher.Event) {
 }
 
 // applyRepoResolution attributes the session's repo_id and copies branch/model
-// metadata. Three rules, in priority order:
-//
-//  1. Parent inheritance: a child session (one with a known parent) inherits the
-//     parent's repo_id verbatim, instead of resolving its own cwd. This stops
-//     subagents running in git worktrees from minting phantom "agent-<hash>"
-//     repos and fragmenting the parent run across fake projects.
-//  2. Start-pin: once a (non-child) session has a repo_id, it stays pinned to
-//     the START project. A later resolution may only upgrade the resolution
-//     QUALITY of the SAME repository (e.g. a toplevel-basename id replaced by the
-//     git-remote id for that same checkout) — never switch to a different repo,
-//     even if that different repo resolved at a higher source rank.
-//  3. CWD is set once (session start) and never overwritten — see below.
+// metadata. A Child session with a known parent inherits the parent's repo_id
+// instead of resolving its own (worktree) cwd, so subagents don't mint phantom
+// "agent-<hash>" repos. Otherwise repo.Pin.Resolve start-pins the session.
 func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r *repo.Repo, parentRepoID string) {
-	// Rule 1: inherit the parent's project. parentRepoID is non-empty only when
-	// this session has a known parent with a resolved repo_id. The child mirrors
-	// the parent's CURRENT repo_id on every event — it is NOT set-once: if the
-	// parent's own pin is later upgraded for the same checkout (e.g. a
-	// toplevel-basename id replaced by the git-remote id), the next child event
-	// re-points the child to follow it. The s.RepoID != parentRepoID guard only
-	// skips a redundant write when they already agree. Start-pin (rule 2) keeps
-	// the parent from flipping to a DIFFERENT repo, so this tracking can only
-	// ever follow a same-repo quality upgrade, never a project switch.
 	if parentRepoID != "" {
-		// Mark the pin as inherited so the flush path skips recording this child's
-		// (worktree) cwd → inherited repo_id in cwd_repos. That cwd belongs to the
-		// child's own working tree, not the parent's project, and persisting the
-		// mapping would mis-attribute future unrelated sessions that resolve the
-		// same directory.
-		s.SetRepoInherited(true)
-		if s.RepoID != parentRepoID {
-			s.RepoID = parentRepoID
-			// Mark as git-remote authority: an inherited id is as trustworthy as
-			// the parent's and must not be downgraded by the child's own cwd.
-			s.SetRepoSourceRank(repo.SourceGitRemote)
-			s.SetRepoToplevel("")
-		}
+		s.SetRepoPin(s.RepoPin().Inherit(parentRepoID))
 	} else if r != nil {
-		newRank := r.SourceRank()
-		if s.RepoID == "" {
-			// First resolution for this session: pin to the START project.
-			s.RepoID = r.ID
-			s.SetRepoSourceRank(newRank)
-			s.SetRepoToplevel(r.Toplevel)
-			if err := p.db.UpsertRepo(r); err != nil {
-				log.Printf("upsert repo error: %v", err)
-			}
-		} else if r.ID != s.RepoID && newRank > s.RepoSourceRank() && sameRepo(s, r, msg.CWD) {
-			// Upgrade ONLY when the new, higher-authority resolution refers to the
-			// SAME repository as the pinned one (e.g. the start cwd resolved to a
-			// toplevel basename because the git-remote lookup timed out, and a
-			// later event for the same checkout resolves the remote origin id).
-			// A higher-rank resolution for a DIFFERENT project (e.g. cd'ing into
-			// another repo) is intentionally ignored so the project stays pinned
-			// to where the session started. When in doubt, keep the original.
-			s.RepoID = r.ID
-			s.SetRepoSourceRank(newRank)
-			s.SetRepoToplevel(r.Toplevel)
+		// s.CWD is still the start cwd: it is set below, once.
+		if pin, adopted := s.RepoPin().Resolve(r, s.CWD, msg.CWD); adopted {
+			s.SetRepoPin(pin)
 			if err := p.db.UpsertRepo(r); err != nil {
 				log.Printf("upsert repo error: %v", err)
 			}
 		}
 	}
 
-	// Rule 3: CWD reflects session START, not the latest event. Set it once (the
+	// CWD reflects session START, not the latest event. Set it once (the
 	// first event that carries a cwd) and never overwrite it, so a card's shown
 	// directory cannot drift away from the project it's attributed to (e.g. after
 	// a `cd`). Repo resolution above still uses the per-event msg.CWD, so this
@@ -627,60 +571,6 @@ func (p *Pipeline) applyRepoResolution(s *session.Session, msg *parser.Event, r 
 	if msg.Entrypoint != "" && s.Entrypoint == "" {
 		s.Entrypoint = msg.Entrypoint
 	}
-}
-
-// sameRepo reports whether resolution r refers to the SAME repository the
-// session is already pinned to, so a higher-authority resolution may upgrade the
-// id in place (rather than switch projects). newCWD is the cwd r was resolved
-// from. It is deliberately conservative — it returns true only on positive
-// evidence, so an ambiguous case keeps the original pinned repo.
-//
-// Evidence, strongest first:
-//   - both sides git-backed: the incoming working-tree root is the pinned one,
-//     or is NESTED WITHIN it (same-or-narrower). Two resolutions of the same
-//     checkout always share a toplevel — git normalises any subdir to the repo
-//     root — so the headline case is equality. The reverse direction is rejected
-//     on purpose: an incoming toplevel that CONTAINS the pin is a WIDER repo
-//     (e.g. the outer monorepo of a nested inner checkout), and letting an inner
-//     project flip up to its enclosing repo would violate the start-pin.
-//   - the session has no recorded toplevel (its pin came from a non-git fallback,
-//     i.e. git was unavailable at start) but the new resolution's toplevel
-//     contains the session's START cwd. That is the headline upgrade case: the
-//     start cwd's git-remote lookup timed out → basename fallback, and a later
-//     event for the SAME directory resolves the real git id.
-//
-// pathContains compares on a trailing separator so "/repo" is not treated as a
-// prefix of "/repo2".
-func sameRepo(s *session.Session, r *repo.Repo, newCWD string) bool {
-	if r.Toplevel == "" {
-		// No git root on the incoming resolution — no positive same-repo evidence.
-		return false
-	}
-	if top := s.RepoToplevel(); top != "" {
-		// Both sides are git-backed. Same repo only when the incoming root is the
-		// pinned one or nested inside it. A wider incoming root that CONTAINS the
-		// pin (an outer monorepo) is a different, enclosing project — reject it so
-		// the inner pin cannot flip outward.
-		return pathContains(top, r.Toplevel)
-	}
-	// The pin is a non-git fallback (no toplevel). Use the session's start cwd:
-	// if it lives inside the incoming resolution's working tree, this is a
-	// higher-confidence resolution of the SAME directory the session started in.
-	if s.CWD != "" {
-		return pathContains(r.Toplevel, s.CWD)
-	}
-	// Last resort: the cwd this resolution came from is the start cwd (first
-	// event), so a containment check against it is still same-directory evidence.
-	return newCWD != "" && pathContains(r.Toplevel, newCWD)
-}
-
-// pathContains reports whether parent is an ancestor of (or equal to) child,
-// comparing on a trailing separator so "/repo" is not a prefix of "/repo2".
-func pathContains(parent, child string) bool {
-	if parent == child {
-		return true
-	}
-	return strings.HasPrefix(child+string(filepath.Separator), parent+string(filepath.Separator))
 }
 
 // applySessionMeta updates session naming, source file tracking, and task description.
