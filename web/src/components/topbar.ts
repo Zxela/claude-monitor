@@ -10,6 +10,8 @@ let el: HTMLElement | null = null;
 let searchInput: HTMLInputElement | null = null;
 let renderAbort: AbortController | null = null;
 let statsTimer: ReturnType<typeof setInterval> | null = null;
+let statsSeq = 0;
+let statsSettledSeq = 0;
 
 let statActive: HTMLElement | null = null;
 let statCost: HTMLElement | null = null;
@@ -181,11 +183,35 @@ export function render(container: HTMLElement): void {
 }
 
 function refreshStats(): void {
+  // Refreshes can overlap; one that settles after a newer one is outdated.
+  const seq = ++statsSeq;
+  const settle = (apply: () => void) => {
+    if (seq < statsSettledSeq) return;
+    statsSettledSeq = seq;
+    apply();
+  };
   fetchStats(state.statsWindow)
-    .then((stats) => {
-      update({ stats });
-    })
-    .catch(() => {});
+    .then((stats) =>
+      settle(() => {
+        update({ stats });
+        setStatsStale(false);
+      }),
+    )
+    .catch(() => settle(() => setStatsStale(true)));
+}
+
+// Dim the figures and say why when a refresh fails, instead of leaving the
+// last numbers on screen as if they were current. The note goes on each stat
+// because their own titles would otherwise win over one on the topbar.
+function setStatsStale(stale: boolean): void {
+  if (!el) return;
+  el.classList.toggle('stats-stale', stale);
+  el.querySelectorAll<HTMLElement>('.topbar-stat').forEach((stat) => {
+    stat.dataset.baseTitle ??= stat.title;
+    stat.title = stale
+      ? `Stats are out of date: the last refresh failed\n\n${stat.dataset.baseTitle}`
+      : stat.dataset.baseTitle;
+  });
 }
 
 function updateWindowButtons(): void {

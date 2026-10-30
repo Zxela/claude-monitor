@@ -213,3 +213,8 @@
 .win-btn:hover {
   border-color: var(--text-dim);
 }
+
+/* Last stats refresh failed: dim the figures rather than present them as current. */
+.topbar.stats-stale .topbar-stat .val {
+  opacity: 0.45;
+}

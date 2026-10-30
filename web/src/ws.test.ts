@@ -106,6 +106,36 @@ describe('ws connect', () => {
     expect(state.connected).toBe(true);
     expect(state.grouped).toBeNull();
   });
+
+  it('retries a failed reconcile fetch while the socket stays open', async () => {
+    const groups = emptyGroups();
+    fetchGroupedSessions
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValueOnce(groups);
+    const { connect, state } = await load();
+
+    connect();
+    latest().onopen?.();
+    await flush();
+    expect(state.grouped).toBeNull();
+
+    vi.advanceTimersByTime(2000);
+    await flush();
+    expect(state.grouped).toBe(groups);
+  });
+
+  it('stops retrying the reconcile fetch once the socket closes', async () => {
+    fetchGroupedSessions.mockRejectedValue(new Error('down'));
+    const { connect } = await load();
+
+    connect();
+    latest().onopen?.();
+    await flush();
+    latest().onclose?.();
+    vi.advanceTimersByTime(2000);
+    await flush();
+    expect(fetchGroupedSessions).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ws reconnect', () => {
