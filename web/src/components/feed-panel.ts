@@ -76,7 +76,7 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
     if (reconnected && state.view === 'list' && feedContent) {
       if (state.selectedSessionId) {
         currentLoadSessionId = null;
-        loadRecentMessages(state.selectedSessionId);
+        loadRecentMessages(state.selectedSessionId, true);
       } else {
         // Wait for the session list refresh that follows the reconnect, so
         // sessions that became active during the outage are included.
@@ -451,12 +451,18 @@ function renderBackfill(items: FeedItem[]): number {
   return merged.length;
 }
 
-async function loadRecentMessages(sessionId: string): Promise<void> {
+// A refresh keeps the current feed visible until the replacement loads.
+async function loadRecentMessages(
+  sessionId: string,
+  refresh = false,
+): Promise<void> {
   if (!feedContent) return;
   if (currentLoadSessionId === sessionId) return;
   currentLoadSessionId = sessionId;
   const seq = beginBackfill();
-  feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
+  if (!refresh) {
+    feedContent.innerHTML = '<div class="feed-empty">Loading...</div>';
+  }
 
   try {
     const [messages, pinned] = await Promise.all([
@@ -499,11 +505,11 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       update({ searchHighlightEventId: null });
     }
   } catch {
-    if (
-      seq === loadSeq &&
-      currentLoadSessionId === sessionId &&
-      renderBackfill([]) === 0
-    ) {
+    if (seq !== loadSeq || currentLoadSessionId !== sessionId) return;
+    if (refresh) {
+      // Live events were appended to the kept feed as they arrived.
+      liveSinceBackfill = null;
+    } else if (renderBackfill([]) === 0) {
       feedContent.innerHTML =
         '<div class="feed-empty">Failed to load messages</div>';
     }

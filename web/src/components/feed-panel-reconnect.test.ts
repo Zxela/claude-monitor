@@ -70,6 +70,21 @@ describe('feed panel reconnect', () => {
     expect(entries(mount).length).toBe(1);
   });
 
+  it('keeps the selected session history when the reconnect reload fails', async () => {
+    const { update, mount } = await setup();
+    update({ connected: true });
+    update({ selectedSessionId: 's1' });
+    await tick();
+
+    fetchSessionEvents.mockRejectedValueOnce(new Error('down'));
+    update({ connected: false });
+    update({ connected: true });
+    expect(entries(mount).length).toBe(1);
+    await tick();
+    expect(entries(mount).length).toBe(1);
+    expect(mount.textContent).not.toContain('Failed to load messages');
+  });
+
   it('backfills sessions that became active during the outage', async () => {
     const { state, update } = await setup();
     update({ connected: true });
