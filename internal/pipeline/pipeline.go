@@ -131,6 +131,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		}
 		return
 	}
+	if event.IsInternal() {
+		return
+	}
 
 	// Stage 2: Resolve Repo
 	var resolvedRepo *repo.Repo
