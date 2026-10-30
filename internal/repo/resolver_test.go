@@ -1,13 +1,10 @@
 package repo
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 )
 
-func TestNormalizeRemoteURL(t *testing.T) {
+func TestResolve_RemoteURLForms(t *testing.T) {
 	tests := []struct {
 		name    string
 		rawURL  string
@@ -15,279 +12,78 @@ func TestNormalizeRemoteURL(t *testing.T) {
 		wantNm  string
 		wantURL string
 	}{
-		{
-			name:    "SCP-style SSH",
-			rawURL:  "git@github.com:Zxela/claude-monitor.git",
-			wantID:  "github.com/Zxela/claude-monitor",
-			wantNm:  "claude-monitor",
-			wantURL: "git@github.com:Zxela/claude-monitor.git",
-		},
-		{
-			name:    "HTTPS with .git",
-			rawURL:  "https://github.com/Zxela/claude-monitor.git",
-			wantID:  "github.com/Zxela/claude-monitor",
-			wantNm:  "claude-monitor",
-			wantURL: "https://github.com/Zxela/claude-monitor.git",
-		},
-		{
-			name:    "HTTPS without .git",
-			rawURL:  "https://github.com/Zxela/claude-monitor",
-			wantID:  "github.com/Zxela/claude-monitor",
-			wantNm:  "claude-monitor",
-			wantURL: "https://github.com/Zxela/claude-monitor",
-		},
-		{
-			name:    "SSH protocol URL",
-			rawURL:  "ssh://git@github.com/Zxela/claude-monitor.git",
-			wantID:  "github.com/Zxela/claude-monitor",
-			wantNm:  "claude-monitor",
-			wantURL: "ssh://git@github.com/Zxela/claude-monitor.git",
-		},
-		{
-			name:    "GitLab nested groups",
-			rawURL:  "git@gitlab.com:org/team/project.git",
-			wantID:  "gitlab.com/org/team/project",
-			wantNm:  "project",
-			wantURL: "git@gitlab.com:org/team/project.git",
-		},
+		{"SCP-style SSH", "git@github.com:Zxela/claude-monitor.git", "github.com/Zxela/claude-monitor", "claude-monitor", "git@github.com:Zxela/claude-monitor.git"},
+		{"HTTPS with .git", "https://github.com/Zxela/claude-monitor.git", "github.com/Zxela/claude-monitor", "claude-monitor", "https://github.com/Zxela/claude-monitor.git"},
+		{"HTTPS without .git", "https://github.com/Zxela/claude-monitor", "github.com/Zxela/claude-monitor", "claude-monitor", "https://github.com/Zxela/claude-monitor"},
+		{"SSH protocol URL", "ssh://git@github.com/Zxela/claude-monitor.git", "github.com/Zxela/claude-monitor", "claude-monitor", "ssh://git@github.com/Zxela/claude-monitor.git"},
+		{"GitLab nested groups", "git@gitlab.com:org/team/project.git", "gitlab.com/org/team/project", "project", "git@gitlab.com:org/team/project.git"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, name, fullURL := normalizeRemoteURL(tt.rawURL)
-			if id != tt.wantID {
-				t.Errorf("id = %q, want %q", id, tt.wantID)
+			r := NewResolver(NewFakeGit().AddCheckout("/w/project", tt.rawURL))
+			got, err := r.Resolve("/w/project/sub", "")
+			if err != nil {
+				t.Fatal(err)
 			}
-			if name != tt.wantNm {
-				t.Errorf("name = %q, want %q", name, tt.wantNm)
-			}
-			if fullURL != tt.wantURL {
-				t.Errorf("url = %q, want %q", fullURL, tt.wantURL)
+			want := Repo{ID: tt.wantID, Name: tt.wantNm, URL: tt.wantURL, Rank: SourceGitRemote, Toplevel: "/w/project"}
+			if *got != want {
+				t.Errorf("got %+v, want %+v", *got, want)
 			}
 		})
 	}
 }
 
-func TestResolve_Cache(t *testing.T) {
-	r := NewResolver()
-
-	// Pre-populate cache
-	r.LoadCache(map[string]string{
-		"/home/user/project": "github.com/user/project",
-	})
-
-	repo, err := r.Resolve("/home/user/project", "")
-	if err != nil {
-		t.Fatal(err)
+func TestResolve_Fallbacks(t *testing.T) {
+	git := NewFakeGit().
+		AddCheckout("/w/local-only", "").
+		AddCheckout("/w/mono", "git@github.com:acme/mono.git").
+		AddCheckout("/w/mono/inner", "git@github.com:acme/inner.git")
+	tests := []struct {
+		name, cwd, label string
+		want             Repo
+	}{
+		{"toplevel without remote", "/w/local-only/pkg", "", Repo{ID: "local-only", Name: "local-only", Rank: SourceGitToplevel, Toplevel: "/w/local-only"}},
+		{"nested checkout wins", "/w/mono/inner/x", "", Repo{ID: "github.com/acme/inner", Name: "inner", URL: "git@github.com:acme/inner.git", Rank: SourceGitRemote, Toplevel: "/w/mono/inner"}},
+		{"not a repo", "/tmp/my-project", "", Repo{ID: "my-project", Name: "my-project", Rank: SourceFallback}},
+		{"not a repo, container label", "/tmp/workspace", "docker-host", Repo{ID: "docker-host/workspace", Name: "workspace", Rank: SourceFallback}},
 	}
-	if repo.ID != "github.com/user/project" {
-		t.Errorf("got ID %q, want %q", repo.ID, "github.com/user/project")
-	}
-}
-
-func TestResolve_GitRepo(t *testing.T) {
-	// Use the actual repo we're in as a test
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := NewResolver()
-	repo, err := r.Resolve(cwd, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Should resolve to a real repo — ID should contain a host
-	if repo.ID == "" {
-		t.Error("expected non-empty repo ID")
-	}
-	if repo.Name == "" {
-		t.Error("expected non-empty repo Name")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewResolver(git).Resolve(tt.cwd, tt.label)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if *got != tt.want {
+				t.Errorf("got %+v, want %+v", *got, tt.want)
+			}
+		})
 	}
 }
 
-func TestResolve_NonGitFallback(t *testing.T) {
-	// Use a temp dir that is not a git repo
-	tmp := t.TempDir()
-	sub := filepath.Join(tmp, "my-project")
-	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
+func TestLoadCache_KeepsRankAndToplevel(t *testing.T) {
+	r := NewResolver(NewFakeGit())
+	r.LoadCache([]CacheEntry{{CWD: "/w/inner", RepoID: "github.com/acme/inner", Rank: SourceGitRemote, Toplevel: "/w/inner"}})
 
-	r := NewResolver()
-	repo, err := r.Resolve(sub, "")
+	got, err := r.Resolve("/w/inner", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.ID != "my-project" {
-		t.Errorf("got ID %q, want %q", repo.ID, "my-project")
-	}
-	if repo.Name != "my-project" {
-		t.Errorf("got Name %q, want %q", repo.Name, "my-project")
-	}
-	if repo.URL != "" {
-		t.Errorf("got URL %q, want empty", repo.URL)
+	want := Repo{ID: "github.com/acme/inner", Rank: SourceGitRemote, Toplevel: "/w/inner"}
+	if *got != want {
+		t.Errorf("got %+v, want %+v", *got, want)
 	}
 }
 
-func TestResolve_GitToplevelNoRemote(t *testing.T) {
-	// A git repo with NO remote origin must resolve via the git-toplevel-basename
-	// path: FromGit=true, empty URL, SourceRank == SourceGitToplevel, ID == the
-	// working-tree basename. The other git-backed tests all run inside the
-	// claude-monitor checkout, which HAS a remote, so they take the remote-origin
-	// branch and leave this toplevel-only branch otherwise uncovered.
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available:", err)
-	}
-
-	tmp := t.TempDir()
-	dir := filepath.Join(tmp, "local-only-repo")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
-		t.Fatalf("git init failed: %v\n%s", err, out)
-	}
-
-	r := NewResolver()
-	got, err := r.Resolve(dir, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.ID != "local-only-repo" {
-		t.Errorf("ID = %q, want %q (git toplevel basename)", got.ID, "local-only-repo")
-	}
-	if got.Name != "local-only-repo" {
-		t.Errorf("Name = %q, want %q", got.Name, "local-only-repo")
-	}
-	if got.URL != "" {
-		t.Errorf("URL = %q, want empty (no remote origin)", got.URL)
-	}
-	if !got.FromGit {
-		t.Error("FromGit = false, want true for a git toplevel resolution")
-	}
-	if got.SourceRank() != SourceGitToplevel {
-		t.Errorf("SourceRank() = %d, want %d (SourceGitToplevel)", got.SourceRank(), SourceGitToplevel)
-	}
-	if got.Toplevel == "" {
-		t.Error("Toplevel is empty, want the git working-tree root")
-	}
-}
-
-func TestResolve_ContainerFallback(t *testing.T) {
-	tmp := t.TempDir()
-	sub := filepath.Join(tmp, "workspace")
-	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	r := NewResolver()
-	repo, err := r.Resolve(sub, "docker-host")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repo.ID != "docker-host/workspace" {
-		t.Errorf("got ID %q, want %q", repo.ID, "docker-host/workspace")
-	}
-	if repo.Name != "workspace" {
-		t.Errorf("got Name %q, want %q", repo.Name, "workspace")
-	}
-}
-
-func TestResolve_FromGitProvenance(t *testing.T) {
-	// The current working directory is a real git repo, so it must resolve git-backed.
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := NewResolver()
-	got, err := r.Resolve(cwd, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.FromGit {
-		t.Errorf("FromGit = false, want true for git-backed cwd %q (ID=%q)", cwd, got.ID)
-	}
-}
-
-func TestResolve_FromGit_FalseForFallbacks(t *testing.T) {
-	// Non-git temp dir -> basename fallback, FromGit must be false.
-	tmp := t.TempDir()
-	sub := filepath.Join(tmp, "my-project")
-	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	r := NewResolver()
-	got, err := r.Resolve(sub, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.FromGit {
-		t.Error("FromGit = true, want false for basename fallback")
-	}
-
-	// Container label fallback must also be non-git.
-	ws := filepath.Join(tmp, "workspace")
-	if err := os.Mkdir(ws, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	r2 := NewResolver()
-	gotC, err := r2.Resolve(ws, "docker-host")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotC.FromGit {
-		t.Error("FromGit = true, want false for container-label fallback")
-	}
-}
-
-func TestCache_PreservesFromGit(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := NewResolver()
-	resolved, err := r.Resolve(cwd, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	c := r.Cache()
-	copied, ok := c[cwd]
-	if !ok {
-		t.Fatalf("cwd %q not present in Cache()", cwd)
-	}
-	if copied.FromGit != resolved.FromGit {
-		t.Errorf("Cache() copy FromGit = %v, want %v", copied.FromGit, resolved.FromGit)
-	}
-}
-
-func TestClearCache(t *testing.T) {
-	r := NewResolver()
-	r.LoadCache(map[string]string{
-		"/a": "repo-a",
-		"/b": "repo-b",
-	})
-
-	if len(r.Cache()) != 2 {
-		t.Fatalf("expected 2 cache entries, got %d", len(r.Cache()))
-	}
+func TestClearCache_ResolvesAgain(t *testing.T) {
+	git := NewFakeGit()
+	r := NewResolver(git)
+	r.LoadCache([]CacheEntry{{CWD: "/w/a", RepoID: "stale"}})
+	git.AddCheckout("/w/a", "git@github.com:acme/a.git")
 
 	r.ClearCache()
 
-	if len(r.Cache()) != 0 {
-		t.Fatalf("expected 0 cache entries after clear, got %d", len(r.Cache()))
-	}
-}
-
-func TestCache_ReturnsCopy(t *testing.T) {
-	r := NewResolver()
-	r.LoadCache(map[string]string{"/x": "repo-x"})
-
-	c := r.Cache()
-	c["/y"] = &Repo{ID: "repo-y"}
-
-	if len(r.Cache()) != 1 {
-		t.Error("modifying returned cache should not affect resolver")
+	got, _ := r.Resolve("/w/a", "")
+	if got.ID != "github.com/acme/a" {
+		t.Errorf("after ClearCache: ID = %q, want github.com/acme/a", got.ID)
 	}
 }

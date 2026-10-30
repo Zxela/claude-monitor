@@ -23,30 +23,35 @@ func (d *DB) UpsertRepo(r *repo.Repo) error {
 	return nil
 }
 
-// UpsertCwdRepo persists a cwd → repo_id mapping.
-func (d *DB) UpsertCwdRepo(cwd, repoID string) error {
-	_, err := d.db.Exec(`INSERT INTO cwd_repos (cwd, repo_id) VALUES (?, ?)
-		ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id`, cwd, repoID)
-	if err != nil {
+const cwdRepoUpsertSQL = `INSERT INTO cwd_repos (cwd, repo_id, source_rank, repo_toplevel) VALUES (?, ?, ?, ?)
+	ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id, source_rank=excluded.source_rank, repo_toplevel=excluded.repo_toplevel`
+
+func cwdRepoUpsertArgs(e repo.CacheEntry) []any {
+	return []any{e.CWD, e.RepoID, e.Rank, e.Toplevel}
+}
+
+// UpsertCwdRepo persists one cwd resolution.
+func (d *DB) UpsertCwdRepo(e repo.CacheEntry) error {
+	if _, err := d.db.Exec(cwdRepoUpsertSQL, cwdRepoUpsertArgs(e)...); err != nil {
 		return fmt.Errorf("UpsertCwdRepo: %w", err)
 	}
 	return nil
 }
 
-// LoadCwdRepos returns all persisted cwd → repo_id mappings.
-func (d *DB) LoadCwdRepos() (map[string]string, error) {
-	rows, err := d.rdb.Query(`SELECT cwd, repo_id FROM cwd_repos`)
+// LoadCwdRepos returns all persisted cwd resolutions.
+func (d *DB) LoadCwdRepos() ([]repo.CacheEntry, error) {
+	rows, err := d.rdb.Query(`SELECT cwd, repo_id, source_rank, repo_toplevel FROM cwd_repos`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make(map[string]string)
+	var result []repo.CacheEntry
 	for rows.Next() {
-		var cwd, repoID string
-		if err := rows.Scan(&cwd, &repoID); err != nil {
+		var e repo.CacheEntry
+		if err := rows.Scan(&e.CWD, &e.RepoID, &e.Rank, &e.Toplevel); err != nil {
 			return nil, err
 		}
-		result[cwd] = repoID
+		result = append(result, e)
 	}
 	return result, rows.Err()
 }

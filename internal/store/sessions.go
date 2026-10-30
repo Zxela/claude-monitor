@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
 
 	_ "modernc.org/sqlite"
@@ -159,6 +160,7 @@ func sessionUpsertArgs(s *session.Session) []any {
 		startedAt = s.StartedAt.UTC().Format(time.RFC3339)
 		startedAtExact = s.StartedAt.Format(time.RFC3339Nano)
 	}
+	pin := s.RepoPin()
 	return []any{
 		s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
 		s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
@@ -169,7 +171,7 @@ func sessionUpsertArgs(s *session.Session) []any {
 		s.WorkflowID, s.AgentID, s.AgentKind,
 		s.AITitle, encodePRLinks(s.PRLinks),
 		s.Status, lastActiveExact, startedAtExact,
-		s.RepoSourceRank(), s.RepoToplevel(), s.RepoInherited(),
+		pin.Rank, pin.Toplevel, pin.Inherited,
 	}
 }
 
@@ -208,8 +210,7 @@ func upsertSessions(tx *sql.Tx, sessions []*session.Session) error {
 	}
 	defer sessStmt.Close()
 
-	cwdStmt, err := tx.Prepare(`INSERT INTO cwd_repos (cwd, repo_id) VALUES (?, ?)
-		ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id`)
+	cwdStmt, err := tx.Prepare(cwdRepoUpsertSQL)
 	if err != nil {
 		return fmt.Errorf("prepare cwd: %w", err)
 	}
@@ -220,12 +221,8 @@ func upsertSessions(tx *sql.Tx, sessions []*session.Session) error {
 			return fmt.Errorf("save %s: %w", s.ID, err)
 		}
 
-		// Skip inherited child pins: their cwd is the child's own (worktree)
-		// directory, not the parent's project, so recording cwd → inherited
-		// repo_id would mis-attribute future unrelated sessions resolving the
-		// same directory after a restart seeds the resolver cache from this table.
-		if s.CWD != "" && s.RepoID != "" && !s.RepoInherited() {
-			if _, err := cwdStmt.Exec(s.CWD, s.RepoID); err != nil {
+		if e, ok := s.RepoPin().CacheEntry(s.CWD); ok {
+			if _, err := cwdStmt.Exec(cwdRepoUpsertArgs(e)...); err != nil {
 				return fmt.Errorf("cwdRepo %s: %w", s.ID, err)
 			}
 		}
@@ -271,9 +268,7 @@ func (d *DB) RestoreSessions(ids []string) ([]*session.Session, error) {
 			if t, err := time.Parse(time.RFC3339Nano, startedAt); err == nil {
 				s.StartedAt = t
 			}
-			s.SetRepoSourceRank(rank)
-			s.SetRepoToplevel(toplevel)
-			s.SetRepoInherited(inherited)
+			s.SetRepoPin(repo.Pin{ID: s.RepoID, Rank: rank, Toplevel: toplevel, Inherited: inherited})
 			s.SetDedupPending(true)
 			out = append(out, s)
 		}

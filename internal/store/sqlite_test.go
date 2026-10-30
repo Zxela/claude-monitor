@@ -182,7 +182,8 @@ func TestCwdRepos(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 
-	if err := db.UpsertCwdRepo("/home/user/project", "test-repo"); err != nil {
+	want := repo.CacheEntry{CWD: "/home/user/project", RepoID: "test-repo", Rank: repo.SourceGitRemote, Toplevel: "/home/user/project"}
+	if err := db.UpsertCwdRepo(want); err != nil {
 		t.Fatalf("UpsertCwdRepo failed: %v", err)
 	}
 
@@ -190,8 +191,8 @@ func TestCwdRepos(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCwdRepos failed: %v", err)
 	}
-	if entries["/home/user/project"] != "test-repo" {
-		t.Errorf("expected test-repo, got %q", entries["/home/user/project"])
+	if len(entries) != 1 || entries[0] != want {
+		t.Errorf("LoadCwdRepos = %+v, want [%+v]", entries, want)
 	}
 
 	if err := db.ClearCwdRepos(); err != nil {
@@ -203,13 +204,7 @@ func TestCwdRepos(t *testing.T) {
 	}
 }
 
-// TestFlushSessions_SkipsCwdRepoForInheritedPins verifies that a child session
-// whose repo_id was inherited from its parent does NOT get its (worktree) cwd
-// recorded in cwd_repos, while a normally-resolved session does. Persisting an
-// inherited child's cwd → repo_id would mis-attribute future unrelated sessions
-// that resolve the same directory once the resolver cache is seeded from this
-// table on restart.
-func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
+func TestFlushSessions_PersistsPinCacheEntry(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
@@ -217,13 +212,11 @@ func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
 	if err := db.UpsertRepo(&repo.Repo{ID: repoID, Name: "widget"}); err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
-
-	// Normally-resolved session: cwd → repo mapping SHOULD be persisted.
-	normal := &session.Session{ID: "normal-sess", CWD: "/work/widget", RepoID: repoID}
-	// Child that inherited its parent's repo: its cwd is the child's own worktree,
-	// not the parent's project, so the mapping must NOT be persisted.
-	child := &session.Session{ID: "child-sess", CWD: "/work/.worktrees/agent-x", RepoID: repoID}
-	child.SetRepoInherited(true)
+	pin := repo.Pin{ID: repoID, Rank: repo.SourceGitRemote, Toplevel: "/work/widget"}
+	normal := &session.Session{ID: "normal-sess", CWD: "/work/widget/src"}
+	normal.SetRepoPin(pin)
+	child := &session.Session{ID: "child-sess", CWD: "/work/.worktrees/agent-x"}
+	child.SetRepoPin(pin.Inherit(repoID))
 
 	if err := db.FlushSessions([]*session.Session{normal, child}); err != nil {
 		t.Fatalf("FlushSessions: %v", err)
@@ -233,11 +226,9 @@ func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCwdRepos: %v", err)
 	}
-	if entries["/work/widget"] != repoID {
-		t.Errorf("normal session cwd mapping = %q, want %q", entries["/work/widget"], repoID)
-	}
-	if got, ok := entries["/work/.worktrees/agent-x"]; ok {
-		t.Errorf("inherited child worktree cwd should not be persisted to cwd_repos; got %q", got)
+	want, _ := pin.CacheEntry("/work/widget/src")
+	if len(entries) != 1 || entries[0] != want {
+		t.Errorf("LoadCwdRepos = %+v, want [%+v]", entries, want)
 	}
 }
 
@@ -2912,7 +2903,7 @@ func TestClosedDB_UpsertCwdRepo(t *testing.T) {
 	db := openTestDB(t)
 	db.Close()
 
-	err := db.UpsertCwdRepo("/tmp", "repo")
+	err := db.UpsertCwdRepo(repo.CacheEntry{CWD: "/tmp", RepoID: "repo"})
 	if err == nil {
 		t.Error("expected error from closed DB, got nil")
 	}

@@ -459,7 +459,7 @@ Examples:
 	}
 
 	// Repo resolver with persisted cwd→repo cache.
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.ExecGit{})
 	if cached, err := historyDB.LoadCwdRepos(); err == nil {
 		resolver.LoadCache(cached)
 	}
