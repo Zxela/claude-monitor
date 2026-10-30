@@ -2053,6 +2053,50 @@ func TestProcess_SessionMetadataOnlyIsFlushed(t *testing.T) {
 	}
 }
 
+func TestProcess_MetadataFirstAfterRestartKeepsSavedRow(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"user","uuid":"u1","sessionId":"s","cwd":"/work/app","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
+	p.Stop()
+	before, err := db.GetSession("s")
+	if err != nil || before == nil || before.CWD == "" {
+		t.Fatalf("setup: %+v %v", before, err)
+	}
+
+	// Restart where the first line seen is metadata, as when a Docker source
+	// is tailed from EOF.
+	p2 := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p2.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"Later title","sessionId":"s"}`)})
+	p2.Stop()
+
+	after, err := db.GetSession("s")
+	if err != nil || after == nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if after.CWD != before.CWD || after.RepoID != before.RepoID || after.StartedAt != before.StartedAt || after.EndedAt != before.EndedAt {
+		t.Errorf("saved row changed: before %+v, after %+v", before, after)
+	}
+	if after.AITitle != "Later title" {
+		t.Errorf("AITitle = %q", after.AITitle)
+	}
+}
+
+func TestFlush_RequeuesSessionsWhenSessionWriteFails(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p.Stop() // keep the ticker out of the way
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"T","sessionId":"s"}`)})
+	db.Close()
+	p.flush()
+
+	p.bufMu.Lock()
+	queued := p.dirty["s"]
+	p.bufMu.Unlock()
+	if !queued {
+		t.Error("session dropped from the dirty set after a failed write, so it is never retried")
+	}
+}
+
 func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
 	db := openTestDB(t)
 	p := New(session.NewStore(), db, repo.NewResolver(), nil)

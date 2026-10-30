@@ -241,6 +241,15 @@ func (p *Pipeline) Process(ev watcher.Event) {
 					s.AgentKind = dbSess.AgentKind
 					s.AITitle = dbSess.AITitle
 					s.PRLinks = dbSess.PRLinks
+					if event.IsSessionMetadata() {
+						// A metadata line sets nothing else, and Docker sources start at
+						// EOF, so without these the flush writes blanks over the saved row.
+						saved := dbSess.ToSession()
+						s.RepoID, s.SessionName, s.CWD = saved.RepoID, saved.SessionName, saved.CWD
+						s.GitBranch, s.Model, s.TaskDescription = saved.GitBranch, saved.Model, saved.TaskDescription
+						s.Version, s.Entrypoint = saved.Version, saved.Entrypoint
+						s.StartedAt, s.LastActive = saved.StartedAt, saved.LastActive
+					}
 				}
 				if errCountErr == nil {
 					s.ErrorCount = errCount
@@ -373,7 +382,12 @@ func (p *Pipeline) flush() {
 		sessionsToFlush = append(sessionsToFlush, sess)
 	}
 	if err := p.db.FlushSessions(sessionsToFlush); err != nil {
-		log.Printf("session flush error: %v", err)
+		log.Printf("session flush error, sessions requeued: %v", err)
+		p.bufMu.Lock()
+		for _, sess := range sessionsToFlush {
+			p.dirty[sess.ID] = true
+		}
+		p.bufMu.Unlock()
 	}
 }
 
