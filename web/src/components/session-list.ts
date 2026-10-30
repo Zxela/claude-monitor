@@ -167,7 +167,6 @@ function renderList(): void {
   yesterdayStart.setDate(yesterdayStart.getDate() - 1);
   const weekStart = new Date(todayStart);
   weekStart.setDate(weekStart.getDate() - 7);
-  const recentCutoff = now - 4 * 3600_000; // 4 hours
 
   // Group sessions
   const active: Session[] = [];
@@ -252,11 +251,7 @@ function renderList(): void {
     (s) => !s.parentId && matchesRepo(s),
   ).length;
   const recentCount =
-    activeCount +
-    [...lastHour, ...today].filter(
-      (s) =>
-        topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
-    ).length;
+    activeCount + [...lastHour, ...today].filter(topLevelFilter).length;
   const totalCount = Array.from(localSessions.values()).filter(
     topLevelFilter,
   ).length;
