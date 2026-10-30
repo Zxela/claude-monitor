@@ -39,10 +39,12 @@ export function effectiveInputTokens(s: {
 /** Extract a short display name for a session. */
 export function sessionDisplayName(s: {
   sessionName?: string;
+  aiTitle?: string;
   cwd?: string;
   id: string;
 }): string {
   if (s.sessionName) return s.sessionName;
+  if (s.aiTitle) return s.aiTitle;
   if (s.cwd) {
     // Use basename of cwd, not the full path
     const parts = s.cwd.replace(/\/+$/, '').split('/');

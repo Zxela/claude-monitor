@@ -119,8 +119,13 @@ func RunDown(db *sql.DB) (string, error) {
 		return "", fmt.Errorf("no migrations to roll back (version 0)")
 	}
 
-	// Find the migration at current version.
+	// Find the migration at current version. Versions can have gaps (numbers
+	// reserved by unmerged branches), so step back to the previous registered one.
+	prev := 0
 	for _, rm := range sorted() {
+		if rm.Version < current {
+			prev = rm.Version
+		}
 		if rm.Version == current {
 			tx, err := db.Begin()
 			if err != nil {
@@ -132,7 +137,7 @@ func RunDown(db *sql.DB) (string, error) {
 				return "", fmt.Errorf("rollback migration %d (%s) failed: %w", rm.Version, rm.Migration.Name, err)
 			}
 
-			if err := setVersionTx(tx, rm.Version-1); err != nil {
+			if err := setVersionTx(tx, prev); err != nil {
 				_ = tx.Rollback()
 				return "", fmt.Errorf("set version in rollback: %w", err)
 			}

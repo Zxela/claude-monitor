@@ -1,7 +1,15 @@
+export interface PrLink {
+  number: number;
+  url: string;
+  repository?: string;
+}
+
 export interface Session {
   id: string;
   repoId?: string;
   sessionName?: string;
+  aiTitle?: string;
+  prLinks?: PrLink[];
   totalCost: number;
   inputTokens: number;
   outputTokens: number;

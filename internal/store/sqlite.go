@@ -50,33 +50,36 @@ const sessionSelectCols = `id, COALESCE(repo_id,''), COALESCE(parent_id,''), COA
 	total_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 	message_count, event_count, error_count,
 	COALESCE(version,''), COALESCE(entrypoint,''),
-	COALESCE(workflow_id,''), COALESCE(agent_id,''), COALESCE(agent_kind,'')`
+	COALESCE(workflow_id,''), COALESCE(agent_id,''), COALESCE(agent_kind,''),
+	COALESCE(ai_title,''), COALESCE(pr_links,'')`
 
 // SessionRow represents a session as stored in the database.
 type SessionRow struct {
-	ID                  string  `json:"id"`
-	RepoID              string  `json:"repoId"`
-	ParentID            string  `json:"parentId"`
-	SessionName         string  `json:"sessionName"`
-	TaskDescription     string  `json:"taskDescription"`
-	CWD                 string  `json:"cwd"`
-	Branch              string  `json:"branch"`
-	Model               string  `json:"model"`
-	StartedAt           string  `json:"startedAt"`
-	EndedAt             string  `json:"endedAt"`
-	TotalCost           float64 `json:"totalCost"`
-	InputTokens         int64   `json:"inputTokens"`
-	OutputTokens        int64   `json:"outputTokens"`
-	CacheReadTokens     int64   `json:"cacheReadTokens"`
-	CacheCreationTokens int64   `json:"cacheCreationTokens"`
-	MessageCount        int     `json:"messageCount"`
-	EventCount          int     `json:"eventCount"`
-	ErrorCount          int     `json:"errorCount"`
-	Version             string  `json:"version,omitempty"`
-	Entrypoint          string  `json:"entrypoint,omitempty"`
-	WorkflowID          string  `json:"workflowId,omitempty"`
-	AgentID             string  `json:"agentId,omitempty"`
-	AgentKind           string  `json:"agentKind,omitempty"`
+	ID                  string           `json:"id"`
+	RepoID              string           `json:"repoId"`
+	ParentID            string           `json:"parentId"`
+	SessionName         string           `json:"sessionName"`
+	TaskDescription     string           `json:"taskDescription"`
+	CWD                 string           `json:"cwd"`
+	Branch              string           `json:"branch"`
+	Model               string           `json:"model"`
+	StartedAt           string           `json:"startedAt"`
+	EndedAt             string           `json:"endedAt"`
+	TotalCost           float64          `json:"totalCost"`
+	InputTokens         int64            `json:"inputTokens"`
+	OutputTokens        int64            `json:"outputTokens"`
+	CacheReadTokens     int64            `json:"cacheReadTokens"`
+	CacheCreationTokens int64            `json:"cacheCreationTokens"`
+	MessageCount        int              `json:"messageCount"`
+	EventCount          int              `json:"eventCount"`
+	ErrorCount          int              `json:"errorCount"`
+	Version             string           `json:"version,omitempty"`
+	Entrypoint          string           `json:"entrypoint,omitempty"`
+	WorkflowID          string           `json:"workflowId,omitempty"`
+	AgentID             string           `json:"agentId,omitempty"`
+	AgentKind           string           `json:"agentKind,omitempty"`
+	AITitle             string           `json:"aiTitle,omitempty"`
+	PRLinks             []session.PRLink `json:"prLinks,omitempty"`
 }
 
 // ToSession converts a SessionRow to a session.Session with default runtime fields.
@@ -103,6 +106,8 @@ func (r *SessionRow) ToSession() *session.Session {
 		WorkflowID:          r.WorkflowID,
 		AgentID:             r.AgentID,
 		AgentKind:           r.AgentKind,
+		AITitle:             r.AITitle,
+		PRLinks:             r.PRLinks,
 		IsActive:            false,
 		Status:              "idle",
 		CostRate:            0,
@@ -414,8 +419,8 @@ func (d *DB) SaveSession(s *session.Session) error {
 		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
 		 started_at, ended_at, total_cost, input_tokens, output_tokens,
 		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-		 version, entrypoint, workflow_id, agent_id, agent_kind)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 version, entrypoint, workflow_id, agent_id, agent_kind, ai_title, pr_links)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 repo_id=excluded.repo_id,
 		 parent_id=excluded.parent_id,
@@ -438,7 +443,9 @@ func (d *DB) SaveSession(s *session.Session) error {
 		 entrypoint=excluded.entrypoint,
 		 workflow_id=excluded.workflow_id,
 		 agent_id=excluded.agent_id,
-		 agent_kind=excluded.agent_kind`,
+		 agent_kind=excluded.agent_kind,
+		 ai_title=excluded.ai_title,
+		 pr_links=excluded.pr_links`,
 		s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
 		s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
 		s.TotalCost, s.InputTokens, s.OutputTokens,
@@ -446,6 +453,7 @@ func (d *DB) SaveSession(s *session.Session) error {
 		s.MessageCount, s.EventCount, s.ErrorCount,
 		s.Version, s.Entrypoint,
 		s.WorkflowID, s.AgentID, s.AgentKind,
+		s.AITitle, encodePRLinks(s.PRLinks),
 	)
 	if err != nil {
 		return fmt.Errorf("SaveSession: %w", err)
@@ -473,8 +481,8 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
 		 started_at, ended_at, total_cost, input_tokens, output_tokens,
 		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-		 version, entrypoint, workflow_id, agent_id, agent_kind)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 version, entrypoint, workflow_id, agent_id, agent_kind, ai_title, pr_links)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		 repo_id=excluded.repo_id,
 		 parent_id=excluded.parent_id,
@@ -497,7 +505,9 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 		 entrypoint=excluded.entrypoint,
 		 workflow_id=excluded.workflow_id,
 		 agent_id=excluded.agent_id,
-		 agent_kind=excluded.agent_kind`)
+		 agent_kind=excluded.agent_kind,
+		 ai_title=excluded.ai_title,
+		 pr_links=excluded.pr_links`)
 	if err != nil {
 		return fmt.Errorf("FlushSessions prepare session: %w", err)
 	}
@@ -530,6 +540,7 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 			s.MessageCount, s.EventCount, s.ErrorCount,
 			s.Version, s.Entrypoint,
 			s.WorkflowID, s.AgentID, s.AgentKind,
+			s.AITitle, encodePRLinks(s.PRLinks),
 		); err != nil {
 			return fmt.Errorf("FlushSessions save %s: %w", s.ID, err)
 		}
@@ -841,10 +852,22 @@ func (d *DB) RepoExists(id string) (bool, error) {
 	}
 }
 
+func encodePRLinks(links []session.PRLink) string {
+	if len(links) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(links)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 	var result []SessionRow
 	for rows.Next() {
 		var r SessionRow
+		var prLinks string
 		if err := rows.Scan(
 			&r.ID, &r.RepoID, &r.ParentID, &r.SessionName,
 			&r.TaskDescription, &r.CWD, &r.Branch, &r.Model,
@@ -854,8 +877,14 @@ func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 			&r.MessageCount, &r.EventCount, &r.ErrorCount,
 			&r.Version, &r.Entrypoint,
 			&r.WorkflowID, &r.AgentID, &r.AgentKind,
+			&r.AITitle, &prLinks,
 		); err != nil {
 			return result, err
+		}
+		if prLinks != "" {
+			if err := json.Unmarshal([]byte(prLinks), &r.PRLinks); err != nil {
+				log.Printf("session %s: bad pr_links: %v", r.ID, err)
+			}
 		}
 		result = append(result, r)
 	}
@@ -1353,7 +1382,7 @@ func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
 			SELECT s.id, a.root FROM sessions s JOIN anc a ON s.parent_id = a.id
 		)
 		SELECT COALESCE(a.root, s.id) AS root_id,
-		       COALESCE(rt.session_name, ''),
+		       COALESCE(NULLIF(rt.session_name, ''), rt.ai_title, ''),
 		       COALESCE(rt.task_description, ''),
 		       COALESCE(SUM(s.total_cost), 0),
 		       COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_creation_tokens), 0),
@@ -1379,7 +1408,7 @@ func (d *DB) trendBySession(p *trendParams) ([]SessionTrend, error) {
 		if err := rows.Scan(&st.SessionID, &name, &task, &st.Cost, &st.Tokens, &st.Agents); err != nil {
 			return nil, fmt.Errorf("trendBySession: scan: %w", err)
 		}
-		// Prefer an explicit session name, then the task/prompt; the frontend
+		// Prefer an explicit session name, then the AI title, then the task/prompt; the frontend
 		// falls back to the id when both are empty.
 		st.SessionName = name
 		if st.SessionName == "" {

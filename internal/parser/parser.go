@@ -60,6 +60,10 @@ type rawMessage struct {
 	HookCount     *int            `json:"hookCount"`    // system.stop_hook_summary
 	HookInfos     json.RawMessage `json:"hookInfos"`    // system.stop_hook_summary
 	Level         string          `json:"level"`        // system.stop_hook_summary
+	AITitle       string          `json:"aiTitle"`
+	PRNumber      int             `json:"prNumber"`
+	PRURL         string          `json:"prUrl"`
+	PRRepository  string          `json:"prRepository"`
 }
 
 type rawProgressData struct {
@@ -165,6 +169,11 @@ type Event struct {
 	IsMeta     bool   `json:"isMeta,omitempty"`
 	Version    string `json:"version,omitempty"`
 	Entrypoint string `json:"entrypoint,omitempty"`
+	// ai-title / pr-link lines
+	AITitle      string `json:"aiTitle,omitempty"`
+	PRNumber     int    `json:"prNumber,omitempty"`
+	PRURL        string `json:"prUrl,omitempty"`
+	PRRepository string `json:"prRepository,omitempty"`
 }
 
 // IsInternal reports Claude Code's own bookkeeping lines: request logs, mode
@@ -174,11 +183,17 @@ func (m *Event) IsInternal() bool {
 	switch m.Type {
 	case "api-request", "api-request-blob", "api-request-shape",
 		"mode", "permission-mode", "atis-latch", "last-prompt",
-		"tools-used", "cost-state", "file-history-delta", "ai-title", "pr-link":
+		"tools-used", "cost-state", "file-history-delta":
 		return true
 	default:
 		return false
 	}
+}
+
+// IsSessionMetadata reports lines that only describe the session (ai-title,
+// pr-link). They update the session but are never stored or counted as events.
+func (m *Event) IsSessionMetadata() bool {
+	return m.Type == "ai-title" || m.Type == "pr-link"
 }
 
 // IsConversationTurn returns true if this message represents a real
@@ -353,6 +368,11 @@ func buildBaseEvent(raw *rawMessage) *Event {
 		IsMeta:     raw.IsMeta,
 		Version:    raw.Version,
 		Entrypoint: raw.Entrypoint,
+
+		AITitle:      raw.AITitle,
+		PRNumber:     raw.PRNumber,
+		PRURL:        raw.PRURL,
+		PRRepository: raw.PRRepository,
 	}
 
 	if raw.Message.StopReason != nil {

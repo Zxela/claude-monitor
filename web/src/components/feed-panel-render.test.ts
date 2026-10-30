@@ -206,6 +206,34 @@ describe('feed panel, one session', () => {
     expect(state.selectedSessionId).toBe('old');
   });
 
+  it('refreshes the header when the selected session gains a title or PR link', async () => {
+    const { mount, update, updateSession } = await setup([
+      sess({ id: 's1', sessionName: '', cwd: '/w/repo', isActive: true }),
+    ]);
+    update({ selectedSessionId: 's1' });
+    const timeline = mount.querySelector('.timeline-btn');
+
+    updateSession(
+      sess({ id: 's1', sessionName: '', cwd: '/w/repo', isActive: true }),
+    );
+    expect(mount.querySelector('.timeline-btn')).toBe(timeline);
+
+    updateSession(
+      sess({
+        id: 's1',
+        sessionName: '',
+        aiTitle: 'Fix login',
+        isActive: true,
+        prLinks: [{ number: 7, url: 'https://example/7', repository: 'g/r' }],
+      }),
+    );
+    expect(header(mount)).toContain('Fix login');
+    const link = mount.querySelector<HTMLAnchorElement>(
+      '.feed-header .pr-links a',
+    );
+    expect(link?.href).toBe('https://example/7');
+  });
+
   it('says so when the session has no events or the load fails', async () => {
     const empty = await selectWith([]);
     expect(empty.mount.querySelector('.feed-empty')?.textContent).toBe(

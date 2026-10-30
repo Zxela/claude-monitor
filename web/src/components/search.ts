@@ -162,7 +162,8 @@ function renderResults(): void {
     let group = groups.get(r.sessionId);
     if (!group) {
       const sess = state.sessions.get(r.sessionId);
-      const name = sess?.sessionName || r.sessionId.slice(0, 8);
+      const name =
+        sess?.sessionName || sess?.aiTitle || r.sessionId.slice(0, 8);
       const project = sess?.cwd || '';
       group = { name, project, results: [] };
       groups.set(r.sessionId, group);
