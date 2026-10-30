@@ -1454,7 +1454,8 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 git_branch=excluded.git_branch,
 		 is_sidechain=excluded.is_sidechain,
 		 agent_name=excluded.agent_name,
-		 team_name=excluded.team_name`)
+		 team_name=excluded.team_name
+		RETURNING id`)
 	if err != nil {
 		return fmt.Errorf("prepare event stmt: %w", err)
 	}
@@ -1486,13 +1487,6 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		return fmt.Errorf("prepare fts insert stmt: %w", err)
 	}
 	defer ftsInsertStmt.Close()
-
-	// For upserts, LastInsertId is unreliable — look up the actual ID.
-	lookupStmt, err := tx.Prepare(`SELECT id FROM events WHERE session_id = ? AND COALESCE(message_id, uuid) = ?`)
-	if err != nil {
-		return fmt.Errorf("prepare lookup stmt: %w", err)
-	}
-	defer lookupStmt.Close()
 
 	// Fetch the OLD indexed FTS values for an existing row (by dedup key) so we
 	// can purge its stale terms before re-indexing the upserted row.
@@ -1539,7 +1533,10 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			}
 		}
 
-		result, err := eventStmt.Exec(
+		// RETURNING yields the row's id whether it was inserted or updated;
+		// LastInsertId is stale after an ON CONFLICT update.
+		var eventID int64
+		err := eventStmt.QueryRow(
 			ei.SessionID, ev.UUID, messageID, ev.Type, ev.Role,
 			ev.ContentText, ev.ToolName, ev.ToolDetail,
 			ev.CostUSD, ev.InputTokens, ev.OutputTokens,
@@ -1553,24 +1550,9 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 			ev.Subtype, ev.TurnMessageCount, ev.HookCount, ev.HookInfos, ev.Level,
 			ev.IsMeta, ev.Version, ev.Entrypoint,
 			toolUseIDsJSON, ev.CWD, ev.GitBranch, ev.IsSidechain, ev.AgentName, ev.TeamName,
-		)
+		).Scan(&eventID)
 		if err != nil {
 			return fmt.Errorf("insert event: %w", err)
-		}
-
-		// Resolve the actual event ID for content and FTS association.
-		// ON CONFLICT may fire for any upsert, so LastInsertId is unreliable.
-		// Look up by the dedup key: message_id if present, else uuid.
-		var eventID int64
-		if dedupKey != "" {
-			if err := lookupStmt.QueryRow(ei.SessionID, dedupKey).Scan(&eventID); err != nil {
-				return fmt.Errorf("lookup event id: %w", err)
-			}
-		} else {
-			eventID, err = result.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("get last insert id: %w", err)
-			}
 		}
 
 		// Insert/update full content if present
