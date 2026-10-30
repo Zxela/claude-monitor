@@ -1,8 +1,10 @@
 package pipeline
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1960,6 +1962,48 @@ func TestProcess_KeylessLinesGetOwnRows(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("got %d rows, want 2 (one per distinct keyless line)", len(events))
+	}
+}
+
+func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: []byte(
+		`{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
+	db.Close() // every write now fails
+	p.flush()
+
+	p.bufMu.Lock()
+	n := len(p.buffer)
+	p.bufMu.Unlock()
+	if n != 1 {
+		t.Errorf("buffer holds %d events after a failed persist, want 1 kept for retry", n)
+	}
+}
+
+func TestProcess_RetainedEventsDontTriggerFlush(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+
+	line := func(i int) []byte {
+		return []byte(fmt.Sprintf(`{"type":"user","uuid":"u%d","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`, i))
+	}
+	for i := 0; i < maxBatchSize-1; i++ {
+		p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(i)})
+	}
+	db.Close()
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(maxBatchSize)}) // fills the batch; flush fails
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(maxBatchSize + 1)})
+
+	if n := strings.Count(logs.String(), "will retry"); n != 1 {
+		t.Errorf("got %d persist attempts, want 1: retained events must not count toward the next size-triggered flush", n)
 	}
 }
 

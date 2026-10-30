@@ -25,6 +25,8 @@ const (
 	flushInterval = 2 * time.Second
 	maxBatchSize  = 200
 	maxMetaCache  = 500
+	// Events held for retry after PersistBatch fails.
+	maxRetainedEvents = 10 * maxBatchSize
 )
 
 // BroadcastFunc is called for each processed event. It receives the event,
@@ -53,8 +55,12 @@ type Pipeline struct {
 	linkMu             sync.Mutex
 	pendingParentLinks map[string]string // childSessionID → parentUUID (not yet in session store)
 
-	bufMu  sync.Mutex
-	buffer []store.EventInsert
+	// flushMu serializes whole flushes so a retried batch can't commit after a
+	// newer one for the same message (upserts are last-write-wins).
+	flushMu  sync.Mutex
+	bufMu    sync.Mutex
+	buffer   []store.EventInsert
+	retained int // leading buffer events kept from a failed persist
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -288,7 +294,7 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		Event:       event,
 		FullContent: fullContent,
 	})
-	needFlush := len(p.buffer) >= maxBatchSize
+	needFlush := len(p.buffer)-p.retained >= maxBatchSize
 	p.bufMu.Unlock()
 
 	if needFlush {
@@ -298,6 +304,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 
 // flush persists buffered events and updates session aggregates.
 func (p *Pipeline) flush() {
+	p.flushMu.Lock()
+	defer p.flushMu.Unlock()
+
 	p.bufMu.Lock()
 	if len(p.buffer) == 0 {
 		p.bufMu.Unlock()
@@ -305,11 +314,21 @@ func (p *Pipeline) flush() {
 	}
 	batch := p.buffer
 	p.buffer = nil
+	p.retained = 0
 	p.bufMu.Unlock()
 
-	// Persist events
+	// Persist events. On failure put the batch back for the next flush; past
+	// maxRetainedEvents give up so a dead database can't grow memory forever.
 	if err := p.db.PersistBatch(&store.EventBatch{Events: batch}); err != nil {
-		log.Printf("batch persist error: %v", err)
+		p.bufMu.Lock()
+		if len(batch)+len(p.buffer) <= maxRetainedEvents {
+			p.buffer = append(batch, p.buffer...)
+			p.retained = len(batch)
+			log.Printf("batch persist error, will retry %d events: %v", len(batch), err)
+		} else {
+			log.Printf("batch persist error, dropping %d events (retry buffer full): %v", len(batch), err)
+		}
+		p.bufMu.Unlock()
 	}
 
 	// Persist affected sessions + repo mappings in a single transaction
