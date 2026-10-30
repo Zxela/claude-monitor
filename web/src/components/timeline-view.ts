@@ -513,7 +513,7 @@ function onMouseMove(e: MouseEvent): void {
     canvas.style.cursor = 'pointer';
     const time = new Date(evt.timestamp).toLocaleTimeString();
     const content = (evt.contentPreview || '').slice(0, 80);
-    tooltip.innerHTML = `<div><b>${time}</b> [${evt.type || evt.role}]</div>
+    tooltip.innerHTML = `<div><b>${time}</b> [${escapeHtml(evt.type || evt.role || '')}]</div>
       ${evt.toolName ? `<div>${escapeHtml(evt.toolName)}</div>` : ''}
       <div style="color:var(--text-dim)">${escapeHtml(content)}</div>
       ${evt.costUSD > 0 ? `<div style="color:var(--yellow)">$${evt.costUSD.toFixed(4)}</div>` : ''}`;

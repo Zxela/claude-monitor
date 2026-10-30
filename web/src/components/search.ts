@@ -2,7 +2,7 @@ import type { Event } from '../types';
 import { state, subscribe, update } from '../state';
 import type { AppState } from '../state';
 import { fetchSearchCombined } from '../api';
-import { escapeHtml } from '../utils';
+import { escapeHtml, escapeAttr } from '../utils';
 import '../styles/feed.css';
 
 let dropdown: HTMLElement | null = null;
@@ -139,7 +139,7 @@ function renderResults(): void {
         <div class="search-result-header">
           <span class="search-result-session">${escapeHtml(group.name)}</span>
           <span class="search-result-project">${escapeHtml(group.project)}</span>
-          <span class="search-type-badge ${badgeType(result)}">${badgeType(result)}</span>
+          <span class="search-type-badge ${escapeAttr(badgeType(result))}">${escapeHtml(badgeType(result))}</span>
           <span class="search-result-time">${formatTime(result.timestamp)}</span>
         </div>
         <div class="search-result-body">${highlightMatch(searchPreview(result, state.searchQuery), state.searchQuery)}</div>
