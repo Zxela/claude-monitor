@@ -232,8 +232,14 @@ function renderList(): void {
     }
   }
 
-  // Save scroll + render
+  // Save scroll and keyboard focus + render. The list rebuilds every 5s, which
+  // otherwise dumps a Tab-focused card's focus back to <body>.
   const scrollTop = listEl.scrollTop;
+  const activeEl = document.activeElement as HTMLElement | null;
+  const focusedId = listEl.contains(activeEl)
+    ? activeEl?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId
+    : undefined;
+  const focusedErr = !!activeEl?.classList.contains('session-error-count');
   listEl.innerHTML = '';
 
   const filter = state.repoFilter;
@@ -326,6 +332,7 @@ function renderList(): void {
       listEl.appendChild(empty);
     }
     listEl.scrollTop = scrollTop;
+    restoreFocus(focusedId, focusedErr);
     return;
   }
 
@@ -432,6 +439,7 @@ function renderList(): void {
   }
 
   listEl.scrollTop = scrollTop;
+  restoreFocus(focusedId, focusedErr);
 
   // Scroll focused element into view
   if (state.focusedSessionId) {
@@ -444,4 +452,15 @@ function renderList(): void {
     const selected = listEl.querySelector<HTMLElement>(`.selected`);
     if (selected) selected.scrollIntoView({ block: 'nearest' });
   }
+}
+
+function restoreFocus(sessionId: string | undefined, errCount: boolean): void {
+  if (!sessionId || !listEl) return;
+  const card = listEl.querySelector<HTMLElement>(
+    `[data-session-id="${CSS.escape(sessionId)}"]`,
+  );
+  const target =
+    (errCount && card?.querySelector<HTMLElement>('.session-error-count')) ||
+    card;
+  target?.focus({ preventScroll: true });
 }
