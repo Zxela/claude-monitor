@@ -31,7 +31,7 @@ claude-monitor hook install             # (optional) auto-start with Claude Code
 
 ## Requirements
 
-- **Go** >= 1.25
+- **Go** >= 1.26.5
 - **Node.js** >= 18
 - **npm**
 - **make**
