@@ -444,8 +444,8 @@ Examples:
 			res.Scanned, res.Updated, res.Skipped, res.Errors)
 	}
 
-	// Load model pricing from DB and initialise the parser's active pricing table.
-	if err := applyDBPricingToParser(historyDB); err != nil {
+	prices := parser.Prices()
+	if err := loadPricing(historyDB, prices); err != nil {
 		log.Printf("warning: could not load model pricing from DB: %v", err)
 	} else {
 		log.Printf("loaded model pricing entries from DB")
@@ -460,7 +460,7 @@ Examples:
 	}
 
 	// Repo resolver with persisted cwd→repo cache.
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.ExecGit{})
 	if cached, err := historyDB.LoadCwdRepos(); err == nil {
 		resolver.LoadCache(cached)
 	}
@@ -697,7 +697,7 @@ Examples:
 	mux.HandleFunc("GET /api/settings", handleSettings(historyDB))
 	mux.HandleFunc("PUT /api/settings/{key}", handleSettingsUpdate(historyDB))
 	mux.HandleFunc("GET /api/pricing", handlePricingGet(historyDB))
-	mux.HandleFunc("PUT /api/pricing/{model_prefix}", handlePricingUpdate(historyDB))
+	mux.HandleFunc("PUT /api/pricing/{model_prefix}", handlePricingUpdate(historyDB, prices))
 	mux.HandleFunc("GET /api/storage", handleStorage(historyDB))
 	mux.HandleFunc("DELETE /api/cache/repos", handleCacheClear(resolver, historyDB))
 	mux.HandleFunc("GET /health", handleHealth(historyDB, fw))

@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.9.0](https://github.com/Zxela/claude-monitor/compare/v3.8.6...v3.9.0) (2026-10-30)
+
+
+### Features
+
+* keep Claude Code's AI title and PR links on sessions ([#312](https://github.com/Zxela/claude-monitor/issues/312)) ([eb3845d](https://github.com/Zxela/claude-monitor/commit/eb3845d08ead057dabc29da5bb0e8e383a4eac44))
+
+
+### Bug Fixes
+
+* **pricing:** bill claude-haiku-5-5 prompts over 100K at the long-context rate ([#313](https://github.com/Zxela/claude-monitor/issues/313)) ([7836770](https://github.com/Zxela/claude-monitor/commit/783677063ead0999bbb5bde33e0a80a6b69b1350))
+* **web:** keyboard access for search, table view, arrow keys and popovers ([#308](https://github.com/Zxela/claude-monitor/issues/308)) ([617139d](https://github.com/Zxela/claude-monitor/commit/617139ddda579f5db1ae8cd65b1f3a10ebbed7ae))
+* **web:** raise low-contrast text to 4.5:1 and honour reduced motion ([#304](https://github.com/Zxela/claude-monitor/issues/304)) ([c3e5fd5](https://github.com/Zxela/claude-monitor/commit/c3e5fd5bb50ce51452b49bc4c101b89e2c92768c))
+* **web:** show real connection state, flag stale stats, backfill feed on reconnect ([#302](https://github.com/Zxela/claude-monitor/issues/302)) ([9b237d1](https://github.com/Zxela/claude-monitor/commit/9b237d1a4923d5f1c275857bc8c1dcc902da5ed5))
+
+
+### Performance Improvements
+
+* resume ingest from saved file offsets ([#315](https://github.com/Zxela/claude-monitor/issues/315)) ([8a8a8ca](https://github.com/Zxela/claude-monitor/commit/8a8a8ca75a3606b13f41952e9f1c4eb87bd5f78e))
+
 ## [3.8.6](https://github.com/Zxela/claude-monitor/compare/v3.8.5...v3.8.6) (2026-10-30)
 
 

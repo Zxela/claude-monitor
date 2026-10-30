@@ -22,7 +22,7 @@ import (
 func runIngest(t *testing.T, db *store.DB, dir string, resume bool, wantLines int) *session.Store {
 	t.Helper()
 	sessions := session.NewStore()
-	p := New(sessions, db, repo.NewResolver(), nil)
+	p := New(sessions, db, repo.NewResolver(repo.NewFakeGit()), nil)
 	fw, err := watcher.New([]string{dir})
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestResume_MatchesFullReplay(t *testing.T) {
 // the restart would skip the dropped lines.
 func TestFlush_FailedBatchOffsets(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	defer p.Stop()
 	line := func(i int) []byte {
 		return []byte(fmt.Sprintf(`{"type":"user","uuid":"u%d","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`, i))
@@ -271,7 +271,7 @@ func TestFlush_FailedBatchOffsets(t *testing.T) {
 func TestPendingLinkRepointIsPersisted(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	p := New(sessions, db, repo.NewResolver(), nil)
+	p := New(sessions, db, repo.NewResolver(repo.NewFakeGit()), nil)
 	base := t.TempDir()
 	childCWD, parentCWD := filepath.Join(base, "alpha"), filepath.Join(base, "beta")
 
@@ -313,14 +313,14 @@ func TestRestoredSession_FailedDedupLoad(t *testing.T) {
 	}
 
 	db := open()
-	first := New(session.NewStore(), db, repo.NewResolver(), nil)
+	first := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	first.Process(ev("m1", 5, 10))
 	first.Stop()
 
 	broken := open()
 	broken.Close()
 	sessions := session.NewStore()
-	p := New(sessions, db, repo.NewResolver(), nil)
+	p := New(sessions, db, repo.NewResolver(repo.NewFakeGit()), nil)
 	p.Stop() // flush manually so swapping p.db can't race the flush loop
 	if got := p.Restore([]string{"s"}); !got["s"] {
 		t.Fatal("session not restored")
@@ -332,14 +332,11 @@ func TestRestoredSession_FailedDedupLoad(t *testing.T) {
 	p.Process(ev("m3", 11, 30))
 	p.flush()
 
-	_, costs, err := db.LoadMessageDedup("s")
+	totals, err := db.SessionTotals("s")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stored int64
-	for _, c := range costs {
-		stored += c.OutputTokens
-	}
+	stored := totals.OutputTokens
 	row, err := db.GetSession("s")
 	if err != nil || row == nil {
 		t.Fatalf("session row: %v", err)

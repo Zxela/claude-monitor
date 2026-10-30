@@ -41,7 +41,7 @@ func makeJSONL(t *testing.T, fields map[string]interface{}) []byte {
 func TestProcess_BasicEvent(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	var mu sync.Mutex
 	var broadcasts []struct{ isNew, sendDetail bool }
@@ -107,7 +107,7 @@ func TestProcess_BasicEvent(t *testing.T) {
 func TestProcess_BootstrapNoBroadcast(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	broadcastCalled := false
 	p := New(sessions, db, resolver, func(event *parser.Event, sess *session.Session, isNew, sendDetail bool) {
@@ -159,36 +159,10 @@ func TestSkipDetail(t *testing.T) {
 	}
 }
 
-func TestParentSessionIDFromPath(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"/home/user/.claude/projects/hash/abc-123/subagents/agent-xyz.jsonl", "abc-123"},
-		{"/home/user/.claude/projects/hash/abc-123/subagents/workflows/wf_def/agent-xyz.jsonl", "abc-123"},
-		{"/home/user/.claude/projects/hash/session.jsonl", ""},
-		{"/tmp/test.jsonl", ""},
-		// Nested subagents: the walk returns the FIRST (innermost) "subagents"
-		// parent going up, so a subagent-of-a-subagent attributes to its immediate
-		// agent parent, not the top-level session.
-		{"/home/u/.claude/projects/hash/gp/subagents/agent-x/subagents/agent-y.jsonl", "agent-x"},
-		// Degenerate root: a "subagents" segment directly under filesystem root.
-		// filepath.Dir("/subagents") == "/" so the parent basename is "/" — locked
-		// in to document the boundary (never produced by real Claude Code paths).
-		{"/subagents/agent-y.jsonl", "/"},
-	}
-	for _, tt := range tests {
-		got := parentSessionIDFromPath(tt.path)
-		if got != tt.want {
-			t.Errorf("parentSessionIDFromPath(%q) = %q, want %q", tt.path, got, tt.want)
-		}
-	}
-}
-
 func TestFlush_PersistsEvents(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -227,7 +201,7 @@ func TestFlush_PersistsEvents(t *testing.T) {
 
 func TestProcess_RebuildDedupFromDB(t *testing.T) {
 	db := openTestDB(t)
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	const sid = "dedup-rebuild-test"
 	ts := time.Now()
 
@@ -316,7 +290,7 @@ func TestProcess_RebuildDedupFromDB(t *testing.T) {
 func TestParentLinking_DeferredUUID(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -429,7 +403,7 @@ func TestParentLinking_DeferredUUID(t *testing.T) {
 func TestParentLinking_DirectUUID(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -509,7 +483,7 @@ func TestParentLinking_DirectUUID(t *testing.T) {
 func TestParentLinking_Shape2_InContentSessionID(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -624,7 +598,7 @@ func TestParentLinking_Shape2_InContentSessionID(t *testing.T) {
 func TestParentLinking_Shape3_Workflow(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -706,7 +680,7 @@ func TestParentLinking_InContent_ChildBeforeParent_BackfillsChildren(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			db := openTestDB(t)
 			sessions := session.NewStore()
-			resolver := repo.NewResolver()
+			resolver := repo.NewResolver(repo.NewFakeGit())
 
 			p := New(sessions, db, resolver, nil)
 			defer p.Stop()
@@ -813,7 +787,7 @@ func TestParentLinking_InContentBeatsParentUuid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openTestDB(t)
 			sessions := session.NewStore()
-			resolver := repo.NewResolver()
+			resolver := repo.NewResolver(repo.NewFakeGit())
 			p := New(sessions, db, resolver, nil)
 			defer p.Stop()
 
@@ -888,7 +862,7 @@ func TestParentLinking_InContent_ParentBeforeChild(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openTestDB(t)
 			sessions := session.NewStore()
-			resolver := repo.NewResolver()
+			resolver := repo.NewResolver(repo.NewFakeGit())
 			p := New(sessions, db, resolver, nil)
 			defer p.Stop()
 
@@ -977,7 +951,7 @@ func TestParentLinking_InContent_ParentBeforeChild(t *testing.T) {
 func TestParentLinking_TwoAgentsShareParent(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -1031,7 +1005,7 @@ func TestParentLinking_TwoAgentsShareParent(t *testing.T) {
 func TestParentLinking_NoSelfParent(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -1082,7 +1056,7 @@ func TestParentLinking_NoSelfParent(t *testing.T) {
 func TestProcess_NormalSessionUnaffected(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -1122,169 +1096,27 @@ func TestProcess_NormalSessionUnaffected(t *testing.T) {
 	}
 }
 
-// TestApplyRepoResolution_UpgradesFallbackToGit verifies that a session whose first
-// repo resolution was a non-git fallback is upgraded to an authoritative git repo
-// when a later resolution arrives with FromGit=true and a different ID.
-func TestApplyRepoResolution_UpgradesFallbackToGit(t *testing.T) {
-	db := openTestDB(t)
-	sessions := session.NewStore()
-	resolver := repo.NewResolver()
-
-	p := New(sessions, db, resolver, nil)
-	defer p.Stop()
-
-	const sid = "upgrade-session"
-	// SAME repository, low confidence then high confidence: the start cwd's git
-	// lookup failed (basename fallback), then a later event for the SAME directory
-	// resolves the git remote. The fallback has no toplevel; same-repo evidence
-	// comes from the session's start cwd living inside the git toplevel.
-	const startCWD = "/work/my-project"
-	fallback := &repo.Repo{ID: "my-project", Name: "my-project", FromGit: false}
-	gitRepo := &repo.Repo{ID: "github.com/acme/my-project", Name: "my-project", URL: "git@github.com:acme/my-project.git", FromGit: true, Toplevel: startCWD}
-
-	// First resolution: non-git fallback (also records the start cwd).
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{CWD: startCWD}, fallback, "")
-	})
-	sess, _ := sessions.Get(sid)
-	if sess.RepoID != "my-project" {
-		t.Fatalf("after fallback: RepoID = %q, want %q", sess.RepoID, "my-project")
-	}
-	if sess.RepoFromGit() {
-		t.Error("after fallback: RepoFromGit() = true, want false")
-	}
-
-	// Second resolution: git-backed for the SAME directory -> upgrade.
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{CWD: startCWD}, gitRepo, "")
-	})
-	sess, _ = sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/my-project" {
-		t.Errorf("after upgrade: RepoID = %q, want %q", sess.RepoID, "github.com/acme/my-project")
-	}
-	if !sess.RepoFromGit() {
-		t.Error("after upgrade: RepoFromGit() = false, want true")
-	}
-}
-
-// TestApplyRepoResolution_NoDowngradeOrThrash verifies that once a git-backed repo
-// is set, a subsequent non-git fallback does NOT replace it, and an identical git
-// resolution causes no spurious change.
-func TestApplyRepoResolution_NoDowngradeOrThrash(t *testing.T) {
-	db := openTestDB(t)
-	sessions := session.NewStore()
-	resolver := repo.NewResolver()
-
-	p := New(sessions, db, resolver, nil)
-	defer p.Stop()
-
-	const sid = "stable-git-session"
-	gitRepo := &repo.Repo{ID: "github.com/acme/widget", Name: "widget", URL: "https://github.com/acme/widget", FromGit: true}
-	fallback := &repo.Repo{ID: "widget", Name: "widget", FromGit: false}
-
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{}, gitRepo, "")
-	})
-	sess, _ := sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/widget" || !sess.RepoFromGit() {
-		t.Fatalf("setup: RepoID=%q fromGit=%v", sess.RepoID, sess.RepoFromGit())
-	}
-
-	// A non-git fallback must NOT downgrade.
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{}, fallback, "")
-	})
-	sess, _ = sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/widget" {
-		t.Errorf("after fallback attempt: RepoID = %q, want unchanged %q", sess.RepoID, "github.com/acme/widget")
-	}
-	if !sess.RepoFromGit() {
-		t.Error("after fallback attempt: RepoFromGit() flipped to false")
-	}
-
-	// An identical git resolution must cause no change (r.ID == s.RepoID guard).
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{}, gitRepo, "")
-	})
-	sess, _ = sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/widget" {
-		t.Errorf("after identical git: RepoID = %q, want %q", sess.RepoID, "github.com/acme/widget")
-	}
-}
-
-// TestApplyRepoResolution_RemoteUpgradesToplevel verifies the provenance ranking
-// (remote > toplevel > fallback): a git toplevel-basename resolution (FromGit, no
-// URL) is upgraded when a git remote-origin resolution (FromGit, with URL) arrives
-// for the same session, and the reverse never downgrades. Guards the review
-// finding that a binary FromGit flag let a toplevel resolution permanently shadow
-// a stronger remote one for the same cwd-set.
-func TestApplyRepoResolution_RemoteUpgradesToplevel(t *testing.T) {
-	db := openTestDB(t)
-	sessions := session.NewStore()
-	resolver := repo.NewResolver()
-	p := New(sessions, db, resolver, nil)
-	defer p.Stop()
-
-	const sid = "remote-upgrade-session"
-	// Same checkout, resolved two ways: the toplevel-basename id and the
-	// remote-origin id share a git working-tree root, which is the same-repo
-	// evidence that permits the in-place upgrade.
-	const top = "/work/widget"
-	toplevel := &repo.Repo{ID: "widget", Name: "widget", FromGit: true, Toplevel: top} // git toplevel basename, no remote URL
-	remote := &repo.Repo{ID: "github.com/acme/widget", Name: "widget", URL: "git@github.com:acme/widget.git", FromGit: true, Toplevel: top}
-
-	// First: git toplevel basename (rank = SourceGitToplevel).
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{}, toplevel, "")
-	})
-	sess, _ := sessions.Get(sid)
-	if sess.RepoID != "widget" || sess.RepoSourceRank() != repo.SourceGitToplevel {
-		t.Fatalf("after toplevel: RepoID=%q rank=%d, want widget/%d", sess.RepoID, sess.RepoSourceRank(), repo.SourceGitToplevel)
-	}
-
-	// Then: git remote origin (rank = SourceGitRemote) -> must upgrade.
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{}, remote, "")
-	})
-	sess, _ = sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/widget" {
-		t.Errorf("after remote: RepoID = %q, want github.com/acme/widget (remote should upgrade toplevel)", sess.RepoID)
-	}
-	if sess.RepoSourceRank() != repo.SourceGitRemote {
-		t.Errorf("after remote: rank = %d, want %d", sess.RepoSourceRank(), repo.SourceGitRemote)
-	}
-
-	// A later toplevel resolution must NOT downgrade the remote.
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{}, &repo.Repo{ID: "widget", Name: "widget", FromGit: true, Toplevel: top}, "")
-	})
-	sess, _ = sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/widget" {
-		t.Errorf("toplevel must not downgrade remote: RepoID = %q, want github.com/acme/widget", sess.RepoID)
-	}
-}
-
 // TestApplyRepoResolution_RestartReupsertPreservesMetadata ties P1-1 and P1-2 at the
 // pipeline layer: after a full git resolution is persisted, a restart-shaped re-upsert
-// (a cache-hit Repo carrying only the ID, FromGit=false) must not blank the stored
+// (a cache-hit Repo carrying no Name or URL) must not blank the stored
 // repo's Name/URL.
 func TestApplyRepoResolution_RestartReupsertPreservesMetadata(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
 
 	const id = "github.com/acme/widget"
-	gitRepo := &repo.Repo{ID: id, Name: "widget", URL: "https://github.com/acme/widget", FromGit: true}
+	gitRepo := &repo.Repo{ID: id, Name: "widget", URL: "https://github.com/acme/widget", Rank: repo.SourceGitRemote}
 
 	sessions.Upsert("sess-a", func(s *session.Session) {
 		p.applyRepoResolution(s, &parser.Event{}, gitRepo, "")
 	})
 
 	// Simulate restart: a new session for a cwd whose cache entry only has the ID.
-	cacheHit := &repo.Repo{ID: id} // empty Name/URL, FromGit=false
+	cacheHit := &repo.Repo{ID: id} // empty Name/URL
 	sessions.Upsert("sess-b", func(s *session.Session) {
 		p.applyRepoResolution(s, &parser.Event{}, cacheHit, "")
 	})
@@ -1324,7 +1156,7 @@ func (p *Pipeline) populateMetaCacheForTest(n int) {
 func TestLoadMeta_EvictsOldestHalf(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
@@ -1385,87 +1217,18 @@ func TestLoadMeta_EvictsOldestHalf(t *testing.T) {
 	}
 }
 
-// TestApplyRepoResolution_StartPin_NoFlipToDifferentRepo verifies the start-pin
-// rule: a session that starts in project A (resolved at a LOW rank) must NOT have
-// its repo_id flipped to a DIFFERENT project B even when B resolves at a strictly
-// HIGHER source rank (e.g. the run cd's into another checkout whose git remote
-// resolves). The project stays pinned to where the session started.
-func TestApplyRepoResolution_StartPin_NoFlipToDifferentRepo(t *testing.T) {
-	db := openTestDB(t)
-	sessions := session.NewStore()
-	resolver := repo.NewResolver()
-	p := New(sessions, db, resolver, nil)
-	defer p.Stop()
-
-	const sid = "startpin-session"
-	// Start: project A resolved at the LOW git-toplevel rank (remote lookup timed out).
-	projectA := &repo.Repo{ID: "alpha", Name: "alpha", FromGit: true, Toplevel: "/work/alpha"}
-	// Later: a DIFFERENT project B at a HIGHER rank (git remote, with URL),
-	// resolved from a cwd inside B's own (different) working tree.
-	projectB := &repo.Repo{ID: "github.com/acme/beta", Name: "beta", URL: "git@github.com:acme/beta.git", FromGit: true, Toplevel: "/work/beta"}
-
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{CWD: "/work/alpha"}, projectA, "")
-	})
-	sess, _ := sessions.Get(sid)
-	if sess.RepoID != "alpha" {
-		t.Fatalf("after start: RepoID = %q, want alpha", sess.RepoID)
-	}
-
-	// Higher-rank, DIFFERENT repo -> must be ignored (start-pin).
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{CWD: "/work/beta"}, projectB, "")
-	})
-	sess, _ = sessions.Get(sid)
-	if sess.RepoID != "alpha" {
-		t.Errorf("start-pin violated: RepoID = %q, want alpha (must not flip to higher-rank different repo beta)", sess.RepoID)
-	}
-	if sess.RepoSourceRank() != repo.SourceGitToplevel {
-		t.Errorf("rank changed: got %d, want %d (no upgrade across repos)", sess.RepoSourceRank(), repo.SourceGitToplevel)
-	}
-}
-
-// TestApplyRepoResolution_StartPin_UpgradesSameRepoSubdir verifies the legitimate
-// upgrade is preserved across a parent/child directory relationship: starting in a
-// subdir (toplevel /work/mono/pkg) then a higher-rank remote resolution for the
-// repo root (/work/mono) is recognised as the SAME repo and upgrades in place.
-func TestApplyRepoResolution_StartPin_UpgradesSameRepoSubdir(t *testing.T) {
-	db := openTestDB(t)
-	sessions := session.NewStore()
-	resolver := repo.NewResolver()
-	p := New(sessions, db, resolver, nil)
-	defer p.Stop()
-
-	const sid = "subdir-upgrade-session"
-	// Start: toplevel basename, working-tree root is a nested path.
-	start := &repo.Repo{ID: "mono", Name: "mono", FromGit: true, Toplevel: "/work/mono"}
-	// Later: remote origin whose toplevel is the same root.
-	remote := &repo.Repo{ID: "github.com/acme/mono", Name: "mono", URL: "git@github.com:acme/mono.git", FromGit: true, Toplevel: "/work/mono"}
-
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{CWD: "/work/mono/pkg"}, start, "")
-	})
-	sessions.Upsert(sid, func(s *session.Session) {
-		p.applyRepoResolution(s, &parser.Event{CWD: "/work/mono"}, remote, "")
-	})
-	sess, _ := sessions.Get(sid)
-	if sess.RepoID != "github.com/acme/mono" {
-		t.Errorf("same-repo upgrade failed: RepoID = %q, want github.com/acme/mono", sess.RepoID)
-	}
-}
-
 // TestApplyRepoResolution_CWDStaysAtStart verifies the displayed cwd reflects
 // session START and is never overwritten by a later event's cwd (e.g. after a cd),
 // so a card's directory cannot drift away from its pinned project.
 func TestApplyRepoResolution_CWDStaysAtStart(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
 
 	const sid = "cwd-start-session"
-	r := &repo.Repo{ID: "alpha", Name: "alpha", FromGit: true, Toplevel: "/work/alpha"}
+	r := &repo.Repo{ID: "alpha", Name: "alpha", Rank: repo.SourceGitToplevel, Toplevel: "/work/alpha"}
 
 	sessions.Upsert(sid, func(s *session.Session) {
 		p.applyRepoResolution(s, &parser.Event{CWD: "/work/alpha"}, r, "")
@@ -1485,7 +1248,7 @@ func TestApplyRepoResolution_CWDStaysAtStart(t *testing.T) {
 func TestProcess_ChildInheritsParentRepo(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
 
@@ -1495,8 +1258,7 @@ func TestProcess_ChildInheritsParentRepo(t *testing.T) {
 	// Seed the parent's repo_id directly so resolution is deterministic and does
 	// not shell out to git. The pipeline looks this up via the live session store.
 	sessions.Upsert(parentID, func(s *session.Session) {
-		s.RepoID = "github.com/acme/widget"
-		s.SetRepoSourceRank(repo.SourceGitRemote)
+		s.SetRepoPin(repo.Pin{ID: "github.com/acme/widget", Rank: repo.SourceGitRemote})
 	})
 
 	// Child event from a worktree whose basename would otherwise resolve to a
@@ -1542,7 +1304,7 @@ func TestProcess_ChildInheritsParentRepo(t *testing.T) {
 func TestProcess_ChildTracksParentRepoChange(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
 
@@ -1551,8 +1313,7 @@ func TestProcess_ChildTracksParentRepoChange(t *testing.T) {
 
 	// Parent starts pinned to a low-authority toplevel-basename id.
 	sessions.Upsert(parentID, func(s *session.Session) {
-		s.RepoID = "widget"
-		s.SetRepoSourceRank(repo.SourceGitToplevel)
+		s.SetRepoPin(repo.Pin{ID: "widget", Rank: repo.SourceGitToplevel})
 	})
 
 	// A child event from the worktree, naming the parent via in-content sessionId
@@ -1597,8 +1358,7 @@ func TestProcess_ChildTracksParentRepoChange(t *testing.T) {
 
 	// Parent's own pin is upgraded for the SAME checkout (basename → git-remote).
 	sessions.Upsert(parentID, func(s *session.Session) {
-		s.RepoID = "github.com/acme/widget"
-		s.SetRepoSourceRank(repo.SourceGitRemote)
+		s.SetRepoPin(repo.Pin{ID: "github.com/acme/widget", Rank: repo.SourceGitRemote})
 	})
 
 	// Event 3: child tracks the parent's CURRENT id (Rule 1 is not set-once).
@@ -1615,7 +1375,7 @@ func TestProcess_ChildTracksParentRepoChange(t *testing.T) {
 func TestProcess_ChildInheritsParentRepoFromDB(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
 
@@ -1623,8 +1383,8 @@ func TestProcess_ChildInheritsParentRepoFromDB(t *testing.T) {
 	const childID = "agent-feedface12345678"
 
 	// Persist the parent to the DB ONLY (absent from the live store).
-	if err := db.SaveSession(&session.Session{ID: parentID, RepoID: "github.com/acme/gadget"}); err != nil {
-		t.Fatalf("SaveSession parent: %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: parentID, RepoID: "github.com/acme/gadget"}}); err != nil {
+		t.Fatalf("FlushSessions parent: %v", err)
 	}
 
 	childLine := makeJSONL(t, map[string]interface{}{
@@ -1659,7 +1419,7 @@ func TestProcess_ChildInheritsParentRepoFromDB(t *testing.T) {
 func TestProcess_ChildBeforeParent_BackfillsRepo(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	p := New(sessions, db, resolver, nil)
 	defer p.Stop()
 
@@ -1671,8 +1431,7 @@ func TestProcess_ChildBeforeParent_BackfillsRepo(t *testing.T) {
 	// having already happened (the parent was unknown at that point). Use the
 	// deferred-link path via parentUuid so the child's ParentID is NOT set yet.
 	sessions.Upsert(childID, func(s *session.Session) {
-		s.RepoID = "agent-00ff00ff" // phantom worktree repo
-		s.SetRepoSourceRank(repo.SourceGitToplevel)
+		s.SetRepoPin(repo.Pin{ID: "agent-00ff00ff", Rank: repo.SourceGitToplevel}) // phantom worktree repo
 	})
 
 	childLine := makeJSONL(t, map[string]interface{}{
@@ -1698,8 +1457,7 @@ func TestProcess_ChildBeforeParent_BackfillsRepo(t *testing.T) {
 
 	// Parent arrives with a real repo.
 	sessions.Upsert(parentID, func(s *session.Session) {
-		s.RepoID = "github.com/acme/widget"
-		s.SetRepoSourceRank(repo.SourceGitRemote)
+		s.SetRepoPin(repo.Pin{ID: "github.com/acme/widget", Rank: repo.SourceGitRemote})
 	})
 	parentLine := makeJSONL(t, map[string]interface{}{
 		"type":      "assistant",
@@ -1723,39 +1481,43 @@ func TestProcess_ChildBeforeParent_BackfillsRepo(t *testing.T) {
 	}
 }
 
-// TestSameRepo verifies the same-repo decision used to gate start-pin upgrades.
-func TestSameRepo(t *testing.T) {
-	mk := func(top string) *repo.Repo { return &repo.Repo{Toplevel: top} }
-	cases := []struct {
-		name      string
-		pinnedTop string
-		startCWD  string
-		incoming  *repo.Repo
-		newCWD    string
-		want      bool
-	}{
-		{"identical toplevels", "/work/widget", "", mk("/work/widget"), "", true},
-		// Direction guard: a narrower incoming root nested inside the pin is the
-		// same (or a more-specific) checkout and may upgrade; a wider incoming
-		// root that CONTAINS the pin is the enclosing monorepo and must NOT let
-		// the inner pin flip outward.
-		{"incoming nested within pin (narrower) -> same", "/work/mono", "", mk("/work/mono/pkg"), "", true},
-		{"incoming contains pin (outer monorepo) -> different", "/work/mono/pkg", "", mk("/work/mono"), "", false},
-		{"different repos", "/work/alpha", "", mk("/work/beta"), "", false},
-		{"prefix-but-not-path (/repo vs /repo2)", "/work/repo", "", mk("/work/repo2"), "", false},
-		{"incoming has no toplevel", "/work/widget", "", mk(""), "", false},
-		{"fallback pin, start cwd inside incoming toplevel", "", "/work/widget/src", mk("/work/widget"), "", true},
-		{"fallback pin, start cwd outside incoming toplevel", "", "/elsewhere/foo", mk("/work/widget"), "", false},
-		{"fallback pin, no start cwd, new cwd inside toplevel", "", "", mk("/work/widget"), "/work/widget/cmd", true},
+// A Session starting in a cwd resolved before a restart must stay pinned to
+// that cwd's repo when it later runs in an enclosing repo.
+func TestProcess_CachedCwdKeepsStartPinAcrossRestart(t *testing.T) {
+	db := openTestDB(t)
+	git := repo.NewFakeGit().
+		AddCheckout("/w/mono", "git@github.com:acme/mono.git").
+		AddCheckout("/w/mono/inner", "git@github.com:acme/inner.git")
+	line := func(sid, msgID, cwd string) watcher.Event {
+		return watcher.Event{SessionID: sid, Line: makeJSONL(t, map[string]interface{}{
+			"type":      "assistant",
+			"timestamp": time.Now().Format(time.RFC3339Nano),
+			"sessionId": sid,
+			"cwd":       cwd,
+			"message":   map[string]interface{}{"id": msgID, "role": "assistant", "content": "x", "stop_reason": "end_turn"},
+		})}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s := &session.Session{CWD: tc.startCWD}
-			s.SetRepoToplevel(tc.pinnedTop)
-			if got := sameRepo(s, tc.incoming, tc.newCWD); got != tc.want {
-				t.Errorf("sameRepo = %v, want %v", got, tc.want)
-			}
-		})
+
+	first := New(session.NewStore(), db, repo.NewResolver(git), nil)
+	first.Process(line("before-restart", "m1", "/w/mono/inner"))
+	first.Stop()
+
+	cached, err := db.LoadCwdRepos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := repo.NewResolver(git)
+	resolver.LoadCache(cached)
+	sessions := session.NewStore()
+	p := New(sessions, db, resolver, nil)
+	defer p.Stop()
+
+	p.Process(line("after-restart", "m2", "/w/mono/inner"))
+	p.Process(line("after-restart", "m3", "/w/mono"))
+
+	s, _ := sessions.Get("after-restart")
+	if s.RepoID != "github.com/acme/inner" {
+		t.Errorf("RepoID = %q, want github.com/acme/inner (start pin)", s.RepoID)
 	}
 }
 
@@ -1765,7 +1527,7 @@ func TestSameRepo(t *testing.T) {
 // replay of an already-counted error line must not re-increment ErrorCount.
 func TestProcess_RebuildErrorDedupFromDB(t *testing.T) {
 	db := openTestDB(t)
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	const sid = "err-dedup-rebuild-test"
 	ts := time.Now()
 
@@ -1790,7 +1552,7 @@ func TestProcess_RebuildErrorDedupFromDB(t *testing.T) {
 	}
 
 	// An assistant message with a message ID, so the restart-rebuild path
-	// (which only fires when LoadMessageDedup returns entries) actually runs —
+	// (which only fires when LoadMessageCosts returns entries) actually runs —
 	// that is the real-world shape where the inflation occurred.
 	assistantLine := makeJSONL(t, map[string]interface{}{
 		"type":      "assistant",
@@ -1855,7 +1617,7 @@ func TestProcess_RebuildErrorDedupFromDB(t *testing.T) {
 // dedup map being non-empty.
 func TestProcess_RebuildErrorDedupFromDB_ErrorsOnlySession(t *testing.T) {
 	db := openTestDB(t)
-	resolver := repo.NewResolver()
+	resolver := repo.NewResolver(repo.NewFakeGit())
 	const sid = "err-only-rebuild-test"
 	ts := time.Now()
 
@@ -1906,7 +1668,7 @@ func TestProcess_IgnoresInternalLines(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
 	var broadcasts int
-	p := New(sessions, db, repo.NewResolver(), func(*parser.Event, *session.Session, bool, bool) {
+	p := New(sessions, db, repo.NewResolver(repo.NewFakeGit()), func(*parser.Event, *session.Session, bool, bool) {
 		broadcasts++
 	})
 	defer p.Stop()
@@ -1941,7 +1703,7 @@ func TestProcess_IgnoresInternalLines(t *testing.T) {
 
 func TestProcess_KeylessLinesGetOwnRows(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	defer p.Stop()
 
 	lines := [][]byte{
@@ -1969,7 +1731,7 @@ func TestProcess_SessionMetadataLines(t *testing.T) {
 	db := openTestDB(t)
 	sessions := session.NewStore()
 	var details, updates int
-	p := New(sessions, db, repo.NewResolver(), func(_ *parser.Event, _ *session.Session, _, sendDetail bool) {
+	p := New(sessions, db, repo.NewResolver(repo.NewFakeGit()), func(_ *parser.Event, _ *session.Session, _, sendDetail bool) {
 		if sendDetail {
 			details++
 		} else {
@@ -2025,7 +1787,7 @@ func TestProcess_SessionMetadataLines(t *testing.T) {
 	// Restart: a fresh store must restore the metadata from the DB on the
 	// first line it sees, before any ai-title line is replayed.
 	sessions2 := session.NewStore()
-	p2 := New(sessions2, db, repo.NewResolver(), nil)
+	p2 := New(sessions2, db, repo.NewResolver(repo.NewFakeGit()), nil)
 	defer p2.Stop()
 	p2.Process(watcher.Event{SessionID: "s", Line: []byte(lines[0]), Bootstrap: true})
 	sess2, _ := sessions2.Get("s")
@@ -2036,7 +1798,7 @@ func TestProcess_SessionMetadataLines(t *testing.T) {
 
 func TestProcess_SessionMetadataOnlyIsFlushed(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	defer p.Stop()
 
 	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"assistant","sessionId":"s","uuid":"u1","message":{"id":"m1","role":"assistant","content":"hi"}}`)})
@@ -2055,7 +1817,7 @@ func TestProcess_SessionMetadataOnlyIsFlushed(t *testing.T) {
 
 func TestProcess_MetadataFirstAfterRestartKeepsSavedRow(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"user","uuid":"u1","sessionId":"s","cwd":"/work/app","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
 	p.Stop()
 	before, err := db.GetSession("s")
@@ -2065,7 +1827,7 @@ func TestProcess_MetadataFirstAfterRestartKeepsSavedRow(t *testing.T) {
 
 	// Restart where the first line seen is metadata, as when a Docker source
 	// is tailed from EOF.
-	p2 := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p2 := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	p2.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"Later title","sessionId":"s"}`)})
 	p2.Stop()
 
@@ -2083,7 +1845,7 @@ func TestProcess_MetadataFirstAfterRestartKeepsSavedRow(t *testing.T) {
 
 func TestFlush_RequeuesSessionsWhenSessionWriteFails(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	p.Stop() // keep the ticker out of the way
 	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"T","sessionId":"s"}`)})
 	db.Close()
@@ -2099,7 +1861,7 @@ func TestFlush_RequeuesSessionsWhenSessionWriteFails(t *testing.T) {
 
 func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	defer p.Stop()
 
 	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: []byte(
@@ -2117,7 +1879,7 @@ func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
 
 func TestProcess_RetainedEventsDontTriggerFlush(t *testing.T) {
 	db := openTestDB(t)
-	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p := New(session.NewStore(), db, repo.NewResolver(repo.NewFakeGit()), nil)
 	defer p.Stop()
 
 	var logs bytes.Buffer
@@ -2154,7 +1916,7 @@ func TestProcess_RestartReplayKeepsCounts(t *testing.T) {
 	var want [3]int
 	for run := range 3 {
 		sessions := session.NewStore()
-		p := New(sessions, db, repo.NewResolver(), nil)
+		p := New(sessions, db, repo.NewResolver(repo.NewFakeGit()), nil)
 		for _, l := range lines {
 			p.Process(watcher.Event{SessionID: "s", Line: l, Bootstrap: run > 0})
 		}

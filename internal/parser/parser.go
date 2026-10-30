@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zxela/claude-monitor/internal/pricing"
 )
 
 const maxContentPreview = 200
@@ -208,158 +208,21 @@ func (m *Event) IsConversationTurn() bool {
 	}
 }
 
-type modelPricing struct {
-	InputPerMTok       float64
-	OutputPerMTok      float64
-	CacheReadPerMTok   float64
-	CacheCreatePerMTok float64
-}
+// prices is the Book ParseLine costs Events with.
+var prices = pricing.NewBook()
 
-// pricingTable is the compile-time fallback used when the DB is empty or unavailable.
-var pricingTable = map[string]modelPricing{
-	"claude-fable-5-1":  {10.0, 50.0, 0.25, 12.50},
-	"claude-mythos-5-1": {10.0, 50.0, 0.25, 12.50},
-	"claude-fable-5":    {10.0, 50.0, 1.0, 12.50},
-	"claude-mythos-5":   {10.0, 50.0, 1.0, 12.50},
-	"claude-opus-5-5":   {4.0, 20.0, 0.20, 5.0},
-	"claude-opus-5":     {5.0, 25.0, 0.50, 6.25},
-	"claude-opus-4-8":   {5.0, 25.0, 0.50, 6.25},
-	"claude-opus-4-7":   {5.0, 25.0, 0.50, 6.25},
-	"claude-opus-4-6":   {5.0, 25.0, 0.50, 6.25},
-	"claude-opus-4-5":   {5.0, 25.0, 0.50, 6.25},
-	"claude-sonnet-5-5": {2.0, 10.0, 0.20, 2.50},
-	"claude-sonnet-5":   {2.0, 10.0, 0.20, 2.50},
-	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
-	"claude-haiku-5-5":  {0.10, 0.50, 0.01, 0.125},
-	"claude-haiku-4-5":  {1.0, 5.0, 0.10, 1.25},
-}
-
-// longContextTier is a second rate card for requests whose prompt (input +
-// cache read + cache write tokens) exceeds threshold.
-type longContextTier struct {
-	threshold int64
-	rates     modelPricing
-}
-
-// longContextTable is the compile-time fallback for tiers, keyed like pricingTable.
-var longContextTable = map[string]longContextTier{
-	"claude-haiku-5-5": {100_000, modelPricing{0.50, 2.50, 0.05, 0.625}},
-}
-
-type pricingTables struct {
-	base map[string]modelPricing
-	long map[string]longContextTier
-}
-
-var defaultPricing = pricingTable["claude-sonnet-4-6"]
-
-// activePricingTable holds the merged pricing tables (DB values preferred over compile-time
-// fallback). Stored as an atomic.Value so concurrent reads from computeCost and writes from
-// SetPricingTable (called from the HTTP pricing handler) are race-free.
-var activePricingTableAtomic atomic.Value // stores pricingTables
-
-// warnedModels tracks models for which an unknown-pricing warning has already been logged
-// (once per process run).
-var warnedModels sync.Map
-
-// ExternalPricing holds the per-million-token rates for a model, plus an
-// optional long-context card used when LongContextThreshold > 0.
-// Used by SetPricingTable to accept DB-loaded pricing without a store import.
-type ExternalPricing struct {
-	InputPerMTok           float64
-	OutputPerMTok          float64
-	CacheReadPerMTok       float64
-	CacheCreatePerMTok     float64
-	LongContextThreshold   int64
-	LongInputPerMTok       float64
-	LongOutputPerMTok      float64
-	LongCacheReadPerMTok   float64
-	LongCacheCreatePerMTok float64
-}
-
-// SetPricingTable merges DB-sourced pricing (preferred) with the compile-time fallback.
-// Call this once at startup after loading from the database.
-// dbPricing keys are model_prefix strings.
-func SetPricingTable(dbPricing map[string]ExternalPricing) {
-	merged := pricingTables{
-		base: make(map[string]modelPricing, len(pricingTable)+len(dbPricing)),
-		long: make(map[string]longContextTier, len(longContextTable)),
-	}
-	// Start with compile-time fallback.
-	for k, v := range pricingTable {
-		merged.base[k] = v
-	}
-	for k, v := range longContextTable {
-		merged.long[k] = v
-	}
-	// Overwrite / extend with DB values. A DB row without a tier has none.
-	for prefix, p := range dbPricing {
-		merged.base[prefix] = modelPricing{p.InputPerMTok, p.OutputPerMTok, p.CacheReadPerMTok, p.CacheCreatePerMTok}
-		if p.LongContextThreshold > 0 {
-			merged.long[prefix] = longContextTier{p.LongContextThreshold, modelPricing{
-				p.LongInputPerMTok, p.LongOutputPerMTok, p.LongCacheReadPerMTok, p.LongCacheCreatePerMTok,
-			}}
-		} else {
-			delete(merged.long, prefix)
-		}
-	}
-	activePricingTableAtomic.Store(merged)
-}
-
-// lookupPricing resolves pricing for the given model string and prompt size.
-// It prefers the atomically-stored pricing table (set from DB) and falls back to pricingTable.
-// Returns the pricing and whether it was found (false means default was used).
-func lookupPricing(model string, promptTokens int64) (modelPricing, bool) {
-	tables := pricingTables{base: pricingTable, long: longContextTable}
-	if v := activePricingTableAtomic.Load(); v != nil {
-		tables = v.(pricingTables)
-	}
-	key, found := matchPricingKey(tables.base, model)
-	if !found {
-		return defaultPricing, false
-	}
-	if tier, ok := tables.long[key]; ok && promptTokens > tier.threshold {
-		return tier.rates, true
-	}
-	return tables.base[key], true
-}
-
-// matchPricingKey returns the table key that prices model: an exact match, else
-// the longest prefix.
-func matchPricingKey(table map[string]modelPricing, model string) (string, bool) {
-	if _, ok := table[model]; ok {
-		return model, true
-	}
-	// Prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001").
-	// Sort keys by length descending so the most-specific prefix wins when
-	// multiple prefixes could match (e.g. "claude-haiku-4" vs "claude-haiku-4-5").
-	keys := make([]string, 0, len(table))
-	for k := range table {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
-	for _, key := range keys {
-		if len(model) > len(key) && model[:len(key)] == key {
-			return key, true
-		}
-	}
-	return "", false
+// Prices returns the Book ParseLine costs Events with; Load DB pricing into it.
+func Prices() *pricing.Book {
+	return prices
 }
 
 func computeCost(model string, usage rawUsage) float64 {
-	prompt := usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
-	p, found := lookupPricing(model, prompt)
-	if !found && model != "" && model != "<synthetic>" {
-		// Warn once per unknown model per process run.
-		// "<synthetic>" is an internal Claude Code model string; suppress its warning.
-		if _, alreadyWarned := warnedModels.LoadOrStore(model, true); !alreadyWarned {
-			log.Printf("[WARN] unknown model pricing for %q, using Sonnet default", model)
-		}
-	}
-	return float64(usage.InputTokens)*p.InputPerMTok/1e6 +
-		float64(usage.OutputTokens)*p.OutputPerMTok/1e6 +
-		float64(usage.CacheReadInputTokens)*p.CacheReadPerMTok/1e6 +
-		float64(usage.CacheCreationInputTokens)*p.CacheCreatePerMTok/1e6
+	return prices.Cost(model, pricing.Usage{
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		CacheReadTokens:     usage.CacheReadInputTokens,
+		CacheCreationTokens: usage.CacheCreationInputTokens,
+	})
 }
 
 // isErrorContent is a last-resort heuristic to detect error messages in tool result content.

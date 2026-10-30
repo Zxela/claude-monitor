@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zxela/claude-monitor/internal/parser"
+	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
 )
 
@@ -84,14 +85,13 @@ func TestRestoreSessions_RoundTripsRuntimeState(t *testing.T) {
 	db := openTestDB(t)
 	last := time.Date(2026, 10, 1, 12, 0, 1, 123456789, time.UTC)
 	s := &session.Session{
-		ID: "child", ParentID: "parent", RepoID: "github.com/x/y", Status: "tool_use",
+		ID: "child", ParentID: "parent", Status: "tool_use",
 		StartedAt: last.Add(-time.Minute), LastActive: last, TotalCost: 1.5,
 		EventCount: 3, MessageCount: 2, ErrorCount: 1, CWD: "/w", GitBranch: "main",
 		AgentKind: "subagent", AgentID: "child",
 	}
-	s.SetRepoSourceRank(3)
-	s.SetRepoToplevel("/w")
-	s.SetRepoInherited(true)
+	pin := repo.Pin{ID: "github.com/x/y", Rank: 3, Toplevel: "/w", Inherited: true}
+	s.SetRepoPin(pin)
 	if err := db.FlushSessions([]*session.Session{s, {ID: "other"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +111,8 @@ func TestRestoreSessions_RoundTripsRuntimeState(t *testing.T) {
 		r.EventCount != 3 || r.MessageCount != 2 || r.ErrorCount != 1 || r.AgentKind != "subagent" {
 		t.Errorf("restored %+v", r)
 	}
-	if r.RepoSourceRank() != 3 || r.RepoToplevel() != "/w" || !r.RepoInherited() {
-		t.Errorf("repo provenance = %d %q %v", r.RepoSourceRank(), r.RepoToplevel(), r.RepoInherited())
+	if got := r.RepoPin(); got != pin {
+		t.Errorf("RepoPin = %+v, want %+v", got, pin)
 	}
 	if !r.DedupPending() {
 		t.Error("restored session should be marked DedupPending")

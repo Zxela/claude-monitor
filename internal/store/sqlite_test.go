@@ -2,12 +2,14 @@ package store
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/zxela/claude-monitor/internal/parser"
+	"github.com/zxela/claude-monitor/internal/pricing"
 	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
 )
@@ -180,7 +182,8 @@ func TestCwdRepos(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 
-	if err := db.UpsertCwdRepo("/home/user/project", "test-repo"); err != nil {
+	want := repo.CacheEntry{CWD: "/home/user/project", RepoID: "test-repo", Rank: repo.SourceGitRemote, Toplevel: "/home/user/project"}
+	if err := db.UpsertCwdRepo(want); err != nil {
 		t.Fatalf("UpsertCwdRepo failed: %v", err)
 	}
 
@@ -188,8 +191,8 @@ func TestCwdRepos(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCwdRepos failed: %v", err)
 	}
-	if entries["/home/user/project"] != "test-repo" {
-		t.Errorf("expected test-repo, got %q", entries["/home/user/project"])
+	if len(entries) != 1 || entries[0] != want {
+		t.Errorf("LoadCwdRepos = %+v, want [%+v]", entries, want)
 	}
 
 	if err := db.ClearCwdRepos(); err != nil {
@@ -201,13 +204,7 @@ func TestCwdRepos(t *testing.T) {
 	}
 }
 
-// TestFlushSessions_SkipsCwdRepoForInheritedPins verifies that a child session
-// whose repo_id was inherited from its parent does NOT get its (worktree) cwd
-// recorded in cwd_repos, while a normally-resolved session does. Persisting an
-// inherited child's cwd → repo_id would mis-attribute future unrelated sessions
-// that resolve the same directory once the resolver cache is seeded from this
-// table on restart.
-func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
+func TestFlushSessions_PersistsPinCacheEntry(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
@@ -215,13 +212,11 @@ func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
 	if err := db.UpsertRepo(&repo.Repo{ID: repoID, Name: "widget"}); err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
-
-	// Normally-resolved session: cwd → repo mapping SHOULD be persisted.
-	normal := &session.Session{ID: "normal-sess", CWD: "/work/widget", RepoID: repoID}
-	// Child that inherited its parent's repo: its cwd is the child's own worktree,
-	// not the parent's project, so the mapping must NOT be persisted.
-	child := &session.Session{ID: "child-sess", CWD: "/work/.worktrees/agent-x", RepoID: repoID}
-	child.SetRepoInherited(true)
+	pin := repo.Pin{ID: repoID, Rank: repo.SourceGitRemote, Toplevel: "/work/widget"}
+	normal := &session.Session{ID: "normal-sess", CWD: "/work/widget/src"}
+	normal.SetRepoPin(pin)
+	child := &session.Session{ID: "child-sess", CWD: "/work/.worktrees/agent-x"}
+	child.SetRepoPin(pin.Inherit(repoID))
 
 	if err := db.FlushSessions([]*session.Session{normal, child}); err != nil {
 		t.Fatalf("FlushSessions: %v", err)
@@ -231,15 +226,13 @@ func TestFlushSessions_SkipsCwdRepoForInheritedPins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCwdRepos: %v", err)
 	}
-	if entries["/work/widget"] != repoID {
-		t.Errorf("normal session cwd mapping = %q, want %q", entries["/work/widget"], repoID)
-	}
-	if got, ok := entries["/work/.worktrees/agent-x"]; ok {
-		t.Errorf("inherited child worktree cwd should not be persisted to cwd_repos; got %q", got)
+	want, _ := pin.CacheEntry("/work/widget/src")
+	if len(entries) != 1 || entries[0] != want {
+		t.Errorf("LoadCwdRepos = %+v, want [%+v]", entries, want)
 	}
 }
 
-func TestSaveSession_InsertAndUpdate(t *testing.T) {
+func TestFlushSessions_InsertAndUpdate(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
@@ -261,8 +254,8 @@ func TestSaveSession_InsertAndUpdate(t *testing.T) {
 		TaskDescription: "Fix the bug",
 	}
 
-	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{sess}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	rows, err := db.ListSessions(10, 0)
@@ -278,8 +271,8 @@ func TestSaveSession_InsertAndUpdate(t *testing.T) {
 
 	// Update
 	sess.TotalCost = 2.50
-	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession update failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{sess}); err != nil {
+		t.Fatalf("FlushSessions update failed: %v", err)
 	}
 	rows, _ = db.ListSessions(10, 0)
 	if rows[0].TotalCost != 2.50 {
@@ -303,11 +296,11 @@ func TestAggregateStats_TopLevelSessionsAndAgentsSplit(t *testing.T) {
 		Model: "claude-sonnet-4-6",
 	}
 
-	if err := db.SaveSession(parent); err != nil {
-		t.Fatalf("SaveSession(parent) failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{parent}); err != nil {
+		t.Fatalf("FlushSessions(parent) failed: %v", err)
 	}
-	if err := db.SaveSession(child); err != nil {
-		t.Fatalf("SaveSession(child) failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{child}); err != nil {
+		t.Fatalf("FlushSessions(child) failed: %v", err)
 	}
 
 	agg, err := db.AggregateStats(time.Time{})
@@ -346,8 +339,8 @@ func TestSession_WorkflowColumnsRoundTrip(t *testing.T) {
 		StartedAt:  now.Add(-5 * time.Minute),
 		LastActive: now,
 	}
-	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{sess}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	got, err := db.GetSession("agent-abc")
@@ -396,8 +389,8 @@ func TestListSessionsByWorkflow(t *testing.T) {
 		},
 	}
 	for _, s := range sessions {
-		if err := db.SaveSession(s); err != nil {
-			t.Fatalf("SaveSession(%s) failed: %v", s.ID, err)
+		if err := db.FlushSessions([]*session.Session{s}); err != nil {
+			t.Fatalf("FlushSessions(%s) failed: %v", s.ID, err)
 		}
 	}
 
@@ -433,10 +426,10 @@ func TestPersistBatch(t *testing.T) {
 	db := openTestDB(t)
 
 	// Create a session first
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{
@@ -497,10 +490,10 @@ func TestPersistBatch_Dedup(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	ts := time.Now()
@@ -552,10 +545,10 @@ func TestSearchFTS(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -628,10 +621,10 @@ func TestListRecentEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	ts := time.Now()
@@ -671,10 +664,10 @@ func TestPersistBatch_EventMetadataRoundTrip(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{{
@@ -741,7 +734,7 @@ func insertTestSession(t *testing.T, db *DB, id string, startedAt time.Time, cos
 		LastActive:          startedAt.Add(5 * time.Minute),
 		Model:               "claude-sonnet-4-6",
 	}
-	if err := db.SaveSession(s); err != nil {
+	if err := db.FlushSessions([]*session.Session{s}); err != nil {
 		t.Fatalf("insertTestSession(%s): %v", id, err)
 	}
 }
@@ -763,7 +756,7 @@ func insertTestSessionWithRepo(t *testing.T, db *DB, id, repoID string, startedA
 		LastActive:          startedAt.Add(5 * time.Minute),
 		Model:               "claude-sonnet-4-6",
 	}
-	if err := db.SaveSession(s); err != nil {
+	if err := db.FlushSessions([]*session.Session{s}); err != nil {
 		t.Fatalf("insertTestSessionWithRepo(%s): %v", id, err)
 	}
 }
@@ -781,7 +774,7 @@ func insertTestSessionWithModel(t *testing.T, db *DB, id, model string, startedA
 		LastActive:          startedAt.Add(5 * time.Minute),
 		Model:               model,
 	}
-	if err := db.SaveSession(s); err != nil {
+	if err := db.FlushSessions([]*session.Session{s}); err != nil {
 		t.Fatalf("insertTestSessionWithModel(%s): %v", id, err)
 	}
 }
@@ -1009,21 +1002,21 @@ func TestTrendByRepo_CountsChildCostOnce(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 	// Parent: top-level session in repo-a, cost 5.00.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "parent-1", RepoID: "repo-a", TotalCost: 5.00, InputTokens: 500,
 		StartedAt: now.Add(-2 * time.Hour), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(parent) failed: %v", err)
 	}
 	// Child: workflow agent in the same repo (children inherit parent repo_id),
 	// cost 1.00, parent_id set so it is not a top-level session.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "child-1", RepoID: "repo-a", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-1 * time.Hour), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession(child) failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(child) failed: %v", err)
 	}
 
 	result, err := db.TrendData("7d", "")
@@ -1060,20 +1053,20 @@ func TestTrendByModel_CountsChildCostOnce(t *testing.T) {
 
 	now := time.Now()
 	// Parent on opus, cost 5.00, top-level.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "parent-1", TotalCost: 5.00, InputTokens: 500,
 		StartedAt: now.Add(-2 * time.Hour), LastActive: now,
 		Model: "claude-opus-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(parent) failed: %v", err)
 	}
 	// Child on sonnet (different model), cost 1.00, parent_id set.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "child-1", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-1 * time.Hour), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession(child) failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(child) failed: %v", err)
 	}
 
 	result, err := db.TrendData("7d", "")
@@ -1259,21 +1252,21 @@ func TestTrendData_CountsChildCostOnceButNotAsSession(t *testing.T) {
 
 	now := time.Now()
 	// Parent session
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "parent-1", TotalCost: 5.00, InputTokens: 500,
 		StartedAt: now.Add(-1 * time.Hour), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 	// Child session — its cost is summed (counted once) but the child is NOT
 	// counted as a top-level session.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "child-1", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-30 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	result, err := db.TrendData("7d", "")
@@ -1434,10 +1427,10 @@ func TestCompactHotToWarm(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	// Insert events with timestamps old enough to be compacted (hotDays=0 means everything)
@@ -1486,10 +1479,10 @@ func TestCompactHotToWarm_NoOldEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	// Insert a recent event
@@ -1525,10 +1518,10 @@ func TestCompactWarmToCold(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	oldTime := time.Now().Add(-48 * time.Hour)
@@ -1573,10 +1566,10 @@ func TestCompactWarmToCold_NoOldEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{{
@@ -1604,10 +1597,10 @@ func TestCompactFullLifecycle(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	oldTime := time.Now().Add(-72 * time.Hour)
@@ -1701,10 +1694,10 @@ func TestStorageInfo_WithData(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -1752,10 +1745,10 @@ func TestSearchFTS_MultipleResults(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -1801,10 +1794,10 @@ func TestSearchFTS_NoResults(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{{
@@ -1831,10 +1824,10 @@ func TestSearchFTS_SpecialCharacters(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{{
@@ -1862,10 +1855,10 @@ func TestSearchFTS_ByToolName(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -1907,10 +1900,10 @@ func TestSearchFTS_LimitRespected(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{}
@@ -1958,10 +1951,10 @@ func TestSearchFullContent(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -2006,10 +1999,10 @@ func TestSearchFullContent_NoResults(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{{
@@ -2060,14 +2053,14 @@ func TestClosedDB_ListSessions(t *testing.T) {
 	}
 }
 
-func TestClosedDB_SaveSession(t *testing.T) {
+func TestClosedDB_FlushSessions(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 	db.Close()
 
-	err := db.SaveSession(&session.Session{
+	err := db.FlushSessions([]*session.Session{{
 		ID: "x", StartedAt: time.Now(), LastActive: time.Now(),
-	})
+	}})
 	if err == nil {
 		t.Error("expected error from closed DB, got nil")
 	}
@@ -2292,12 +2285,12 @@ func TestGetSession(t *testing.T) {
 
 	// Insert and retrieve
 	now := time.Now()
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "sess-get-1", SessionName: "my session", TotalCost: 3.50,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
 		Model: "claude-opus-4-6", CWD: "/tmp", GitBranch: "main",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	row, err = db.GetSession("sess-get-1")
@@ -2327,23 +2320,23 @@ func TestListSessionsByRepo(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", RepoID: "repo-x", TotalCost: 1.00,
 		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s2", RepoID: "repo-x", TotalCost: 2.00,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s3", RepoID: "repo-y", TotalCost: 5.00,
 		StartedAt: now.Add(-2 * time.Minute), LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	rows, err := db.ListSessionsByRepo("repo-x", 10, 0)
@@ -2364,19 +2357,19 @@ func TestAggregateStatsByRepo(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", RepoID: "repo-agg", TotalCost: 1.00, InputTokens: 100, OutputTokens: 50,
 		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s2", RepoID: "repo-agg", TotalCost: 2.00, InputTokens: 200, OutputTokens: 100,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
 		Model: "claude-opus-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	agg, err := db.AggregateStatsByRepo("repo-agg")
@@ -2414,20 +2407,20 @@ func TestAggregateStatsByRepo_IncludesChildCostOnce(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 	// Parent: top-level session on opus, cost 5.00.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "parent-1", RepoID: "repo-agg", TotalCost: 5.00, InputTokens: 500, OutputTokens: 250,
 		StartedAt: now.Add(-10 * time.Minute), LastActive: now,
 		Model: "claude-opus-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession(parent) failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(parent) failed: %v", err)
 	}
 	// Child: workflow agent on sonnet (different model), same repo, cost 1.00.
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "child-1", RepoID: "repo-agg", ParentID: "parent-1", TotalCost: 1.00, InputTokens: 100, OutputTokens: 50,
 		StartedAt: now.Add(-5 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession(child) failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(child) failed: %v", err)
 	}
 
 	agg, err := db.AggregateStatsByRepo("repo-agg")
@@ -2467,20 +2460,20 @@ func TestAggregateStats_WithSinceFilter(t *testing.T) {
 
 	now := time.Now()
 	// Session from 2 hours ago
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s-old", TotalCost: 1.00, InputTokens: 100,
 		StartedAt: now.Add(-2 * time.Hour), LastActive: now.Add(-2 * time.Hour),
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 	// Session from 30 minutes ago
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s-new", TotalCost: 3.00, InputTokens: 300,
 		StartedAt: now.Add(-30 * time.Minute), LastActive: now,
 		Model: "claude-sonnet-4-6",
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	// Filter to last hour
@@ -2508,17 +2501,17 @@ func TestListRepos(t *testing.T) {
 		t.Fatalf("UpsertRepo failed: %v", err)
 	}
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", RepoID: "repo-list-a", TotalCost: 5.00,
 		StartedAt: now, LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s2", RepoID: "repo-list-b", TotalCost: 2.00,
 		StartedAt: now, LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	repos, err := db.ListRepos()
@@ -2540,80 +2533,100 @@ func TestListRepos(t *testing.T) {
 	}
 }
 
-func TestLoadMessageDedup(t *testing.T) {
-	t.Parallel()
-	db := openTestDB(t)
-
-	if err := db.SaveSession(&session.Session{
-		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+func persistTotalsFixture(t *testing.T, db *DB) {
+	t.Helper()
+	ts := time.Now()
+	if err := db.FlushSessions([]*session.Session{{ID: "s1", StartedAt: ts, LastActive: ts}, {ID: "s2", StartedAt: ts, LastActive: ts}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
-
-	batch := &EventBatch{Events: []EventInsert{
-		{
-			SessionID: "s1",
-			Event: &parser.Event{
-				MessageID:    "msg-dedup-1",
-				Type:         "assistant",
-				ContentText:  "first message",
-				CostUSD:      0.01,
-				InputTokens:  100,
-				OutputTokens: 50,
-				Timestamp:    time.Now(),
-			},
-		},
-		{
-			SessionID: "s1",
-			Event: &parser.Event{
-				MessageID:    "msg-dedup-2",
-				Type:         "assistant",
-				ContentText:  "second message",
-				CostUSD:      0.02,
-				InputTokens:  200,
-				OutputTokens: 100,
-				Timestamp:    time.Now().Add(time.Second),
-			},
-		},
-	}}
-	if err := db.PersistBatch(batch); err != nil {
+	if err := db.PersistBatch(&EventBatch{Events: []EventInsert{
+		{SessionID: "s1", Event: &parser.Event{MessageID: "msg-a", UUID: "ua", Type: "assistant", ContentText: "a", CostUSD: 1.25, InputTokens: 100, OutputTokens: 10, CacheReadTokens: 1000, CacheCreationTokens: 50, Timestamp: ts}},
+		{SessionID: "s1", Event: &parser.Event{MessageID: "msg-b", UUID: "ub", Type: "assistant", ContentText: "b", CostUSD: 2.50, InputTokens: 200, OutputTokens: 20, CacheReadTokens: 2000, CacheCreationTokens: 60, Timestamp: ts.Add(time.Second)}},
+		{SessionID: "s1", Event: &parser.Event{MessageID: "msg-free", UUID: "uf", Type: "assistant", ContentText: "free", CacheReadTokens: 9999, Timestamp: ts.Add(2 * time.Second)}},
+		{SessionID: "s1", Event: &parser.Event{UUID: "u-no-msg", Type: "user", ContentText: "hi", CostUSD: 7, Timestamp: ts.Add(3 * time.Second)}},
+		{SessionID: "s2", Event: &parser.Event{MessageID: "msg-other", UUID: "uo", Type: "assistant", ContentText: "o", CostUSD: 5, InputTokens: 500, Timestamp: ts}},
+	}}); err != nil {
 		t.Fatalf("PersistBatch failed: %v", err)
 	}
-
-	ids, costs, err := db.LoadMessageDedup("s1")
-	if err != nil {
-		t.Fatalf("LoadMessageDedup failed: %v", err)
-	}
-	if len(ids) != 2 {
-		t.Errorf("expected 2 message IDs, got %d", len(ids))
-	}
-	if !ids["msg-dedup-1"] {
-		t.Error("expected msg-dedup-1 in ids")
-	}
-	if !ids["msg-dedup-2"] {
-		t.Error("expected msg-dedup-2 in ids")
-	}
-	if costs["msg-dedup-1"].CostUSD != 0.01 {
-		t.Errorf("msg-dedup-1 cost: got %f, want 0.01", costs["msg-dedup-1"].CostUSD)
-	}
-	if costs["msg-dedup-2"].InputTokens != 200 {
-		t.Errorf("msg-dedup-2 input tokens: got %d, want 200", costs["msg-dedup-2"].InputTokens)
+	// A later streamed line of msg-a carries the Message's final usage.
+	if err := db.PersistBatch(&EventBatch{Events: []EventInsert{
+		{SessionID: "s1", Event: &parser.Event{MessageID: "msg-a", UUID: "ua", Type: "assistant", ContentText: "a2", CostUSD: 1.75, InputTokens: 120, OutputTokens: 12, CacheReadTokens: 1000, CacheCreationTokens: 50, Timestamp: ts}},
+	}}); err != nil {
+		t.Fatalf("PersistBatch re-emit failed: %v", err)
 	}
 }
 
-func TestLoadMessageDedup_EmptySession(t *testing.T) {
+func TestSessionTotals_SumsLastRowPerMessage(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	persistTotalsFixture(t, db)
+
+	got, err := db.SessionTotals("s1")
+	if err != nil {
+		t.Fatalf("SessionTotals failed: %v", err)
+	}
+	if math.Abs(got.CostUSD-4.25) > 1e-9 {
+		t.Errorf("CostUSD: got %v, want 4.25", got.CostUSD)
+	}
+	want := SessionTotals{CostUSD: got.CostUSD, InputTokens: 320, OutputTokens: 32, CacheReadTokens: 3000, CacheCreationTokens: 110}
+	if got != want {
+		t.Errorf("SessionTotals: got %+v, want %+v", got, want)
+	}
+}
+
+func TestSessionTotals_AgreesWithLoadMessageCosts(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	persistTotalsFixture(t, db)
+
+	costs, err := db.LoadMessageCosts("s1")
+	if err != nil {
+		t.Fatalf("LoadMessageCosts failed: %v", err)
+	}
+	if len(costs) != 2 {
+		t.Fatalf("LoadMessageCosts: got %d Messages, want 2 (msg-a, msg-b): %+v", len(costs), costs)
+	}
+	if costs["msg-a"].CostUSD != 1.75 {
+		t.Errorf("msg-a cost: got %v, want the last row's 1.75", costs["msg-a"].CostUSD)
+	}
+	var sum SessionTotals
+	for _, mc := range costs {
+		sum.CostUSD += mc.CostUSD
+		sum.InputTokens += mc.InputTokens
+		sum.OutputTokens += mc.OutputTokens
+		sum.CacheReadTokens += mc.CacheReadTokens
+		sum.CacheCreationTokens += mc.CacheCreationTokens
+	}
+	totals, err := db.SessionTotals("s1")
+	if err != nil {
+		t.Fatalf("SessionTotals failed: %v", err)
+	}
+	if math.Abs(sum.CostUSD-totals.CostUSD) > 1e-9 {
+		t.Errorf("CostUSD: costs sum %v, totals %v", sum.CostUSD, totals.CostUSD)
+	}
+	sum.CostUSD = totals.CostUSD
+	if sum != totals {
+		t.Errorf("costs sum %+v != totals %+v", sum, totals)
+	}
+}
+
+func TestSessionTotals_UnknownSessionIsZero(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	ids, costs, err := db.LoadMessageDedup("nonexistent")
+	got, err := db.SessionTotals("nonexistent")
 	if err != nil {
-		t.Fatalf("LoadMessageDedup failed: %v", err)
+		t.Fatalf("SessionTotals failed: %v", err)
 	}
-	if len(ids) != 0 {
-		t.Errorf("expected 0 ids, got %d", len(ids))
+	if got != (SessionTotals{}) {
+		t.Errorf("SessionTotals: got %+v, want zero", got)
+	}
+	costs, err := db.LoadMessageCosts("nonexistent")
+	if err != nil {
+		t.Fatalf("LoadMessageCosts failed: %v", err)
 	}
 	if len(costs) != 0 {
-		t.Errorf("expected 0 costs, got %d", len(costs))
+		t.Errorf("LoadMessageCosts: got %d entries, want 0", len(costs))
 	}
 }
 
@@ -2621,10 +2634,10 @@ func TestListPinnedEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -2839,14 +2852,16 @@ func TestClosedDB_ListRepos(t *testing.T) {
 	}
 }
 
-func TestClosedDB_LoadMessageDedup(t *testing.T) {
+func TestClosedDB_SessionTotals(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 	db.Close()
 
-	_, _, err := db.LoadMessageDedup("s1")
-	if err == nil {
-		t.Error("expected error from closed DB, got nil")
+	if _, err := db.SessionTotals("s1"); err == nil {
+		t.Error("SessionTotals: expected error from closed DB, got nil")
+	}
+	if _, err := db.LoadMessageCosts("s1"); err == nil {
+		t.Error("LoadMessageCosts: expected error from closed DB, got nil")
 	}
 }
 
@@ -2888,7 +2903,7 @@ func TestClosedDB_UpsertCwdRepo(t *testing.T) {
 	db := openTestDB(t)
 	db.Close()
 
-	err := db.UpsertCwdRepo("/tmp", "repo")
+	err := db.UpsertCwdRepo(repo.CacheEntry{CWD: "/tmp", RepoID: "repo"})
 	if err == nil {
 		t.Error("expected error from closed DB, got nil")
 	}
@@ -2919,8 +2934,8 @@ func TestGetSession_AllFields(t *testing.T) {
 		GitBranch:       "feature/test",
 		TaskDescription: "Implement feature X",
 	}
-	if err := db.SaveSession(sess); err != nil {
-		t.Fatalf("SaveSession: %v", err)
+	if err := db.FlushSessions([]*session.Session{sess}); err != nil {
+		t.Fatalf("FlushSessions: %v", err)
 	}
 
 	row, err := db.GetSession("get-all-1")
@@ -2958,10 +2973,10 @@ func TestSearchFullContent_SpecialCharacters(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "sfc-special", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{{
@@ -3047,11 +3062,11 @@ func TestListWorkflows_Aggregates(t *testing.T) {
 
 	now := time.Now()
 	save := func(id, wf string, cost float64) {
-		if err := db.SaveSession(&session.Session{
+		if err := db.FlushSessions([]*session.Session{{
 			ID: id, WorkflowID: wf, TotalCost: cost,
 			StartedAt: now.Add(-time.Minute), LastActive: now,
-		}); err != nil {
-			t.Fatalf("SaveSession(%s): %v", id, err)
+		}}); err != nil {
+			t.Fatalf("FlushSessions(%s): %v", id, err)
 		}
 	}
 	save("agent-1", "wf_1", 1.00)
@@ -3094,15 +3109,15 @@ func TestListReplayEvents_IncludesChildren(t *testing.T) {
 	db := openTestDB(t)
 
 	base := time.Now().UTC().Truncate(time.Second)
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "p1", StartedAt: base, LastActive: base,
-	}); err != nil {
-		t.Fatalf("SaveSession(p1): %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(p1): %v", err)
 	}
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "agent-1", ParentID: "p1", StartedAt: base, LastActive: base,
-	}); err != nil {
-		t.Fatalf("SaveSession(agent-1): %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(agent-1): %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -3149,11 +3164,11 @@ func TestListReplayEvents_SameTimestampTiebreak(t *testing.T) {
 	db := openTestDB(t)
 
 	base := time.Now().UTC().Truncate(time.Second)
-	if err := db.SaveSession(&session.Session{ID: "p1", StartedAt: base, LastActive: base}); err != nil {
-		t.Fatalf("SaveSession(p1): %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: "p1", StartedAt: base, LastActive: base}}); err != nil {
+		t.Fatalf("FlushSessions(p1): %v", err)
 	}
-	if err := db.SaveSession(&session.Session{ID: "agent-1", ParentID: "p1", StartedAt: base, LastActive: base}); err != nil {
-		t.Fatalf("SaveSession(agent-1): %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: "agent-1", ParentID: "p1", StartedAt: base, LastActive: base}}); err != nil {
+		t.Fatalf("FlushSessions(agent-1): %v", err)
 	}
 
 	// Both events carry the SAME timestamp; the parent is persisted first so it
@@ -3267,8 +3282,8 @@ func TestTrendBySession_RollsUpSubagents(t *testing.T) {
 	c2 := &session.Session{ID: "agent-2", ParentID: "root-1", TotalCost: 2.0, InputTokens: 20, StartedAt: now.Add(-80 * time.Minute), LastActive: now, Model: "claude-opus-4-8"}
 	other := &session.Session{ID: "root-2", SessionName: "lint fix", TotalCost: 1.0, InputTokens: 10, StartedAt: now.Add(-1 * time.Hour), LastActive: now, Model: "claude-opus-4-8"}
 	for _, s := range []*session.Session{parent, c1, c2, other} {
-		if err := db.SaveSession(s); err != nil {
-			t.Fatalf("SaveSession(%s): %v", s.ID, err)
+		if err := db.FlushSessions([]*session.Session{s}); err != nil {
+			t.Fatalf("FlushSessions(%s): %v", s.ID, err)
 		}
 	}
 
@@ -3439,11 +3454,11 @@ func TestSessionAITitlePRLinks_RoundTrip(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("FlushSessions: %v", err)
 	}
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "named", SessionName: "explicit", AITitle: "ignored for trends", TotalCost: 0.5,
 		StartedAt: now.Add(-time.Hour), LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions: %v", err)
 	}
 
 	row, err := db.GetSession("titled")
@@ -3476,14 +3491,14 @@ func TestAllModelPricing_LongContextTier(t *testing.T) {
 	db := openTestDB(t)
 
 	// Editing the base rates must keep the seeded tier.
-	if err := db.UpsertModelPricing("claude-haiku-5-5", ModelPricing{InputPerMTok: 0.10, OutputPerMTok: 0.60, CacheReadPerMTok: 0.01, CacheCreatePerMTok: 0.125}); err != nil {
+	if err := db.UpsertModelPricing("claude-haiku-5-5", pricing.Price{InputPerMTok: 0.10, OutputPerMTok: 0.60, CacheReadPerMTok: 0.01, CacheCreatePerMTok: 0.125}); err != nil {
 		t.Fatal(err)
 	}
 	all, err := db.AllModelPricing()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ModelPricing{
+	want := pricing.Price{
 		InputPerMTok: 0.10, OutputPerMTok: 0.60, CacheReadPerMTok: 0.01, CacheCreatePerMTok: 0.125,
 		LongContextThreshold: 100_000,
 		LongInputPerMTok:     0.50, LongOutputPerMTok: 2.50, LongCacheReadPerMTok: 0.05, LongCacheCreatePerMTok: 0.625,

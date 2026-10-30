@@ -12,8 +12,8 @@ import (
 // it: a thinking line, then a tool_use line, both carrying the same message id.
 func persistMessageBlocks(t *testing.T, db *DB, ts time.Time) {
 	t.Helper()
-	if err := db.SaveSession(&session.Session{ID: "s1", StartedAt: ts, LastActive: ts}); err != nil {
-		t.Fatalf("SaveSession: %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: "s1", StartedAt: ts, LastActive: ts}}); err != nil {
+		t.Fatalf("FlushSessions: %v", err)
 	}
 	thinking := EventInsert{
 		SessionID: "s1",
