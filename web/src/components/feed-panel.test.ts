@@ -23,14 +23,22 @@ vi.mock('../ws', () => ({ onMessage: () => {} }));
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
+async function setup() {
+  vi.resetModules();
+  gate = Promise.resolve();
+  document.body.innerHTML = '';
+  const { state, update } = await import('../state');
+  const { render } = await import('./feed-panel');
+  const mount = document.createElement('div');
+  document.body.appendChild(mount);
+  state.sessions.set('s1', { id: 's1', isActive: false } as Session);
+  render(mount);
+  return { mount, update };
+}
+
 describe('feed panel', () => {
   it('reloads session history after a view round-trip', async () => {
-    const { state, update } = await import('../state');
-    const { render } = await import('./feed-panel');
-    const mount = document.createElement('div');
-    document.body.appendChild(mount);
-    state.sessions.set('s1', { id: 's1', isActive: false } as Session);
-    render(mount);
+    const { mount, update } = await setup();
 
     update({ selectedSessionId: 's1' });
     await tick();
@@ -44,10 +52,7 @@ describe('feed panel', () => {
   });
 
   it('does not duplicate entries when an older load resolves late', async () => {
-    const { update } = await import('../state');
-    update({ selectedSessionId: null });
-    await tick();
-    const mount = document.body.lastElementChild as HTMLElement;
+    const { mount, update } = await setup();
 
     let release!: () => void;
     gate = new Promise((r) => {
