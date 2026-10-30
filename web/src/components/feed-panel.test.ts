@@ -1,17 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Session } from '../types';
 
+let gate: Promise<void> = Promise.resolve();
+
 vi.mock('../api', () => ({
-  fetchSessionEvents: vi.fn(async () => [
-    {
-      id: 1,
-      sessionId: 's1',
-      role: 'user',
-      type: 'user',
-      contentPreview: 'hello world',
-      timestamp: '2026-01-01T00:00:00Z',
-    },
-  ]),
+  fetchSessionEvents: vi.fn(async () => {
+    await gate;
+    return [
+      {
+        id: 1,
+        sessionId: 's1',
+        role: 'user',
+        type: 'user',
+        contentPreview: 'hello world',
+        timestamp: '2026-01-01T00:00:00Z',
+      },
+    ];
+  }),
   fetchPinnedEvents: vi.fn(async () => []),
 }));
 vi.mock('../ws', () => ({ onMessage: () => {} }));
@@ -34,6 +39,24 @@ describe('feed panel', () => {
     update({ view: 'timeline' });
     mount.innerHTML = '';
     update({ view: 'list' });
+    await tick();
+    expect(mount.querySelectorAll('.feed-entry').length).toBe(1);
+  });
+
+  it('does not duplicate entries when an older load resolves late', async () => {
+    const { update } = await import('../state');
+    update({ selectedSessionId: null });
+    await tick();
+    const mount = document.body.lastElementChild as HTMLElement;
+
+    let release!: () => void;
+    gate = new Promise((r) => {
+      release = r;
+    });
+    update({ selectedSessionId: 's1' });
+    update({ view: 'timeline' });
+    update({ view: 'list' });
+    release();
     await tick();
     expect(mount.querySelectorAll('.feed-entry').length).toBe(1);
   });
