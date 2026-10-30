@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.4/schema.json",
   "files": {
     // Matches the old `eslint src/` scope. Note Biome also lints CSS, which
     // ESLint never did — see noImportantStyles/noDescendingSpecificity below.
@@ -8,7 +8,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": {
         // Carried over from the ESLint config's explicit rules.
         "noExplicitAny": "warn"
