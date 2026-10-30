@@ -55,9 +55,28 @@ export function render(mount: HTMLElement): void {
   onMessage(onWsMessage);
 }
 
+let everConnected = false;
+
 function onStateChange(_state: AppState, changed: Set<string>): void {
   const sessionChanged = changed.has('selectedSessionId');
   const viewChanged = changed.has('view');
+
+  // Events broadcast while the socket was down never reach this feed; reload
+  // it from the API after a reconnect.
+  if (changed.has('connected') && state.connected) {
+    const reconnected = everConnected;
+    everConnected = true;
+    if (reconnected && state.view === 'list' && feedContent) {
+      if (state.selectedSessionId) {
+        currentLoadSessionId = null;
+        loadRecentMessages(state.selectedSessionId);
+      } else {
+        renderFeedPanel();
+        loadMultiSessionEvents();
+      }
+      return;
+    }
+  }
 
   // When sessions first load, populate multi-session feed
   if (

@@ -184,8 +184,18 @@ function refreshStats(): void {
   fetchStats(state.statsWindow)
     .then((stats) => {
       update({ stats });
+      setStatsStale(false);
     })
-    .catch(() => {});
+    .catch(() => setStatsStale(true));
+}
+
+// Dim the figures and say why when a refresh fails, instead of leaving the
+// last numbers on screen as if they were current.
+function setStatsStale(stale: boolean): void {
+  if (!el) return;
+  el.classList.toggle('stats-stale', stale);
+  if (stale) el.title = 'Stats are out of date: the last refresh failed';
+  else el.removeAttribute('title');
 }
 
 function updateWindowButtons(): void {
