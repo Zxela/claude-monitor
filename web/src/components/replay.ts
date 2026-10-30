@@ -1,6 +1,6 @@
 // web/src/components/replay.ts
 import type { Event } from '../types';
-import { state, update } from '../state';
+import { state, subscribe, update } from '../state';
 import { renderFeedEntry } from './render-message';
 import { escapeHtml, sessionDisplayName } from '../utils';
 import '../styles/feed.css';
@@ -23,8 +23,20 @@ let manifestEvents: Event[] = [];
 // progress label can show "N / M+" instead of a false "N / M" completeness.
 let manifestTruncated = false;
 
+// The panel lives in the shared mount, which other views wipe without telling
+// it. Close on any navigation so playback and the Space/R shortcuts stop.
 export function render(mount: HTMLElement): void {
   container = mount;
+  subscribe((_s, changed) => {
+    if (!state.replaySessionId) return;
+    if (
+      changed.has('view') ||
+      (changed.has('selectedSessionId') &&
+        state.selectedSessionId !== state.replaySessionId)
+    ) {
+      close();
+    }
+  });
 }
 
 export function open(sessionId: string): void {
@@ -51,6 +63,8 @@ function renderReplayPanel(sessionId: string): void {
   if (panel) panel.remove();
   panel = document.createElement('div');
   panel.className = 'replay-panel';
+  panel.setAttribute('role', 'region');
+  panel.setAttribute('aria-label', 'Session replay');
   panel.innerHTML = `
     <div class="replay-header">
       <span class="session-label">${escapeHtml(name)}</span>
@@ -68,7 +82,7 @@ function renderReplayPanel(sessionId: string): void {
         <option value="2">2x</option>
         <option value="4">4x</option>
       </select>
-      <input type="range" class="replay-scrubber" min="0" max="0" value="0" />
+      <input type="range" class="replay-scrubber" min="0" max="0" value="0" aria-label="Replay position" />
       <span class="replay-progress">0 / 0</span>
     </div>
   `;
@@ -168,13 +182,42 @@ function renderUpTo(n: number): void {
     feedEl.innerHTML = '<div class="replay-empty">PRESS PLAY TO BEGIN</div>';
     return;
   }
-  for (let i = 0; i < count; i++) {
+  const start = replayWindowStart(count);
+  if (start > 0) {
+    const note = document.createElement('div');
+    note.className = 'replay-empty';
+    note.textContent = `${start} earlier events not shown`;
+    feedEl.appendChild(note);
+  }
+  for (let i = start; i < count; i++) {
     feedEl.appendChild(renderFeedEntry(manifestEvents[i]));
   }
   feedEl.scrollTop = feedEl.scrollHeight;
 }
 
+// Rebuilding thousands of entries per scrub input froze the page on long
+// sessions; only the tail near the playhead is visible anyway.
+export const REPLAY_WINDOW = 500;
+
+/** Pure: first index rendered when showing `count` events. */
+export function replayWindowStart(count: number): number {
+  return Math.max(0, count - REPLAY_WINDOW);
+}
+
+let scrubFrame: number | null = null;
+
+// Stop playback before deferring: a tick before the frame would overwrite
+// the scrubber value the user just picked.
 function onScrub(): void {
+  stopPlayback();
+  if (scrubFrame !== null) return;
+  scrubFrame = requestAnimationFrame(() => {
+    scrubFrame = null;
+    applyScrub();
+  });
+}
+
+function applyScrub(): void {
   if (!scrubber) return;
   stopPlayback();
   currentIndex = parseInt(scrubber.value, 10);

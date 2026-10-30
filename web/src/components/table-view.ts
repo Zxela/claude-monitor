@@ -24,17 +24,26 @@ let container: HTMLElement | null = null;
 let tableEl: HTMLElement | null = null;
 let sortKey: SortKey = 'lastActive';
 let sortDir: SortDir = 'desc';
+let pendingRender: ReturnType<typeof setTimeout> | null = null;
 
 export function render(mount: HTMLElement): void {
   container = mount;
   subscribe((_s, changed) => {
     if (
       changed.has('view') ||
-      changed.has('sessions') ||
       changed.has('grouped') ||
       changed.has('selectedSessionId')
     ) {
       renderTable();
+    } else if (changed.has('sessions') && state.view === 'table') {
+      // Every WebSocket event touches 'sessions'; batch those into at most
+      // one rebuild a second.
+      if (pendingRender === null) {
+        pendingRender = setTimeout(() => {
+          pendingRender = null;
+          renderTable();
+        }, 1000);
+      }
     }
   });
   renderTable();
@@ -219,13 +228,15 @@ function renderTable(): void {
     })
     .join('');
 
-  const scrollTop = tableEl.querySelector('table')?.parentElement?.scrollTop;
+  const prevScroller = tableEl.querySelector('.table-scroll');
+  const prevTop = prevScroller?.scrollTop ?? 0;
+  const prevLeft = prevScroller?.scrollLeft ?? 0;
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border)">
       <span style="color:var(--cyan);font-size:var(--fs-base);letter-spacing:var(--tracking-label)">TABLE VIEW</span>
       <span style="color:var(--text-dim);font-size:var(--fs-sm)">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
     </div>
-    <div style="overflow:auto;flex:1">
+    <div class="table-scroll" style="overflow:auto;flex:1">
       <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono)">
         <thead>
           <tr>${headerCells}</tr>
@@ -234,8 +245,10 @@ function renderTable(): void {
       </table>
     </div>
   `;
-  if (scrollTop)
-    tableEl.querySelector('table')!.parentElement!.scrollTop = scrollTop;
+
+  const scroller = tableEl.querySelector('.table-scroll')!;
+  scroller.scrollTop = prevTop;
+  scroller.scrollLeft = prevLeft;
 
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
