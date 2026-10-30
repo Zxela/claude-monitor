@@ -103,6 +103,11 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       loadMultiSessionEvents();
     }
   }
+
+  if (changed.has('feedTypeFilters')) {
+    updateFilterButtons();
+    applyFilters();
+  }
 }
 
 function onWsMessage(event: WsEvent): void {
@@ -342,8 +347,6 @@ function handleFilterClick(type: string, e: MouseEvent): void {
     }
     update({ feedTypeFilters: filters });
   }
-  updateFilterButtons();
-  applyFilters();
 }
 
 function updateFilterButtons(): void {
