@@ -231,6 +231,8 @@ function resizeCanvas(): void {
   canvas.style.height = logicalH + 'px';
   ctx = canvas.getContext('2d');
   if (ctx) ctx.scale(dpr, dpr);
+  // Resizing wipes the canvas, and a settled graph has no frame loop to repaint it.
+  draw();
 }
 
 /** Deterministic per-workflow tint so all agents of a workflow share a color. */

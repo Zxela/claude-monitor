@@ -54,4 +54,46 @@ describe('graph view animation', () => {
     }
     expect(pending).toBeNull();
   });
+
+  it('repaints a settled graph after a window resize', () => {
+    let pending: FrameRequestCallback | null = null;
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      pending = cb;
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      pending = null;
+    });
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+    }));
+    const calls: Record<string, ReturnType<typeof vi.fn>> = {};
+    const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+      get: (t, p) => {
+        if (!(p in t)) t[p] = calls[String(p)] = vi.fn();
+        return t[p];
+      },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      ctx as unknown as CanvasRenderingContext2D,
+    );
+
+    update({ view: 'list' });
+    state.sessions.set(waiting.id, waiting);
+    render(document.createElement('div'));
+    update({ view: 'graph' });
+
+    let frames = 0;
+    while (pending && frames < 500) {
+      const cb: FrameRequestCallback = pending;
+      pending = null;
+      cb(frames * 16);
+      frames++;
+    }
+    expect(pending).toBeNull();
+
+    calls.arc.mockClear();
+    window.dispatchEvent(new Event('resize'));
+    expect(calls.arc).toHaveBeenCalled();
+  });
 });
