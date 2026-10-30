@@ -106,10 +106,6 @@ func (s *Session) SetRepoPin(p repo.Pin) {
 	s.RepoID, s.repoSourceRank, s.repoToplevel, s.repoInherited = p.ID, p.Rank, p.Toplevel, p.Inherited
 }
 
-// RepoFromGit reports whether the current RepoID came from an authoritative git
-// resolution (git remote or toplevel), as opposed to a non-git fallback.
-func (s *Session) RepoFromGit() bool { return s.repoSourceRank >= repo.SourceGitToplevel }
-
 // HasSeenMessageID reports whether the given key has been recorded.
 func (s *Session) HasSeenMessageID(key string) bool {
 	return s.seenMessageIDs[key]
