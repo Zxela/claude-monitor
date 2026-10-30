@@ -272,6 +272,7 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		SessionID:   ev.SessionID,
 		Event:       event,
 		FullContent: fullContent,
+		Thinking:    event.ThinkingContent,
 	})
 	needFlush := len(p.buffer) >= maxBatchSize
 	p.bufMu.Unlock()
