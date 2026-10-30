@@ -19,6 +19,7 @@ let lastToolUseId: string | null = null;
 let currentHighlightGroup: string | null = null;
 let filterBar: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
+let renderedHeaderKey = '';
 let scrollLockBtn: HTMLElement | null = null;
 let autoScroll = true;
 let currentLoadSessionId: string | null = null;
@@ -103,6 +104,16 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
       multiSessionLoaded = false;
       loadMultiSessionEvents();
     }
+  }
+
+  // Every event updates sessions; rebuild the header only when what it shows
+  // changed, so header buttons keep focus.
+  if (
+    changed.has('sessions') &&
+    state.view === 'list' &&
+    headerKey() !== renderedHeaderKey
+  ) {
+    updateHeader();
   }
 
   if (changed.has('feedTypeFilters')) {
@@ -242,8 +253,21 @@ function renderFeedPanel(): void {
   container.appendChild(scrollLockBtn);
 }
 
+function headerKey(): string {
+  const sess = state.selectedSessionId
+    ? state.sessions.get(state.selectedSessionId)
+    : undefined;
+  return JSON.stringify([
+    state.selectedSessionId,
+    sess && sessionDisplayName(sess),
+    sess?.isActive,
+    sess?.prLinks,
+  ]);
+}
+
 function updateHeader(): void {
   if (!headerEl) return;
+  renderedHeaderKey = headerKey();
   if (state.selectedSessionId) {
     const sess = state.sessions.get(state.selectedSessionId);
     const name = sess ? sessionDisplayName(sess) : state.selectedSessionId;
