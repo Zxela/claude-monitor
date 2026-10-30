@@ -1093,3 +1093,59 @@ func TestHaiku55LongContextPricing_SkipsEditedRow(t *testing.T) {
 		t.Errorf("edited row: threshold %d, event cost %v; want 0 and 0.04 untouched", threshold, cost)
 	}
 }
+
+func TestResumeFromOffsets_UpDown(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	newCols := []string{"status", "last_active_exact", "started_at_exact", "repo_source_rank", "repo_toplevel", "repo_inherited"}
+	for _, col := range newCols {
+		if !columnExists(t, db, "sessions", col) {
+			t.Fatalf("sessions.%s missing", col)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO file_offsets (path, session_id, byte_offset) VALUES ('/p', 's', 1)`); err != nil {
+		t.Fatalf("file_offsets: %v", err)
+	}
+
+	rollDownTo(t, db, "resume_from_offsets")
+	for _, col := range newCols {
+		if columnExists(t, db, "sessions", col) {
+			t.Errorf("sessions.%s still present after rollback", col)
+		}
+	}
+	if _, err := db.Exec(`SELECT 1 FROM file_offsets`); err == nil {
+		t.Error("file_offsets still present after rollback")
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+}
+
+func TestRunDown_SkipsUnregisteredVersions(t *testing.T) {
+	saved := registry
+	defer func() { registry = saved }()
+	registry = nil
+	noop := func(*sql.Tx) error { return nil }
+	Register(1, Migration{Name: "one", Up: noop, Down: noop})
+	Register(4, Migration{Name: "four", Up: noop, Down: noop})
+
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		name    string
+		version int
+	}{{"four", 1}, {"one", 0}} {
+		name, err := RunDown(db)
+		if err != nil {
+			t.Fatalf("RunDown: %v", err)
+		}
+		v, _ := GetVersion(db)
+		if name != want.name || v != want.version {
+			t.Errorf("RunDown rolled back %q to v%d, want %q to v%d", name, v, want.name, want.version)
+		}
+	}
+}

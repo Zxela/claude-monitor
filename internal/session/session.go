@@ -74,6 +74,7 @@ type Session struct {
 	repoSourceRank      int                     `json:"-"`                    // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 	repoToplevel        string                  `json:"-"`                    // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
 	repoInherited       bool                    `json:"-"`                    // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
+	dedupPending        bool                    `json:"-"`                    // restored from the DB without dedup state; load it before applying a line
 }
 
 // SetPRLink records l, replacing any earlier link with the same number.
@@ -188,6 +189,13 @@ func (s *Session) MarkRowSeen(key string) bool {
 func (s *Session) SetSeenRows(keys map[string]struct{}) {
 	s.seenRows = keys
 }
+
+// DedupPending reports whether the session was restored from the database
+// without its dedup state, which must be loaded before the next line is applied.
+func (s *Session) DedupPending() bool { return s.dedupPending }
+
+// SetDedupPending marks whether the session's dedup state still needs loading.
+func (s *Session) SetDedupPending(v bool) { s.dedupPending = v }
 
 // SetDedupState bulk-sets the dedup maps, used when restoring state from the database.
 func (s *Session) SetDedupState(ids map[string]bool, costs map[string]MessageCosts) {

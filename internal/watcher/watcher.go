@@ -69,12 +69,24 @@ type Event struct {
 	WorkflowID string
 	AgentID    string
 	AgentKind  string
+	// Offset is the byte just past this line in FilePath, and Inode the file it
+	// was read from. Zero when the line did not come from a tracked file.
+	Offset int64
+	Inode  uint64
+}
+
+// FileOffset is a saved read position in a JSONL file.
+type FileOffset struct {
+	Offset int64
+	Inode  uint64
 }
 
 // fileState tracks our read position within a single JSONL file.
 type fileState struct {
 	path     string
 	offset   int64
+	inode    uint64
+	lineEnd  int64     // offset just past the line being emitted
 	partial  []byte    // incomplete line carried across reads
 	lastEmit time.Time // last time an event was emitted for this file
 }
@@ -91,6 +103,8 @@ type Watcher struct {
 	droppedEvents atomic.Int64
 	bootstrapping bool        // true during initial scan
 	bootstrapCB   func(Event) // called synchronously for bootstrap events
+	resume        map[string]FileOffset
+	restore       func(sessionIDs []string) map[string]bool
 }
 
 // New creates a Watcher that will scan basePaths plus any extraPaths provided.
@@ -117,6 +131,16 @@ func New(extraPaths []string) (*Watcher, error) {
 // line during the initial scan, bypassing the event channel.
 func (w *Watcher) SetBootstrapCallback(cb func(Event)) {
 	w.bootstrapCB = cb
+}
+
+// Resume makes the bootstrap scan continue each file in offsets from its saved
+// position instead of re-reading it from the start. Before any line is emitted,
+// restore is called with the session IDs of the files that can be resumed and
+// returns the ones it restored; every other file is read in full. Call before
+// Start; it has no effect without a bootstrap callback.
+func (w *Watcher) Resume(offsets map[string]FileOffset, restore func(sessionIDs []string) map[string]bool) {
+	w.resume = offsets
+	w.restore = restore
 }
 
 // Add begins watching path at runtime, tagging sessions from that path with
@@ -235,9 +259,11 @@ func (w *Watcher) run(ctx context.Context) {
 	defer close(w.events)
 
 	// Initial scan — read all existing data to bootstrap session stats.
+	start := time.Now()
 	w.mu.Lock()
 	w.bootstrapping = true
 	w.scanAll()
+	resumed := w.applyResume()
 	// After tracking files, read their existing content. Stop early on
 	// shutdown: this replay can take tens of seconds on a large history.
 	for _, state := range w.states {
@@ -247,7 +273,10 @@ func (w *Watcher) run(ctx context.Context) {
 		w.readNewLines(state.path)
 	}
 	w.bootstrapping = false
+	tracked := len(w.states)
 	w.mu.Unlock()
+	log.Printf("watcher: bootstrap read %d files (%d resumed from saved offsets) in %s",
+		tracked, resumed, time.Since(start).Round(time.Millisecond))
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -301,6 +330,73 @@ func (w *Watcher) run(ctx context.Context) {
 			w.mu.Unlock()
 		}
 	}
+}
+
+// applyResume moves tracked files to their saved offsets once their sessions
+// are restored, and returns how many it moved. Caller must hold w.mu.
+func (w *Watcher) applyResume() int {
+	offsets, restore := w.resume, w.restore
+	w.resume, w.restore = nil, nil
+	if len(offsets) == 0 || restore == nil || w.bootstrapCB == nil {
+		return 0
+	}
+	bySession := make(map[string][]*fileState)
+	for path, saved := range offsets {
+		state, ok := w.states[path]
+		if !ok || !resumable(path, saved) {
+			continue
+		}
+		sid := sessionIDFromPath(path)
+		bySession[sid] = append(bySession[sid], state)
+	}
+	if len(bySession) == 0 {
+		return 0
+	}
+	ids := make([]string, 0, len(bySession))
+	for sid := range bySession {
+		ids = append(ids, sid)
+	}
+	restored := restore(ids)
+	n := 0
+	for sid, states := range bySession {
+		if !restored[sid] {
+			continue
+		}
+		for _, state := range states {
+			saved := offsets[state.path]
+			state.offset = saved.Offset
+			state.inode = saved.Inode
+			n++
+		}
+	}
+	return n
+}
+
+// resumable reports whether path is still the file saved was read from: same
+// inode, at least as long, and saved.Offset falls just after a newline.
+func resumable(path string, saved FileOffset) bool {
+	if saved.Offset <= 0 {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	if info.Size() < saved.Offset || (saved.Inode != 0 && inodeOf(info) != saved.Inode) {
+		log.Printf("watcher: %s was truncated or replaced since its offset was saved, reading from start", path)
+		return false
+	}
+	b := make([]byte, 1)
+	if _, err := f.ReadAt(b, saved.Offset-1); err != nil || b[0] != '\n' {
+		log.Printf("watcher: saved offset %d in %s is not at a line boundary, reading from start", saved.Offset, path)
+		return false
+	}
+	return true
 }
 
 // scanAll walks all base paths looking for JSONL files not yet tracked.
@@ -437,11 +533,16 @@ func (w *Watcher) readNewLines(path string) {
 	}
 	defer f.Close()
 
-	// Detect file truncation: if file is smaller than our offset, reset.
-	if info, err := f.Stat(); err == nil && info.Size() < state.offset {
-		log.Printf("watcher: file truncated (%s), resetting offset from %d to 0", path, state.offset)
-		state.offset = 0
-		state.partial = nil
+	// Detect truncation or replacement: smaller than our offset, or a different
+	// file at the same path.
+	if info, err := f.Stat(); err == nil {
+		ino := inodeOf(info)
+		if info.Size() < state.offset || (state.inode != 0 && ino != state.inode) {
+			log.Printf("watcher: file truncated or replaced (%s), resetting offset from %d to 0", path, state.offset)
+			state.offset = 0
+			state.partial = nil
+		}
+		state.inode = ino
 	}
 
 	if _, err := f.Seek(state.offset, 0); err != nil {
@@ -458,6 +559,8 @@ func (w *Watcher) readNewLines(path string) {
 	for {
 		n, err := f.Read(buf)
 		if n > 0 {
+			// File position of partial[0]; its bytes are already in state.offset.
+			pos := state.offset - int64(len(partial))
 			partial = append(partial, buf[:n]...)
 			chunk := partial
 			partial = nil
@@ -471,10 +574,12 @@ func (w *Watcher) readNewLines(path string) {
 					}
 					break
 				}
+				pos += int64(len(line)) + 1
 				line = bytes.TrimSpace(line)
 				if len(line) == 0 {
 					continue
 				}
+				state.lineEnd = pos
 				w.emit(path, line)
 			}
 
@@ -511,8 +616,10 @@ func (w *Watcher) emit(filePath string, line []byte) {
 		AgentKind:  kind,
 	}
 
-	if !w.bootstrapping {
-		if state, ok := w.states[filePath]; ok {
+	if state, ok := w.states[filePath]; ok {
+		ev.Offset = state.lineEnd
+		ev.Inode = state.inode
+		if !w.bootstrapping {
 			state.lastEmit = time.Now()
 		}
 	}
