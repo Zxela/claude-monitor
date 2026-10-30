@@ -58,7 +58,7 @@ type Session struct {
 	WorkflowID          string                  `json:"workflowId,omitempty"` // wf_<id> grouping all agents of one Claude Code workflow run; empty for non-workflow sessions
 	AgentID             string                  `json:"agentId,omitempty"`    // agent-<id> file stem for subagent/workflow rows (== ID); empty for normal sessions
 	AgentKind           string                  `json:"agentKind,omitempty"`  // session | subagent | workflow_agent
-	NeedsAttention      bool                    `json:"needsAttention"`       // Awaiting user; unseen errors are per viewer, so the client adds them
+	NeedsAttention      bool                    `json:"needsAttention"`       // Status is waiting, so Awaiting children counts until #320; the client adds unseen errors
 	turn                string                  `json:"-"`                    // status the last turn left; input to Status
 	SourceFile          string                  `json:"-"`                    // JSONL file path currently providing events (not serialized)
 	repoSourceRank      int                     `json:"-"`                    // repo.Pin.Rank; see RepoPin

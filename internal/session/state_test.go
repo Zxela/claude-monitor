@@ -94,8 +94,6 @@ func TestState_EventThatIsNotATurnKeepsStatus(t *testing.T) {
 	}
 }
 
-// Get used to return the state as of the last Upsert, so a quiet Session
-// stayed active until its next Event.
 func TestState_GetAndAllDecayWithoutAnEvent(t *testing.T) {
 	t.Parallel()
 	s, c := clockedStore()
