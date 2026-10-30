@@ -3422,3 +3422,28 @@ func TestCompactHotToWarm_ClearsDuplicatePlaintext(t *testing.T) {
 		t.Error("warm row still holds plaintext beside its gzip copy")
 	}
 }
+
+func TestAllModelPricing_LongContextTier(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	// Editing the base rates must keep the seeded tier.
+	if err := db.UpsertModelPricing("claude-haiku-5-5", ModelPricing{InputPerMTok: 0.10, OutputPerMTok: 0.60, CacheReadPerMTok: 0.01, CacheCreatePerMTok: 0.125}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := db.AllModelPricing()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ModelPricing{
+		InputPerMTok: 0.10, OutputPerMTok: 0.60, CacheReadPerMTok: 0.01, CacheCreatePerMTok: 0.125,
+		LongContextThreshold: 100_000,
+		LongInputPerMTok:     0.50, LongOutputPerMTok: 2.50, LongCacheReadPerMTok: 0.05, LongCacheCreatePerMTok: 0.625,
+	}
+	if got := all["claude-haiku-5-5"]; got != want {
+		t.Errorf("haiku-5-5 = %+v, want %+v", got, want)
+	}
+	if got := all["claude-sonnet-5-5"]; got.LongContextThreshold != 0 {
+		t.Errorf("sonnet-5-5 threshold = %d, want 0", got.LongContextThreshold)
+	}
+}

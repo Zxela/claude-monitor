@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"database/sql"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -862,5 +863,103 @@ func TestDropCollapsedKeylessEvents(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'kept'`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("fts match for kept row = %d (err %v), want 1", n, err)
+	}
+}
+
+func TestHaiku55LongContextPricing_RecomputesAcrossBoundary(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "haiku_5_5_long_context_pricing")
+
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO sessions (id, model, total_cost) VALUES ('s-026', 'claude-haiku-5-5', 1.0)`)
+	// Both rows were costed on the base card.
+	for _, ev := range []struct {
+		uuid, msg                  string
+		in, cacheRead, cacheCreate int
+	}{
+		{"u1", "at", 100_000, 0, 0},
+		{"u2", "over", 1, 60_000, 40_000},
+	} {
+		mustExec(`INSERT INTO events (session_id, uuid, message_id, model, cost_usd,
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, timestamp)
+			VALUES ('s-026', ?, ?, 'claude-haiku-5-5', 0.5, ?, 1000, ?, ?, '2026-10-01T00:00:00Z')`,
+			ev.uuid, ev.msg, ev.in, ev.cacheRead, ev.cacheCreate)
+	}
+
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+
+	want := map[string]float64{
+		"at":   100_000*0.10/1e6 + 1000*0.50/1e6,
+		"over": 1*0.50/1e6 + 60_000*0.05/1e6 + 40_000*0.625/1e6 + 1000*2.50/1e6,
+	}
+	for msg, w := range want {
+		var got float64
+		if err := db.QueryRow(`SELECT cost_usd FROM events WHERE message_id=?`, msg).Scan(&got); err != nil {
+			t.Fatalf("event %s: %v", msg, err)
+		}
+		if math.Abs(got-w) > 1e-12 {
+			t.Errorf("event %s cost_usd = %v, want %v", msg, got, w)
+		}
+	}
+	var sessCost float64
+	if err := db.QueryRow(`SELECT total_cost FROM sessions WHERE id='s-026'`).Scan(&sessCost); err != nil {
+		t.Fatal(err)
+	}
+	if w := want["at"] + want["over"]; math.Abs(sessCost-w) > 1e-12 {
+		t.Errorf("session total_cost = %v, want %v", sessCost, w)
+	}
+
+	var threshold int64
+	var longIn float64
+	if err := db.QueryRow(`SELECT long_context_threshold, long_input_per_mtok FROM model_pricing
+		WHERE model_prefix='claude-haiku-5-5'`).Scan(&threshold, &longIn); err != nil {
+		t.Fatal(err)
+	}
+	if threshold != 100_000 || longIn != 0.50 {
+		t.Errorf("haiku-5-5 tier = %d / %v, want 100000 / 0.50", threshold, longIn)
+	}
+
+	rollDownTo(t, db, "haiku_5_5_long_context_pricing")
+	if columnExists(t, db, "model_pricing", "long_context_threshold") {
+		t.Error("long_context_threshold should be dropped on rollback")
+	}
+}
+
+func TestHaiku55LongContextPricing_SkipsEditedRow(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "haiku_5_5_long_context_pricing")
+	if _, err := db.Exec(`UPDATE model_pricing SET input_per_mtok = 0.2 WHERE model_prefix='claude-haiku-5-5'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO events (session_id, uuid, message_id, model, cost_usd, input_tokens, timestamp)
+		VALUES ('s', 'u', 'm', 'claude-haiku-5-5', 0.04, 200000, '2026-10-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+	var threshold int64
+	var cost float64
+	if err := db.QueryRow(`SELECT long_context_threshold FROM model_pricing WHERE model_prefix='claude-haiku-5-5'`).Scan(&threshold); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT cost_usd FROM events WHERE message_id='m'`).Scan(&cost); err != nil {
+		t.Fatal(err)
+	}
+	if threshold != 0 || cost != 0.04 {
+		t.Errorf("edited row: threshold %d, event cost %v; want 0 and 0.04 untouched", threshold, cost)
 	}
 }

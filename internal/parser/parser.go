@@ -215,62 +215,105 @@ var pricingTable = map[string]modelPricing{
 	"claude-sonnet-5-5": {2.0, 10.0, 0.20, 2.50},
 	"claude-sonnet-5":   {2.0, 10.0, 0.20, 2.50},
 	"claude-sonnet-4-6": {3.0, 15.0, 0.30, 3.75},
-	// Above 100K prompt tokens Haiku 5.5 bills 5x; this table has no tiers.
-	"claude-haiku-5-5": {0.10, 0.50, 0.01, 0.125},
-	"claude-haiku-4-5": {1.0, 5.0, 0.10, 1.25},
+	"claude-haiku-5-5":  {0.10, 0.50, 0.01, 0.125},
+	"claude-haiku-4-5":  {1.0, 5.0, 0.10, 1.25},
+}
+
+// longContextTier is a second rate card for requests whose prompt (input +
+// cache read + cache write tokens) exceeds threshold.
+type longContextTier struct {
+	threshold int64
+	rates     modelPricing
+}
+
+// longContextTable is the compile-time fallback for tiers, keyed like pricingTable.
+var longContextTable = map[string]longContextTier{
+	"claude-haiku-5-5": {100_000, modelPricing{0.50, 2.50, 0.05, 0.625}},
+}
+
+type pricingTables struct {
+	base map[string]modelPricing
+	long map[string]longContextTier
 }
 
 var defaultPricing = pricingTable["claude-sonnet-4-6"]
 
-// activePricingTable holds the merged pricing map pointer (DB values preferred over compile-time
+// activePricingTable holds the merged pricing tables (DB values preferred over compile-time
 // fallback). Stored as an atomic.Value so concurrent reads from computeCost and writes from
 // SetPricingTable (called from the HTTP pricing handler) are race-free.
-var activePricingTableAtomic atomic.Value // stores map[string]modelPricing
+var activePricingTableAtomic atomic.Value // stores pricingTables
 
 // warnedModels tracks models for which an unknown-pricing warning has already been logged
 // (once per process run).
 var warnedModels sync.Map
 
-// ExternalPricing holds the four per-million-token rates for a model.
+// ExternalPricing holds the per-million-token rates for a model, plus an
+// optional long-context card used when LongContextThreshold > 0.
 // Used by SetPricingTable to accept DB-loaded pricing without a store import.
 type ExternalPricing struct {
-	InputPerMTok       float64
-	OutputPerMTok      float64
-	CacheReadPerMTok   float64
-	CacheCreatePerMTok float64
+	InputPerMTok           float64
+	OutputPerMTok          float64
+	CacheReadPerMTok       float64
+	CacheCreatePerMTok     float64
+	LongContextThreshold   int64
+	LongInputPerMTok       float64
+	LongOutputPerMTok      float64
+	LongCacheReadPerMTok   float64
+	LongCacheCreatePerMTok float64
 }
 
 // SetPricingTable merges DB-sourced pricing (preferred) with the compile-time fallback.
 // Call this once at startup after loading from the database.
 // dbPricing keys are model_prefix strings.
 func SetPricingTable(dbPricing map[string]ExternalPricing) {
-	merged := make(map[string]modelPricing, len(pricingTable)+len(dbPricing))
+	merged := pricingTables{
+		base: make(map[string]modelPricing, len(pricingTable)+len(dbPricing)),
+		long: make(map[string]longContextTier, len(longContextTable)),
+	}
 	// Start with compile-time fallback.
 	for k, v := range pricingTable {
-		merged[k] = v
+		merged.base[k] = v
 	}
-	// Overwrite / extend with DB values.
+	for k, v := range longContextTable {
+		merged.long[k] = v
+	}
+	// Overwrite / extend with DB values. A DB row without a tier has none.
 	for prefix, p := range dbPricing {
-		merged[prefix] = modelPricing(p)
+		merged.base[prefix] = modelPricing{p.InputPerMTok, p.OutputPerMTok, p.CacheReadPerMTok, p.CacheCreatePerMTok}
+		if p.LongContextThreshold > 0 {
+			merged.long[prefix] = longContextTier{p.LongContextThreshold, modelPricing{
+				p.LongInputPerMTok, p.LongOutputPerMTok, p.LongCacheReadPerMTok, p.LongCacheCreatePerMTok,
+			}}
+		} else {
+			delete(merged.long, prefix)
+		}
 	}
 	activePricingTableAtomic.Store(merged)
 }
 
-// lookupPricing resolves pricing for the given model string.
+// lookupPricing resolves pricing for the given model string and prompt size.
 // It prefers the atomically-stored pricing table (set from DB) and falls back to pricingTable.
 // Returns the pricing and whether it was found (false means default was used).
-func lookupPricing(model string) (modelPricing, bool) {
-	var table map[string]modelPricing
+func lookupPricing(model string, promptTokens int64) (modelPricing, bool) {
+	tables := pricingTables{base: pricingTable, long: longContextTable}
 	if v := activePricingTableAtomic.Load(); v != nil {
-		table = v.(map[string]modelPricing)
+		tables = v.(pricingTables)
 	}
-	if table == nil {
-		table = pricingTable
+	key, found := matchPricingKey(tables.base, model)
+	if !found {
+		return defaultPricing, false
 	}
+	if tier, ok := tables.long[key]; ok && promptTokens > tier.threshold {
+		return tier.rates, true
+	}
+	return tables.base[key], true
+}
 
-	// Exact match.
-	if p, ok := table[model]; ok {
-		return p, true
+// matchPricingKey returns the table key that prices model: an exact match, else
+// the longest prefix.
+func matchPricingKey(table map[string]modelPricing, model string) (string, bool) {
+	if _, ok := table[model]; ok {
+		return model, true
 	}
 	// Prefix match for versioned model names (e.g. "claude-haiku-4-5-20251001").
 	// Sort keys by length descending so the most-specific prefix wins when
@@ -282,14 +325,15 @@ func lookupPricing(model string) (modelPricing, bool) {
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	for _, key := range keys {
 		if len(model) > len(key) && model[:len(key)] == key {
-			return table[key], true
+			return key, true
 		}
 	}
-	return defaultPricing, false
+	return "", false
 }
 
 func computeCost(model string, usage rawUsage) float64 {
-	p, found := lookupPricing(model)
+	prompt := usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	p, found := lookupPricing(model, prompt)
 	if !found && model != "" && model != "<synthetic>" {
 		// Warn once per unknown model per process run.
 		// "<synthetic>" is an internal Claude Code model string; suppress its warning.
