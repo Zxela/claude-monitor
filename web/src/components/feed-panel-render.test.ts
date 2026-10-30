@@ -391,7 +391,7 @@ describe('feed panel filters', () => {
     expect(visibleTypes(mount)).toEqual(['assistant']);
   });
 
-  it.skip('the err badge re-filters an already-selected session (bug: feed ignores a feedTypeFilters-only change)', async () => {
+  it('the err badge re-filters an already-selected session', async () => {
     const { mount, update } = await selectWith(mixed());
     const { errorsOnlyFilters } = await import('./session-card');
 
