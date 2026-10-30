@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go** >= 1.26.5 (see note below)
+- **Go** >= 1.27.3 (see note below)
 - **Node.js** >= 22
 - **npm**
 - **make**
@@ -10,9 +10,8 @@
 > The `go` directive in `go.mod` is the single source of truth for the toolchain:
 > CI passes it to `actions/setup-go` via `go-version-file`, which installs that
 > **exact** version. Dependabot does not manage Go toolchain versions, so this
-> floor only moves when someone bumps it — worth reviewing when a Go security
-> release lands. It is currently pinned to 1.26.5, which carries the fix for
-> GO-2026-5856.
+> floor only moves when someone bumps it. CI gates on `govulncheck`, so a Go
+> security release fails the `lint` job until this is bumped.
 
 ## Development Setup
 
