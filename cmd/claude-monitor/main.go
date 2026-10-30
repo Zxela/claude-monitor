@@ -116,10 +116,8 @@ func handleMigrate(args []string) {
 	if err != nil {
 		log.Fatalf("cannot determine home directory: %v", err)
 	}
-	dbPath := filepath.Join(homeDir, ".claude-monitor", "history.db")
-
-	// Ensure directory exists.
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+	dbPath, err := openDataDir(homeDir)
+	if err != nil {
 		log.Fatalf("cannot create data directory: %v", err)
 	}
 
@@ -380,11 +378,11 @@ Examples:
 	if err != nil {
 		log.Fatalf("cannot determine home directory: %v", err)
 	}
-	dbDir := filepath.Join(homeDir, ".claude-monitor")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+	dbPath, err := openDataDir(homeDir)
+	if err != nil {
 		log.Fatalf("cannot create data directory: %v", err)
 	}
-	historyDB, err := store.Open(filepath.Join(dbDir, "history.db"))
+	historyDB, err := store.Open(dbPath)
 	if err != nil {
 		log.Fatalf("cannot open database: %v", err)
 	}
