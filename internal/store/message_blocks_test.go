@@ -101,3 +101,32 @@ func TestCompaction_Thinking(t *testing.T) {
 		t.Errorf("cold ThinkingContent = %q, want empty", events[0].ThinkingContent)
 	}
 }
+
+func TestPersistBatch_IsAgentFollowsLastTool(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ts := time.Now()
+	if err := db.SaveSession(&session.Session{ID: "s1", StartedAt: ts, LastActive: ts}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	agent := &parser.Event{
+		Type: "assistant", Role: "assistant", MessageID: "msg_1", UUID: "u1",
+		ContentText: "[agent]", ToolName: "Agent", ToolUseID: "toolu_1", IsAgent: true, Timestamp: ts,
+	}
+	bash := &parser.Event{
+		Type: "assistant", Role: "assistant", MessageID: "msg_1", UUID: "u2",
+		ContentText: "[tool: Bash]", ToolName: "Bash", ToolUseID: "toolu_2", Timestamp: ts.Add(time.Second),
+	}
+	for _, ev := range []*parser.Event{agent, bash} {
+		if err := db.PersistBatch(&EventBatch{Events: []EventInsert{{SessionID: "s1", Event: ev}}}); err != nil {
+			t.Fatalf("PersistBatch: %v", err)
+		}
+	}
+	events, err := db.ListEvents("s1", 10, 0)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("ListEvents = %+v, %v; want 1 row", events, err)
+	}
+	if events[0].ToolName != "Bash" || events[0].IsAgent {
+		t.Errorf("ToolName=%q IsAgent=%v, want Bash and false", events[0].ToolName, events[0].IsAgent)
+	}
+}

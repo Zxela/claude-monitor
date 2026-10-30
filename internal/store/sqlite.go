@@ -1460,7 +1460,7 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		 tool_name=COALESCE(NULLIF(excluded.tool_name,''), events.tool_name),
 		 tool_detail=COALESCE(NULLIF(excluded.tool_detail,''), events.tool_detail),
 		 tool_use_id=COALESCE(NULLIF(excluded.tool_use_id,''), events.tool_use_id),
-		 is_agent=(events.is_agent OR excluded.is_agent),
+		 is_agent=CASE WHEN COALESCE(excluded.tool_name,'')='' THEN events.is_agent ELSE excluded.is_agent END,
 		 cost_usd=excluded.cost_usd,
 		 input_tokens=excluded.input_tokens,
 		 output_tokens=excluded.output_tokens,
