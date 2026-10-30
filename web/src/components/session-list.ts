@@ -234,6 +234,19 @@ function renderList(): void {
 
   // Save scroll + render
   const scrollTop = listEl.scrollTop;
+  const focusedEl = document.activeElement;
+  const focusedCardId =
+    focusedEl instanceof HTMLElement && listEl.contains(focusedEl)
+      ? focusedEl.dataset.sessionId
+      : undefined;
+  const list = listEl;
+  const restoreView = () => {
+    list.scrollTop = scrollTop;
+    if (!focusedCardId) return;
+    Array.from(list.querySelectorAll<HTMLElement>('[data-session-id]'))
+      .find((c) => c.dataset.sessionId === focusedCardId)
+      ?.focus({ preventScroll: true });
+  };
   listEl.innerHTML = '';
 
   const filter = state.repoFilter;
@@ -325,7 +338,7 @@ function renderList(): void {
       empty.textContent = 'NO ACTIVE SESSIONS';
       listEl.appendChild(empty);
     }
-    listEl.scrollTop = scrollTop;
+    restoreView();
     return;
   }
 
@@ -431,7 +444,7 @@ function renderList(): void {
       });
   }
 
-  listEl.scrollTop = scrollTop;
+  restoreView();
 
   // Scroll focused element into view
   if (state.focusedSessionId) {

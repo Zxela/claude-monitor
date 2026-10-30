@@ -83,5 +83,14 @@ describe('global arrow keys', () => {
     card('a').focus();
     key(card('a'), 'Enter');
     expect(state.selectedSessionId).toBe('a');
+    expect(document.activeElement).toBe(card('a'));
+  });
+
+  it('keeps arrow navigation working after the list rebuilds', () => {
+    card('b').focus();
+    update({ renderVersion: state.renderVersion + 1 });
+    expect(document.activeElement).toBe(card('b'));
+    key(card('b'), 'ArrowDown');
+    expect(document.activeElement).toBe(card('c'));
   });
 });
