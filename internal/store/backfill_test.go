@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zxela/claude-monitor/internal/session"
+	"github.com/zxela/claude-monitor/internal/transcript"
 )
 
 // writeAgentFile writes a single-line JSONL transcript at path with the given
@@ -32,64 +33,6 @@ func saveOrphan(t *testing.T, db *DB, id string) {
 		ID: id, StartedAt: time.Now(), LastActive: time.Now(),
 	}); err != nil {
 		t.Fatalf("SaveSession(%s) failed: %v", id, err)
-	}
-}
-
-func TestClassifyAgentPath(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name           string
-		path           string
-		wantKind       string
-		wantAgentID    string
-		wantWorkflowID string
-	}{
-		{
-			name:     "shape1 normal session",
-			path:     "/proj/3f2e-uuid.jsonl",
-			wantKind: "",
-		},
-		{
-			name:        "shape2 task subagent",
-			path:        "/proj/parentUUID/subagents/agent-AAA.jsonl",
-			wantKind:    backfillKindSubagent,
-			wantAgentID: "agent-AAA",
-		},
-		{
-			name:           "shape3 workflow agent",
-			path:           "/proj/parentUUID/subagents/workflows/wf_9/agent-BBB.jsonl",
-			wantKind:       backfillKindWorkflowAgent,
-			wantAgentID:    "agent-BBB",
-			wantWorkflowID: "wf_9",
-		},
-		{
-			name:     "non-agent file under subagents",
-			path:     "/proj/parentUUID/subagents/notes.jsonl",
-			wantKind: "",
-		},
-		{
-			// Degenerate empty-id "agent-.jsonl": must classify identically to the
-			// watcher's HasPrefix(stem, "agent-") path (subagent, full stem as id),
-			// not be skipped — the two in-sync code paths must agree.
-			name:        "degenerate empty-id agent file",
-			path:        "/proj/parentUUID/subagents/agent-.jsonl",
-			wantKind:    backfillKindSubagent,
-			wantAgentID: "agent-",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			kind, agentID, workflowID := classifyAgentPath(tt.path)
-			if kind != tt.wantKind {
-				t.Errorf("kind = %q, want %q", kind, tt.wantKind)
-			}
-			if agentID != tt.wantAgentID {
-				t.Errorf("agentID = %q, want %q", agentID, tt.wantAgentID)
-			}
-			if workflowID != tt.wantWorkflowID {
-				t.Errorf("workflowID = %q, want %q", workflowID, tt.wantWorkflowID)
-			}
-		})
 	}
 }
 
@@ -130,8 +73,8 @@ func TestRunBackfillV013_OrphanRowLinked(t *testing.T) {
 	if a.AgentID != "agent-AAA" {
 		t.Errorf("agent-AAA AgentID = %q, want agent-AAA", a.AgentID)
 	}
-	if a.AgentKind != backfillKindSubagent {
-		t.Errorf("agent-AAA AgentKind = %q, want %q", a.AgentKind, backfillKindSubagent)
+	if a.AgentKind != transcript.KindSubagent {
+		t.Errorf("agent-AAA AgentKind = %q, want %q", a.AgentKind, transcript.KindSubagent)
 	}
 	if a.WorkflowID != "" {
 		t.Errorf("agent-AAA WorkflowID = %q, want empty", a.WorkflowID)
@@ -144,8 +87,8 @@ func TestRunBackfillV013_OrphanRowLinked(t *testing.T) {
 	if b.ParentID != parentUUID {
 		t.Errorf("agent-BBB ParentID = %q, want %q", b.ParentID, parentUUID)
 	}
-	if b.AgentKind != backfillKindWorkflowAgent {
-		t.Errorf("agent-BBB AgentKind = %q, want %q", b.AgentKind, backfillKindWorkflowAgent)
+	if b.AgentKind != transcript.KindWorkflowAgent {
+		t.Errorf("agent-BBB AgentKind = %q, want %q", b.AgentKind, transcript.KindWorkflowAgent)
 	}
 	if b.WorkflowID != "wf_123" {
 		t.Errorf("agent-BBB WorkflowID = %q, want wf_123", b.WorkflowID)
@@ -194,8 +137,8 @@ func TestRunBackfillV013_SessionIDOnLaterLine(t *testing.T) {
 	if a.ParentID != parentUUID {
 		t.Errorf("ParentID = %q, want %q (sessionId resolved from a later line)", a.ParentID, parentUUID)
 	}
-	if a.AgentKind != backfillKindSubagent {
-		t.Errorf("AgentKind = %q, want %q", a.AgentKind, backfillKindSubagent)
+	if a.AgentKind != transcript.KindSubagent {
+		t.Errorf("AgentKind = %q, want %q", a.AgentKind, transcript.KindSubagent)
 	}
 }
 
@@ -339,7 +282,7 @@ func TestRunBackfillV013_SelfParentGuard(t *testing.T) {
 		t.Errorf("ParentID = %q, want empty (self-parent guard)", c.ParentID)
 	}
 	// Identity columns are still filled even with no parent link.
-	if c.AgentKind != backfillKindSubagent || c.AgentID != "agent-CCC" {
+	if c.AgentKind != transcript.KindSubagent || c.AgentID != "agent-CCC" {
 		t.Errorf("identity not filled: kind=%q id=%q", c.AgentKind, c.AgentID)
 	}
 }

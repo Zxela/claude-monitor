@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/zxela/claude-monitor/internal/parser"
+	"github.com/zxela/claude-monitor/internal/transcript"
 )
 
 // backfillMarkerKey is the settings key that records whether the v013 identity
@@ -18,19 +19,9 @@ import (
 const backfillMarkerKey = "backfill_v013_done"
 
 // agentFileRe matches a Claude Code agent transcript file base name:
-// "agent-<id>.jsonl". The captured group is the bare agent id, allowed to be
-// empty (.*), so the degenerate "agent-.jsonl" matches here exactly as it does
-// for the watcher's strings.HasPrefix(stem, "agent-") classification — the two
-// in-sync code paths must agree on what counts as an agent transcript.
+// "agent-<id>.jsonl". The bare id may be empty, so the degenerate "agent-.jsonl"
+// is scanned, matching transcript.Classify.
 var agentFileRe = regexp.MustCompile(`^agent-(.*)\.jsonl$`)
-
-// Agent-kind classifications. These mirror the watcher's package-private
-// constants (internal/watcher/watcher.go:39-44) and pipeline path classification;
-// keep them in sync.
-const (
-	backfillKindSubagent      = "subagent"
-	backfillKindWorkflowAgent = "workflow_agent"
-)
 
 // BackfillResult summarises a v013 identity backfill run.
 type BackfillResult struct {
@@ -53,54 +44,6 @@ func DefaultBackfillBasePaths() []string {
 		paths = append([]string{filepath.Join(home, ".claude", "projects")}, paths...)
 	}
 	return paths
-}
-
-// classifyAgentPath derives (kind, agentID, workflowID) from a transcript file
-// path. It mirrors the watcher's classifyPath / pipeline.parentSessionIDFromPath
-// rules so backfill labels rows identically to live ingestion:
-//
-//	shape 1 normal:        <uuid>.jsonl                                           -> ("",                 "",           "")
-//	shape 2 task subagent: <parent>/subagents/agent-<id>.jsonl                    -> ("subagent",         "agent-<id>", "")
-//	shape 3 workflow:      <parent>/subagents/workflows/wf_<id>/agent-<id>.jsonl  -> ("workflow_agent",   "agent-<id>", "wf_<id>")
-//
-// A non-agent file (no "agent-" prefix) returns kind == "" so callers skip it.
-func classifyAgentPath(filePath string) (kind, agentID, workflowID string) {
-	base := filepath.Base(filePath)
-	m := agentFileRe.FindStringSubmatch(base)
-	if m == nil {
-		return "", "", ""
-	}
-	// agentID is the full "agent-<id>" stem (== ev.SessionID and the session
-	// row's id for shapes 2/3), matching the watcher's classifyPath so backfilled
-	// and live-ingested rows store an identical agent_id value. m[1] is the bare
-	// captured id, used only to confirm the match.
-	_ = m[1]
-	agentID = strings.TrimSuffix(base, ".jsonl")
-
-	// Walk UP looking for a wf_<id> segment and/or a subagents segment.
-	hasSubagents := false
-	wf := ""
-	dir := filepath.Dir(filePath)
-	for dir != "." && dir != string(filepath.Separator) {
-		seg := filepath.Base(dir)
-		if seg == "subagents" {
-			hasSubagents = true
-		}
-		if wf == "" && strings.HasPrefix(seg, "wf_") {
-			wf = seg
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir { // reached filesystem root; stop
-			break
-		}
-		dir = parent
-	}
-	if hasSubagents && wf != "" {
-		return backfillKindWorkflowAgent, agentID, wf
-	}
-	// shape 2, or defensive fallback (agent-* file without a subagents/ ancestor):
-	// classify as a subagent so it is never mistaken for a top-level session.
-	return backfillKindSubagent, agentID, ""
 }
 
 // firstValidEventSessionID reads the first non-empty, parseable JSONL line from
@@ -201,11 +144,7 @@ func (d *DB) RunBackfillV013(basePaths []string, force bool) (BackfillResult, er
 
 			res.Scanned++
 
-			kind, agentID, workflowID := classifyAgentPath(path)
-			if kind == "" {
-				// Not an agent transcript shape we backfill.
-				return nil
-			}
+			ident := transcript.Classify(path)
 			// The session row id is the "agent-<id>" file stem (ev.SessionID key).
 			id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 
@@ -224,9 +163,9 @@ func (d *DB) RunBackfillV013(basePaths []string, force bool) (BackfillResult, er
 
 			result, uerr := d.db.Exec(updateSQL,
 				sql.Named("parent", parentID),
-				sql.Named("workflow", workflowID),
-				sql.Named("agent", agentID),
-				sql.Named("kind", kind),
+				sql.Named("workflow", ident.WorkflowID),
+				sql.Named("agent", ident.AgentID),
+				sql.Named("kind", ident.Kind),
 				sql.Named("id", id),
 			)
 			if uerr != nil {
@@ -236,7 +175,7 @@ func (d *DB) RunBackfillV013(basePaths []string, force bool) (BackfillResult, er
 			affected, _ := result.RowsAffected()
 			if affected > 0 {
 				res.Updated++
-				log.Printf("backfill: linked %s parent=%s workflow=%s kind=%s", id, parentID, workflowID, kind)
+				log.Printf("backfill: linked %s parent=%s workflow=%s kind=%s", id, parentID, ident.WorkflowID, ident.Kind)
 			} else {
 				// No column was filled: either no row with this id (session not
 				// ingested yet) or the row's identity columns are already populated
