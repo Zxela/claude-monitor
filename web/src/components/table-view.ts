@@ -216,7 +216,9 @@ function renderTable(): void {
     })
     .join('');
 
-  const prevScroll = tableEl.querySelector('.table-scroll')?.scrollTop ?? 0;
+  const prevScroller = tableEl.querySelector('.table-scroll');
+  const prevTop = prevScroller?.scrollTop ?? 0;
+  const prevLeft = prevScroller?.scrollLeft ?? 0;
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border)">
       <span style="color:var(--cyan);font-size:var(--fs-base);letter-spacing:var(--tracking-label)">TABLE VIEW</span>
@@ -232,7 +234,9 @@ function renderTable(): void {
     </div>
   `;
 
-  tableEl.querySelector('.table-scroll')!.scrollTop = prevScroll;
+  const scroller = tableEl.querySelector('.table-scroll')!;
+  scroller.scrollTop = prevTop;
+  scroller.scrollLeft = prevLeft;
 
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
