@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Install and build frontend
         run: cd web && npm ci && npm run build
@@ -51,6 +51,19 @@ jobs:
 
       - name: Vet
         run: go vet $(go list ./... | grep -v /node_modules/)
+
+  # build-and-test runs Node 24; this holds the documented Node 22 floor.
+  frontend-node-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.22.2'
+
+      - name: Install, build and test frontend
+        run: cd web && npm ci && npm run build && npm test
 
   # Boots the server and checks api/openapi.yaml against it in both directions:
   # responses that violate the spec, and responses carrying fields the spec does
@@ -152,13 +165,31 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           govulncheck $(go list ./... | grep -v /node_modules/)
 
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t claude-monitor:ci .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name cm -p 127.0.0.1:7799:7700 claude-monitor:ci
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:7799/health && exit 0
+            sleep 1
+          done
+          docker logs cm
+          exit 1
+
   # Create or update the release PR on pushes to main
   release-please:
     permissions:
       contents: write
       pull-requests: write
     if: github.ref == 'refs/heads/main'
-    needs: [build-and-test, lint, api-spec]
+    needs: [build-and-test, lint, api-spec, docker]
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}

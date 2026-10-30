@@ -119,6 +119,8 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
     if (state.selectedSessionId) {
       renderFeedPanel();
+      // renderFeedPanel emptied the feed, so the load guard must not skip.
+      currentLoadSessionId = null;
       loadRecentMessages(state.selectedSessionId);
     } else {
       // Back to multi-session mode
@@ -461,7 +463,7 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       fetchSessionEvents(sessionId, 200),
       fetchPinnedEvents(sessionId),
     ]);
-    if (seq !== loadSeq) return;
+    if (seq !== loadSeq || currentLoadSessionId !== sessionId) return;
 
     // Pinned events (errors + agents) fill in what the recent window misses.
     const rendered = renderBackfill(
@@ -497,7 +499,11 @@ async function loadRecentMessages(sessionId: string): Promise<void> {
       update({ searchHighlightEventId: null });
     }
   } catch {
-    if (seq === loadSeq && renderBackfill([]) === 0) {
+    if (
+      seq === loadSeq &&
+      currentLoadSessionId === sessionId &&
+      renderBackfill([]) === 0
+    ) {
       feedContent.innerHTML =
         '<div class="feed-empty">Failed to load messages</div>';
     }
