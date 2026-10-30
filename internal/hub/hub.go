@@ -4,6 +4,7 @@ package hub
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,29 +22,16 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Allow same-origin requests and localhost. Rejects cross-site WebSocket
-	// hijacking while permitting access from any machine that loaded the UI.
+	// Same-origin only. The Host header itself is vetted by the server's host
+	// guard, so matching it exactly rules out cross-site hijacking, including
+	// from other localhost ports.
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
 			return true // non-browser clients (curl, etc.)
 		}
-		// Same-origin: origin's host matches the Host header (covers LAN IPs).
-		host := r.Host
-		if strings.Contains(origin, "://"+host) {
-			return true
-		}
-		// Also allow localhost variants for dev.
-		for _, prefix := range []string{
-			"http://localhost", "https://localhost",
-			"http://127.0.0.1", "https://127.0.0.1",
-			"http://[::1]", "https://[::1]",
-		} {
-			if origin == prefix || strings.HasPrefix(origin, prefix+":") {
-				return true
-			}
-		}
-		return false
+		u, err := url.Parse(origin)
+		return err == nil && strings.EqualFold(u.Host, r.Host)
 	},
 }
 

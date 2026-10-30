@@ -449,3 +449,26 @@ func TestHub_StopSendsCloseGoingAwayFrame(t *testing.T) {
 		// Ignore any non-close data frames and keep reading.
 	}
 }
+
+func TestCheckOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		host, origin string
+		want         bool
+	}{
+		{"localhost:7700", "", true},
+		{"localhost:7700", "http://localhost:7700", true},
+		{"192.168.1.20:7700", "http://192.168.1.20:7700", true},
+		{"localhost:7700", "http://localhost:5173", false},
+		{"localhost:7700", "http://localhost:7700.evil.com", false},
+		{"localhost:7700", "https://evil.com", false},
+	} {
+		r := httptest.NewRequest("GET", "/ws", nil)
+		r.Host = tc.host
+		if tc.origin != "" {
+			r.Header.Set("Origin", tc.origin)
+		}
+		if got := upgrader.CheckOrigin(r); got != tc.want {
+			t.Errorf("host %q origin %q: got %v, want %v", tc.host, tc.origin, got, tc.want)
+		}
+	}
+}

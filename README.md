@@ -83,6 +83,7 @@ claude-monitor --port 8080 --watch /path/to/.claude/projects
 | `--port` | `7700` | HTTP listen port |
 | `--bind` | `127.0.0.1` | Address to bind to (use `0.0.0.0` for all interfaces) |
 | `--broadcast` | `false` | Listen on all interfaces (shorthand for `--bind 0.0.0.0`) |
+| `--allowed-host` | — | Hostname the UI may be reached by, besides `localhost` and IP addresses (repeatable). Other hostnames get 403, which blocks DNS rebinding. |
 | `--watch` | — | Additional directory to watch (repeatable) |
 | `--docker` | `false` | Auto-discover `.claude/projects` mounts from running Docker containers |
 | `--docker-socket` | `/var/run/docker.sock` | Path to Docker socket |
