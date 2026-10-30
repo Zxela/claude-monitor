@@ -603,6 +603,35 @@ func (d *DB) LoadErrorDedup(sessionID string) ([]string, error) {
 	return ids, rows.Err()
 }
 
+// LoadRowKeys returns the dedup key of every persisted event in a session,
+// plus how many distinct event rows and conversation turns those keys cover.
+// These are the counts the live pipeline produces, since it counts a row once.
+func (d *DB) LoadRowKeys(sessionID string) (keys map[string]struct{}, events, turns int, err error) {
+	rows, err := d.rdb.Query(`SELECT COALESCE(NULLIF(message_id,''), uuid, '') AS k,
+		MAX(type IN ('assistant','user','human'))
+		FROM events WHERE session_id = ? GROUP BY k`, sessionID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer rows.Close()
+	keys = make(map[string]struct{})
+	for rows.Next() {
+		var k string
+		var isTurn bool
+		if err := rows.Scan(&k, &isTurn); err != nil {
+			return nil, 0, 0, err
+		}
+		events++
+		if isTurn {
+			turns++
+		}
+		if k != "" {
+			keys[k] = struct{}{}
+		}
+	}
+	return keys, events, turns, rows.Err()
+}
+
 // CountSessionErrors returns the number of distinct error events for a session,
 // deduped by the stable event identity (message_id, else uuid) so re-emitted
 // error lines are counted once. This is the deterministic source of truth for
