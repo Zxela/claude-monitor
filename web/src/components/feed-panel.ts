@@ -355,12 +355,21 @@ function updateFilterButtons(): void {
     });
 }
 
+// A tool result takes its call's type, so it has to pass both filters.
+function isEntryVisible(entry: HTMLElement): boolean {
+  const filters = state.feedTypeFilters;
+  if (!(filters[entry.dataset.type || 'system'] ?? true)) return false;
+  return (
+    !entry.classList.contains('type-tool_result') ||
+    (filters.tool_result ?? true)
+  );
+}
+
 function applyFilters(): void {
   if (!feedContent) return;
   let visibleCount = 0;
   feedContent.querySelectorAll<HTMLElement>('.feed-entry').forEach((entry) => {
-    const type = entry.dataset.type || 'system';
-    const visible = state.feedTypeFilters[type] ?? true;
+    const visible = isEntryVisible(entry);
     entry.style.display = visible ? '' : 'none';
     if (visible) visibleCount++;
   });
@@ -575,8 +584,7 @@ function appendMessage(
   }
 
   const type = msgType;
-  const visible = state.feedTypeFilters[type] ?? true;
-  if (!visible) entry.style.display = 'none';
+  if (!isEntryVisible(entry)) entry.style.display = 'none';
 
   if (type === 'tool_use') {
     entry.classList.add('tool-group-start');

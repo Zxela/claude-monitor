@@ -335,7 +335,7 @@ describe('feed panel filters', () => {
     expect(visibleTypes(mount)).toEqual(['user', 'assistant']);
   });
 
-  it.skip('TOOL_RESULT hides results of tool calls in the feed (bug: they inherit the tool_use type and stay visible)', async () => {
+  it('TOOL_RESULT hides results of tool calls in the feed', async () => {
     const { mount } = await selectWith(mixed());
 
     filterBtn(mount, 'tool_result').click();
