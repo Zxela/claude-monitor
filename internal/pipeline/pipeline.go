@@ -19,6 +19,7 @@ import (
 	"github.com/zxela/claude-monitor/internal/repo"
 	"github.com/zxela/claude-monitor/internal/session"
 	"github.com/zxela/claude-monitor/internal/store"
+	"github.com/zxela/claude-monitor/internal/transcript"
 	"github.com/zxela/claude-monitor/internal/watcher"
 )
 
@@ -785,7 +786,7 @@ func (p *Pipeline) resolveParentID(msg *parser.Event, ev watcher.Event) string {
 			}
 		}
 		// Fall back to path-based inference.
-		if sid := parentSessionIDFromPath(ev.FilePath); sid != "" && sid != ev.SessionID {
+		if sid := transcript.Classify(ev.FilePath).ParentSessionID; sid != "" && sid != ev.SessionID {
 			return sid
 		}
 		// Neither source found a parent — record a deferred link. Guard on !ok so
@@ -803,7 +804,7 @@ func (p *Pipeline) resolveParentID(msg *parser.Event, ev watcher.Event) string {
 
 	// Team agent detection via parent path.
 	if msg.TeamName != "" {
-		return parentSessionIDFromPath(ev.FilePath)
+		return transcript.Classify(ev.FilePath).ParentSessionID
 	}
 
 	return ""
@@ -987,25 +988,4 @@ func skipDetail(event *parser.Event) bool {
 		return event.Subtype != "turn_duration"
 	}
 	return false
-}
-
-// parentSessionIDFromPath extracts the parent session ID from a subagent JSONL path.
-// It walks UP the directory tree looking for a "subagents" segment and returns the
-// directory immediately above it. This handles both:
-//
-//	shape 2: .../<parent-session-id>/subagents/agent-<id>.jsonl
-//	shape 3: .../<parent-session-id>/subagents/workflows/wf_<id>/agent-<id>.jsonl
-func parentSessionIDFromPath(filePath string) string {
-	dir := filepath.Dir(filePath)
-	for dir != "." && dir != string(filepath.Separator) {
-		parent := filepath.Dir(dir)
-		if filepath.Base(dir) == "subagents" {
-			return filepath.Base(parent)
-		}
-		if parent == dir { // reached filesystem root; stop
-			break
-		}
-		dir = parent
-	}
-	return ""
 }

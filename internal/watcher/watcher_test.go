@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/zxela/claude-monitor/internal/transcript"
 )
 
 // waitTracked blocks until the watcher's initial scan has registered path in its
@@ -98,33 +100,6 @@ func TestProjectDirFromPath(t *testing.T) {
 	}
 }
 
-func TestClassifyPath(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		path, kind, agentID, workflowID string
-	}{
-		// shape 1 normal session
-		{"/home/u/.claude/projects/hash/abc-123.jsonl", kindSession, "", ""},
-		{"/home/u/.claude/projects/hash/abc-123/session.jsonl", kindSession, "", ""},
-		// shape 2 task subagent
-		{"/home/u/.claude/projects/hash/abc-123/subagents/agent-xyz.jsonl", kindSubagent, "agent-xyz", ""},
-		// shape 3 workflow agent
-		{"/home/u/.claude/projects/hash/abc-123/subagents/workflows/wf_def/agent-xyz.jsonl", kindWorkflowAgent, "agent-xyz", "wf_def"},
-		// defensive: agent-* file without a subagents/ ancestor -> subagent, no workflow
-		{"/tmp/agent-loose.jsonl", kindSubagent, "agent-loose", ""},
-	}
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.path, func(t *testing.T) {
-			t.Parallel()
-			k, a, w := classifyPath(tc.path)
-			if k != tc.kind || a != tc.agentID || w != tc.workflowID {
-				t.Errorf("classifyPath(%q) = (%q,%q,%q), want (%q,%q,%q)", tc.path, k, a, w, tc.kind, tc.agentID, tc.workflowID)
-			}
-		})
-	}
-}
-
 func TestWatcher_EmitsWorkflowIdentity(t *testing.T) {
 	// Integration test: a workflow-shaped agent file should propagate
 	// AgentKind/AgentID/WorkflowID onto the Event while SessionID stays the stem.
@@ -164,8 +139,8 @@ func TestWatcher_EmitsWorkflowIdentity(t *testing.T) {
 
 	select {
 	case ev := <-events:
-		if ev.AgentKind != kindWorkflowAgent {
-			t.Errorf("AgentKind: got %q, want %q", ev.AgentKind, kindWorkflowAgent)
+		if ev.AgentKind != transcript.KindWorkflowAgent {
+			t.Errorf("AgentKind: got %q, want %q", ev.AgentKind, transcript.KindWorkflowAgent)
 		}
 		if ev.AgentID != "agent-7" {
 			t.Errorf("AgentID: got %q, want agent-7", ev.AgentID)
