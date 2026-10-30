@@ -219,6 +219,7 @@ function renderTable(): void {
     })
     .join('');
 
+  const scrollTop = tableEl.querySelector('table')?.parentElement?.scrollTop;
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border)">
       <span style="color:var(--cyan);font-size:var(--fs-base);letter-spacing:var(--tracking-label)">TABLE VIEW</span>
@@ -233,6 +234,8 @@ function renderTable(): void {
       </table>
     </div>
   `;
+  if (scrollTop)
+    tableEl.querySelector('table')!.parentElement!.scrollTop = scrollTop;
 
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {

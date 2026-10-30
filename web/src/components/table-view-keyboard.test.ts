@@ -80,6 +80,15 @@ describe('table view keyboard', () => {
     expect(document.activeElement).toBe(row('b'));
   });
 
+  it('keeps the table scroll position across a re-render', () => {
+    const scroller = () => mount.querySelector('table')!.parentElement!;
+    row('b').focus();
+    scroller().scrollTop = 120;
+    update({ grouped: grouped([session('a', 1), session('b', 4)]) });
+    expect(scroller().scrollTop).toBe(120);
+    expect(document.activeElement).toBe(row('b'));
+  });
+
   it('opens the focused row with Enter', () => {
     row('a').focus();
     key(row('a'), 'Enter');
