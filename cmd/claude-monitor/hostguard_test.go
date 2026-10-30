@@ -7,7 +7,7 @@ import (
 )
 
 func TestHostGuard(t *testing.T) {
-	h := hostGuard([]string{"monitor.lan"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	h := hostGuard([]string{"monitor.lan", "box.local."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	for host, want := range map[string]int{
 		"localhost:7700":       200,
 		"LOCALHOST:7700":       200,

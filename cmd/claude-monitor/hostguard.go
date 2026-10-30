@@ -13,7 +13,7 @@ import (
 func hostGuard(allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{"localhost": true}
 	for _, h := range allowed {
-		set[strings.ToLower(h)] = true
+		set[strings.ToLower(strings.TrimSuffix(h, "."))] = true
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hostAllowed(r.Host, set) {
