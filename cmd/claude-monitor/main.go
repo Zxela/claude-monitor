@@ -751,7 +751,8 @@ Examples:
 
 	log.Printf("claude-monitor listening on http://%s", addr)
 	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
-		log.Fatalf("http server error: %v", err)
+		log.Printf("http server error: %v", err)
+		return
 	}
 	// Serve returns as soon as Shutdown starts; wait for it to drain in-flight
 	// requests before the deferred historyDB.Close runs.
