@@ -16,10 +16,10 @@ func TestSearchFTS_ImplicitAnd(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	batch := &EventBatch{Events: []EventInsert{
@@ -75,10 +75,10 @@ func TestSearchFTS_SpecialCharsSafe(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 	batch := &EventBatch{Events: []EventInsert{{
 		SessionID: "s1",
@@ -105,10 +105,10 @@ func TestPersistBatch_FTSNoPhantomTokens(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	ts := time.Now()
@@ -157,10 +157,10 @@ func TestCountSessionErrors_DedupByUUID(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "s1", StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	ts := time.Now()
@@ -220,11 +220,11 @@ func TestAggregateStatsByRepo_ChildOnlyRepoStillReportsCost(t *testing.T) {
 		t.Fatalf("seed repo: %v", err)
 	}
 	now := time.Now()
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: "agent-only", ParentID: "some-parent", RepoID: "child-repo",
 		TotalCost: 0.75, StartedAt: now, LastActive: now,
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	agg, err := db.AggregateStatsByRepo("child-repo")
@@ -261,11 +261,11 @@ func TestCountReplayEvents(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{ID: "parent", StartedAt: time.Now(), LastActive: time.Now()}); err != nil {
-		t.Fatalf("SaveSession(parent) failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: "parent", StartedAt: time.Now(), LastActive: time.Now()}}); err != nil {
+		t.Fatalf("FlushSessions(parent) failed: %v", err)
 	}
-	if err := db.SaveSession(&session.Session{ID: "child", ParentID: "parent", StartedAt: time.Now(), LastActive: time.Now()}); err != nil {
-		t.Fatalf("SaveSession(child) failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: "child", ParentID: "parent", StartedAt: time.Now(), LastActive: time.Now()}}); err != nil {
+		t.Fatalf("FlushSessions(child) failed: %v", err)
 	}
 
 	ts := time.Now()
@@ -295,8 +295,8 @@ func TestMigration015_RecomputeAggregates(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{ID: "s1", StartedAt: time.Now(), LastActive: time.Now()}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: "s1", StartedAt: time.Now(), LastActive: time.Now()}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	ts := time.Now()

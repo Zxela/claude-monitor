@@ -2,8 +2,6 @@
 package session
 
 import (
-	"log"
-	"strings"
 	"sync"
 	"time"
 )
@@ -14,9 +12,6 @@ const activeThreshold = 30 * time.Second
 // subagentWaitingThreshold is a shorter timeout for subagents in "waiting" status.
 // Subagents that finish their task emit end_turn then stop writing — no need to wait 30s.
 const subagentWaitingThreshold = 5 * time.Second
-
-// maxSeenMessageIDs caps the deduplication map to prevent unbounded memory growth.
-const maxSeenMessageIDs = 10000
 
 // MessageCosts tracks the last-seen cost/tokens for a single message ID,
 // so we can replace (not double-add) when streaming sends multiple lines per message.
@@ -53,9 +48,7 @@ type Session struct {
 	IsActive            bool                    `json:"isActive"` // true if lastActive < 30s ago
 	StartedAt           time.Time               `json:"startedAt"`
 	Status              string                  `json:"status"` // idle, thinking, tool_use, waiting
-	seenMessageIDs      map[string]bool         `json:"-"`      // tracks message IDs to deduplicate streaming chunks
-	seenMessageCosts    map[string]MessageCosts `json:"-"`      // tracks per-message cost/tokens for dedup
-	seenMessageOrder    []string                `json:"-"`      // insertion order for LRU eviction
+	seenMessageCosts    map[string]MessageCosts `json:"-"`      // last cost/tokens per Message; never evicted, since a dropped entry would re-add that Message's full cost
 	seenRows            map[string]struct{}     `json:"-"`      // dedup keys of event rows already counted; never reset
 	ParentID            string                  `json:"parentId,omitempty"`
 	Children            []string                `json:"children,omitempty"`
@@ -123,20 +116,6 @@ func (s *Session) SetRepoInherited(v bool) { s.repoInherited = v }
 // resolution (git remote or toplevel), as opposed to a non-git fallback.
 func (s *Session) RepoFromGit() bool { return s.repoSourceRank >= 2 }
 
-// HasSeenMessageID reports whether the given key has been recorded.
-func (s *Session) HasSeenMessageID(key string) bool {
-	return s.seenMessageIDs[key]
-}
-
-// MarkMessageIDSeen records a message-ID key and appends it to the insertion-order list.
-func (s *Session) MarkMessageIDSeen(key string) {
-	if s.seenMessageIDs == nil {
-		s.seenMessageIDs = make(map[string]bool)
-	}
-	s.seenMessageIDs[key] = true
-	s.seenMessageOrder = append(s.seenMessageOrder, key)
-}
-
 // GetMessageCosts returns the previously recorded cost entry for a message ID.
 // If no entry exists, the zero value is returned.
 func (s *Session) GetMessageCosts(msgID string) MessageCosts {
@@ -154,26 +133,9 @@ func (s *Session) SetMessageCosts(msgID string, mc MessageCosts) {
 	s.seenMessageCosts[msgID] = mc
 }
 
-// AppendSeenOrder appends a key to the insertion-order list without marking it as seen.
-// Use MarkMessageIDSeen when you also need to record the ID in the dedup map.
-func (s *Session) AppendSeenOrder(key string) {
-	s.seenMessageOrder = append(s.seenMessageOrder, key)
-}
-
-// SeenOrderLen returns the length of the insertion-order list.
-func (s *Session) SeenOrderLen() int {
-	return len(s.seenMessageOrder)
-}
-
-// ResetMessageIDs clears the dedup map and insertion-order list (e.g. on compact/summary).
-func (s *Session) ResetMessageIDs() {
-	s.seenMessageIDs = make(map[string]bool)
-	s.seenMessageOrder = nil
-}
-
 // MarkRowSeen records an event row's dedup key and reports whether it was new.
-// Unlike seenMessageIDs this set is neither evicted nor cleared on summary, so
-// the startup replay of an already-persisted line does not count it again.
+// The set is never evicted or cleared, so the startup replay of an
+// already-persisted line does not count it again.
 func (s *Session) MarkRowSeen(key string) bool {
 	if _, ok := s.seenRows[key]; ok {
 		return false
@@ -197,9 +159,8 @@ func (s *Session) DedupPending() bool { return s.dedupPending }
 // SetDedupPending marks whether the session's dedup state still needs loading.
 func (s *Session) SetDedupPending(v bool) { s.dedupPending = v }
 
-// SetDedupState bulk-sets the dedup maps, used when restoring state from the database.
-func (s *Session) SetDedupState(ids map[string]bool, costs map[string]MessageCosts) {
-	s.seenMessageIDs = ids
+// RestoreMessageCosts replaces the per-Message cost map, used when restoring from the database.
+func (s *Session) RestoreMessageCosts(costs map[string]MessageCosts) {
 	s.seenMessageCosts = costs
 }
 
@@ -234,33 +195,6 @@ func (s *Store) Upsert(sessionID string, update func(*Session)) *Session {
 
 	update(sess)
 
-	// Prevent unbounded growth of the deduplication maps.
-	// Evict the oldest half of non-error entries instead of clearing everything.
-	if len(sess.seenMessageIDs) > maxSeenMessageIDs {
-		half := len(sess.seenMessageOrder) / 2
-		evicted := 0
-		for i := 0; i < half; i++ {
-			key := sess.seenMessageOrder[i]
-			if strings.HasPrefix(key, "err:") {
-				continue // keep error entries
-			}
-			delete(sess.seenMessageIDs, key)
-			evicted++
-		}
-		// Rebuild order with surviving entries only.
-		surviving := make([]string, 0, len(sess.seenMessageOrder)-evicted)
-		for _, key := range sess.seenMessageOrder {
-			if sess.seenMessageIDs[key] {
-				surviving = append(surviving, key)
-			}
-		}
-		sess.seenMessageOrder = surviving
-		log.Printf("session %s: dedup map exceeded %d entries, evicted oldest %d", sess.ID, maxSeenMessageIDs, evicted)
-	}
-	// Note: we do NOT cap seenMessageCosts — clearing it would break the
-	// delta-based cost accumulation (cleared entries re-add full cost).
-	// 10k entries ≈ 500KB, acceptable for correctness.
-
 	// Recalculate derived fields.
 	// Subagents in "waiting" use a shorter threshold — they emit end_turn then stop.
 	threshold := activeThreshold
@@ -293,9 +227,7 @@ func (s *Store) All() []*Session {
 	out := make([]*Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		cp := *sess
-		cp.seenMessageIDs = nil   // don't share internal dedup map
 		cp.seenMessageCosts = nil // don't share internal dedup map
-		cp.seenMessageOrder = nil // don't share internal dedup slice
 		cp.seenRows = nil
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
@@ -352,9 +284,7 @@ func (s *Store) Get(id string) (*Session, bool) {
 		return nil, false
 	}
 	cp := *sess
-	cp.seenMessageIDs = nil
 	cp.seenMessageCosts = nil
-	cp.seenMessageOrder = nil
 	cp.seenRows = nil
 	return &cp, true
 }

@@ -173,14 +173,6 @@ func sessionUpsertArgs(s *session.Session) []any {
 	}
 }
 
-// SaveSession upserts a session into the sessions table from live session state.
-func (d *DB) SaveSession(s *session.Session) error {
-	if _, err := d.db.Exec(sessionUpsertSQL, sessionUpsertArgs(s)...); err != nil {
-		return fmt.Errorf("SaveSession: %w", err)
-	}
-	return nil
-}
-
 // FlushSessions upserts multiple sessions and their cwd->repo mappings in a single transaction.
 func (d *DB) FlushSessions(sessions []*session.Session) error {
 	if len(sessions) == 0 {
@@ -294,41 +286,61 @@ func (d *DB) RestoreSessions(ids []string) ([]*session.Session, error) {
 	return out, nil
 }
 
-// LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
-// This is used to rebuild in-memory dedup state after a restart, preventing double-counting.
-func (d *DB) LoadMessageDedup(sessionID string) (map[string]bool, map[string]session.MessageCosts, error) {
-	rows, err := d.rdb.Query(`
-		SELECT message_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-		FROM events
-		WHERE session_id = ? AND message_id IS NOT NULL AND message_id != ''
-		AND id IN (SELECT MAX(id) FROM events WHERE session_id = ? AND message_id IS NOT NULL AND message_id != '' GROUP BY message_id)`,
-		sessionID, sessionID)
+// lastMessageRowsSQL selects each Message's last persisted row in one Session
+// (two session_id args). Rows with no cost, input or output are left out, as
+// applyCostDedup never records them; SessionTotals and LoadMessageCosts must
+// agree, or a restored Session counts a Message's cost twice.
+const lastMessageRowsSQL = `FROM events
+	WHERE session_id = ?
+	AND id IN (SELECT MAX(id) FROM events WHERE session_id = ? AND message_id IS NOT NULL AND message_id != '' GROUP BY message_id)
+	AND (cost_usd > 0 OR input_tokens > 0 OR output_tokens > 0)`
+
+// SessionTotals is a Session's cost and token totals.
+type SessionTotals struct {
+	CostUSD             float64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+}
+
+// SessionTotals sums the last persisted row of each Message in a Session.
+func (d *DB) SessionTotals(sessionID string) (SessionTotals, error) {
+	var t SessionTotals
+	err := d.rdb.QueryRow(`SELECT COALESCE(SUM(cost_usd), 0), COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_creation_tokens), 0)
+		`+lastMessageRowsSQL, sessionID, sessionID).
+		Scan(&t.CostUSD, &t.InputTokens, &t.OutputTokens, &t.CacheReadTokens, &t.CacheCreationTokens)
+	return t, err
+}
+
+// LoadMessageCosts returns the last persisted cost/tokens of each Message in a
+// Session, the baseline the live per-Message deltas continue from after a restart.
+func (d *DB) LoadMessageCosts(sessionID string) (map[string]session.MessageCosts, error) {
+	rows, err := d.rdb.Query(`SELECT message_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+		`+lastMessageRowsSQL, sessionID, sessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	ids := make(map[string]bool)
 	costs := make(map[string]session.MessageCosts)
 	for rows.Next() {
 		var mid string
 		var mc session.MessageCosts
 		if err := rows.Scan(&mid, &mc.CostUSD, &mc.InputTokens, &mc.OutputTokens, &mc.CacheReadTokens, &mc.CacheCreationTokens); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		ids[mid] = true
-		if mc.CostUSD > 0 || mc.InputTokens > 0 || mc.OutputTokens > 0 {
-			costs[mid] = mc
-		}
+		costs[mid] = mc
 	}
-	return ids, costs, rows.Err()
+	return costs, rows.Err()
 }
 
 // LoadErrorDedup returns the distinct stable identities (message_id, else uuid)
 // of a session's persisted error events. Used to rebuild the in-memory "err:"
 // dedup keys after a restart so bootstrap replay does not re-increment
-// error_count for errors already counted — the counterpart of LoadMessageDedup
-// for the error path, matching CountSessionErrors' identity definition.
+// error_count for errors already counted, matching CountSessionErrors' identity
+// definition.
 func (d *DB) LoadErrorDedup(sessionID string) ([]string, error) {
 	rows, err := d.rdb.Query(`SELECT DISTINCT COALESCE(NULLIF(message_id,''), uuid)
 		FROM events WHERE session_id = ? AND is_error = 1`, sessionID)

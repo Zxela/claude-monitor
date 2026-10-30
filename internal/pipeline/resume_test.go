@@ -332,14 +332,11 @@ func TestRestoredSession_FailedDedupLoad(t *testing.T) {
 	p.Process(ev("m3", 11, 30))
 	p.flush()
 
-	_, costs, err := db.LoadMessageDedup("s")
+	totals, err := db.SessionTotals("s")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stored int64
-	for _, c := range costs {
-		stored += c.OutputTokens
-	}
+	stored := totals.OutputTokens
 	row, err := db.GetSession("s")
 	if err != nil || row == nil {
 		t.Fatalf("session row: %v", err)

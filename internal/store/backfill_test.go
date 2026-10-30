@@ -28,10 +28,10 @@ func writeAgentFile(t *testing.T, path, inContentSessionID string) {
 // ingested before Workstream 2 identity stamping.
 func saveOrphan(t *testing.T, db *DB, id string) {
 	t.Helper()
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID: id, StartedAt: time.Now(), LastActive: time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession(%s) failed: %v", id, err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions(%s) failed: %v", id, err)
 	}
 }
 

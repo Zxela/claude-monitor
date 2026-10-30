@@ -222,11 +222,13 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		// Rebuild dedup state from DB if this session was previously persisted.
 		// After a restart, in-memory dedup maps are empty, which would cause
 		// duplicate events to double-count costs, messages, and errors.
-		// Gate on the session existing in the DB (not on len(ids) > 0): a
-		// session whose only persisted events are errors has no message-id'd
+		// Gate on the session existing in the DB (not on len(costs) > 0): a
+		// session whose only persisted events are errors has no costed
 		// rows, but its err: dedup keys and error_count still need rebuilding
 		// or replay re-inflates the count on every restart.
-		ids, costs, dedupErr := p.db.LoadMessageDedup(ev.SessionID)
+		costs, costsErr := p.db.LoadMessageCosts(ev.SessionID)
+		totals, totalsErr := p.db.SessionTotals(ev.SessionID)
+		dedupErr := errors.Join(costsErr, totalsErr)
 		dbSess, getErr := p.db.GetSession(ev.SessionID)
 		if !isNew && (dedupErr != nil || getErr != nil) {
 			// Applying this line to the restored totals would be undone when a
@@ -241,52 +243,32 @@ func (p *Pipeline) Process(ev watcher.Event) {
 			p.bufMu.Unlock()
 			return
 		}
-		if dedupErr == nil && (len(ids) > 0 || dbSess != nil) {
+		if dedupErr == nil && (len(costs) > 0 || dbSess != nil) {
 			// Seed the "err:" dedup keys from persisted error events. Without
 			// them, bootstrap replay of the JSONL re-fires ErrorCount++ for every
 			// historical error line on top of the recounted baseline below —
 			// doubling sessions.error_count on every restart.
-			if errIDs, errIDsErr := p.db.LoadErrorDedup(ev.SessionID); errIDsErr == nil {
-				for _, id := range errIDs {
-					ids["err:"+id] = true
-				}
-			}
-			// Recompute the cost/token aggregates from the SAME per-message map
-			// just rebuilt from events, rather than copying the stored sessions
-			// columns. The stored values can be stale (e.g. accumulated across
-			// re-bootstraps), which would freeze a divergent total; deriving them
-			// from the dedup map keeps sessions.total_cost provably equal to the
-			// per-message events ground truth. See audit findings on cost drift.
-			var tc float64
-			var ti, to, tr, tcc int64
-			for _, mc := range costs {
-				tc += mc.CostUSD
-				ti += mc.InputTokens
-				to += mc.OutputTokens
-				tr += mc.CacheReadTokens
-				tcc += mc.CacheCreationTokens
-			}
+			errIDs, errIDsErr := p.db.LoadErrorDedup(ev.SessionID)
 			// Recompute error_count deterministically from events so the badge
 			// matches the feed and cannot accumulate across re-bootstraps.
 			errCount, errCountErr := p.db.CountSessionErrors(ev.SessionID)
 			// Same for event/message counts: seed the row keys so replayed lines
 			// are not counted again on top of the restored totals.
 			rowKeys, evCount, turnCount, rowErr := p.db.LoadRowKeys(ev.SessionID)
-			if rowErr == nil {
-				for id := range ids {
-					if strings.HasPrefix(id, "err:") {
-						rowKeys[id] = struct{}{}
-					}
+			if rowErr == nil && errIDsErr == nil {
+				for _, id := range errIDs {
+					rowKeys["err:"+id] = struct{}{}
 				}
 			}
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
 				s.SetDedupPending(false)
-				s.SetDedupState(ids, costs)
-				s.TotalCost = tc
-				s.InputTokens = ti
-				s.OutputTokens = to
-				s.CacheReadTokens = tr
-				s.CacheCreationTokens = tcc
+				s.RestoreMessageCosts(costs)
+				// The stored sessions columns can be stale; the events are the ground truth.
+				s.TotalCost = totals.CostUSD
+				s.InputTokens = totals.InputTokens
+				s.OutputTokens = totals.OutputTokens
+				s.CacheReadTokens = totals.CacheReadTokens
+				s.CacheCreationTokens = totals.CacheCreationTokens
 				if dbSess != nil {
 					// MessageCount/EventCount are not derivable from the cost map.
 					s.MessageCount = dbSess.MessageCount
@@ -926,12 +908,6 @@ func (p *Pipeline) applyStatusUpdate(s *session.Session, msg *parser.Event, ev w
 		}
 	} else if !ev.Bootstrap {
 		s.LastActive = time.Now()
-	}
-
-	// On compact/summary, reset message-ID dedup (IDs change after compact)
-	// but preserve cost tracking to maintain running totals.
-	if msg.Type == "summary" {
-		s.ResetMessageIDs()
 	}
 
 	// Status

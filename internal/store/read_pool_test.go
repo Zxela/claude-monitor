@@ -17,12 +17,12 @@ func TestReadsNotBlockedByWriteTransaction(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 
-	if err := db.SaveSession(&session.Session{
+	if err := db.FlushSessions([]*session.Session{{
 		ID:         "read-pool-session",
 		LastActive: time.Now(),
 		StartedAt:  time.Now(),
-	}); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	}}); err != nil {
+		t.Fatalf("FlushSessions failed: %v", err)
 	}
 
 	// Occupy the single write connection with an open transaction that holds
