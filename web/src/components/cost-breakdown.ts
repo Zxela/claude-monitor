@@ -5,6 +5,7 @@ import { dismiss as dismissBudget } from './budget-popover';
 import '../styles/views.css';
 
 let popover: HTMLElement | null = null;
+let previousFocus: HTMLElement | null = null;
 
 /** Close the cost breakdown if open. Called by other dialogs to avoid overlap. */
 export function dismiss(): void {
@@ -49,7 +50,16 @@ export function toggle(anchor: HTMLElement): void {
   popover.setAttribute('role', 'dialog');
   popover.setAttribute('aria-modal', 'false');
   popover.setAttribute('aria-label', 'Cost breakdown');
+  popover.setAttribute('tabindex', '-1');
   popover.addEventListener('click', (e) => e.stopPropagation());
+  popover.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      dismiss();
+      previousFocus?.focus();
+    }
+  });
+  previousFocus = document.activeElement as HTMLElement | null;
 
   // Build content
   popover.innerHTML = `
@@ -165,6 +175,7 @@ export function toggle(anchor: HTMLElement): void {
   // Position below the anchor
   anchor.parentElement!.style.position = 'relative';
   anchor.parentElement!.appendChild(popover);
+  popover.focus();
 
   // Close on outside click
   const closeHandler = () => {

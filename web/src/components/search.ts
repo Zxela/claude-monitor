@@ -6,14 +6,26 @@ import { escapeHtml, escapeAttr } from '../utils';
 import '../styles/feed.css';
 
 let dropdown: HTMLElement | null = null;
+let input: HTMLInputElement | null = null;
+let activeIndex = -1;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function render(searchBoxEl: HTMLElement): void {
   dropdown = document.createElement('div');
+  dropdown.id = 'search-results';
   dropdown.className = 'search-dropdown search-dropdown-hidden';
   dropdown.setAttribute('role', 'listbox');
   dropdown.setAttribute('aria-label', 'Search results');
   searchBoxEl.appendChild(dropdown);
+
+  input = searchBoxEl.querySelector<HTMLInputElement>('[data-search]');
+  if (input) {
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', dropdown.id);
+    input.setAttribute('aria-expanded', 'false');
+    input.addEventListener('keydown', onInputKeydown);
+  }
 
   // Close dropdown on outside click
   document.addEventListener('click', (e) => {
@@ -76,14 +88,55 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 function showDropdown(): void {
   dropdown?.classList.remove('search-dropdown-hidden');
+  input?.setAttribute('aria-expanded', 'true');
 }
 
 function hideDropdown(): void {
   dropdown?.classList.add('search-dropdown-hidden');
+  input?.setAttribute('aria-expanded', 'false');
+  setActive(-1);
+}
+
+function options(): HTMLElement[] {
+  return dropdown
+    ? Array.from(dropdown.querySelectorAll<HTMLElement>('[role="option"]'))
+    : [];
+}
+
+function setActive(index: number): void {
+  const opts = options();
+  opts[activeIndex]?.setAttribute('aria-selected', 'false');
+  activeIndex = index;
+  const opt = opts[index];
+  if (opt) {
+    opt.setAttribute('aria-selected', 'true');
+    opt.scrollIntoView({ block: 'nearest' });
+    input?.setAttribute('aria-activedescendant', opt.id);
+  } else {
+    input?.removeAttribute('aria-activedescendant');
+  }
+}
+
+function onInputKeydown(e: KeyboardEvent): void {
+  if (dropdown?.classList.contains('search-dropdown-hidden')) return;
+  const opts = options();
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (opts.length === 0) return;
+    e.preventDefault();
+    const next =
+      e.key === 'ArrowDown'
+        ? Math.min(activeIndex + 1, opts.length - 1)
+        : Math.max(activeIndex - 1, 0);
+    setActive(next);
+  } else if (e.key === 'Enter' && opts[activeIndex]) {
+    e.preventDefault();
+    opts[activeIndex].click();
+  }
 }
 
 function renderResults(): void {
   if (!dropdown) return;
+  setActive(-1);
 
   if (state.searchLoading) {
     dropdown.innerHTML = '<div class="search-status">Searching...</div>';
@@ -128,6 +181,7 @@ function renderResults(): void {
     dropdown.appendChild(indicator);
   }
 
+  let optionIndex = 0;
   for (const [sessionId, group] of groups) {
     const visibleResults = group.results.slice(0, 3);
     const remaining = group.results.length - visibleResults.length;
@@ -135,7 +189,9 @@ function renderResults(): void {
     for (const result of visibleResults) {
       const el = document.createElement('div');
       el.className = 'search-result';
+      el.id = `search-result-${optionIndex++}`;
       el.setAttribute('role', 'option');
+      el.setAttribute('aria-selected', 'false');
       el.innerHTML = `
         <div class="search-result-header">
           <span class="search-result-session">${escapeHtml(group.name)}</span>
