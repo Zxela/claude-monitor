@@ -3347,3 +3347,78 @@ func TestPersistBatch_UpsertContentLandsOnOwnRow(t *testing.T) {
 		t.Errorf("q content = %q, want the upserted value", got)
 	}
 }
+
+// TestReingestRespectsCompaction: startup re-ingest replays every line with its
+// full content, and must not undo hot->warm or warm->cold compaction.
+func TestReingestRespectsCompaction(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	old := time.Now().Add(-48 * time.Hour)
+	persist := func(uuid string) {
+		t.Helper()
+		if err := db.PersistBatch(&EventBatch{Events: []EventInsert{{
+			SessionID:   "s1",
+			Event:       &parser.Event{UUID: uuid, Type: "assistant", ContentText: "p", Timestamp: old},
+			FullContent: "full text for " + uuid,
+		}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tierOf := func(uuid string) (tier string, plain, gz bool) {
+		t.Helper()
+		if err := db.db.QueryRow(`SELECT ec.tier, ec.content IS NOT NULL, ec.compressed IS NOT NULL
+			FROM event_content ec JOIN events e ON e.id = ec.event_id WHERE e.uuid = ?`, uuid).
+			Scan(&tier, &plain, &gz); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	persist("w")
+	persist("c")
+	if _, err := db.CompactHotToWarm(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.Exec(`UPDATE events SET timestamp = ? WHERE uuid = 'c'`,
+		time.Now().Add(-90*24*time.Hour).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CompactWarmToCold(30); err != nil {
+		t.Fatal(err)
+	}
+
+	persist("w") // restart re-ingest
+	persist("c")
+
+	if tier, plain, gz := tierOf("w"); tier != "warm" || plain || !gz {
+		t.Errorf("warm row after re-ingest: tier=%s plaintext=%v gzip=%v, want warm/false/true", tier, plain, gz)
+	}
+	if tier, plain, gz := tierOf("c"); tier != "cold" || plain || gz {
+		t.Errorf("cold row after re-ingest: tier=%s plaintext=%v gzip=%v, want cold/false/false", tier, plain, gz)
+	}
+}
+
+func TestCompactHotToWarm_ClearsDuplicatePlaintext(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	if err := db.PersistBatch(&EventBatch{Events: []EventInsert{{
+		SessionID:   "s1",
+		Event:       &parser.Event{UUID: "u", Type: "assistant", ContentText: "p", Timestamp: time.Now()},
+		FullContent: "body",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.Exec(`UPDATE event_content SET tier='warm', compressed=x'00'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CompactHotToWarm(30); err != nil {
+		t.Fatal(err)
+	}
+	var plain bool
+	if err := db.db.QueryRow(`SELECT content IS NOT NULL FROM event_content`).Scan(&plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain {
+		t.Error("warm row still holds plaintext beside its gzip copy")
+	}
+}
