@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -226,7 +227,20 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		// rows, but its err: dedup keys and error_count still need rebuilding
 		// or replay re-inflates the count on every restart.
 		ids, costs, dedupErr := p.db.LoadMessageDedup(ev.SessionID)
-		dbSess, _ := p.db.GetSession(ev.SessionID)
+		dbSess, getErr := p.db.GetSession(ev.SessionID)
+		if !isNew && (dedupErr != nil || getErr != nil) {
+			// Applying this line to the restored totals would be undone when a
+			// later line seeds from committed rows that don't include it. Skip it
+			// and stop saving the file's offset so the next start re-reads it.
+			log.Printf("load dedup state for restored session %s: %v (skipping line; file re-read on next start)", ev.SessionID, errors.Join(dedupErr, getErr))
+			p.bufMu.Lock()
+			if ev.FilePath != "" {
+				p.offsetHold[ev.FilePath] = true
+				delete(p.offsets, ev.FilePath)
+			}
+			p.bufMu.Unlock()
+			return
+		}
 		if dedupErr == nil && (len(ids) > 0 || dbSess != nil) {
 			// Seed the "err:" dedup keys from persisted error events. Without
 			// them, bootstrap replay of the JSONL re-fires ErrorCount++ for every

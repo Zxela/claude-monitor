@@ -282,3 +282,70 @@ func TestPendingLinkRepointIsPersisted(t *testing.T) {
 		t.Errorf("child repo: live %q, stored %q; want both beta", live.RepoID, row.RepoID)
 	}
 }
+
+// TestRestoredSession_FailedDedupLoad: a restored session's line that arrives
+// while its dedup state can't be loaded must not be applied, or the seed on the
+// next line replaces totals that include it with committed ones that don't.
+func TestRestoredSession_FailedDedupLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	open := func() *store.DB {
+		db, err := store.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		return db
+	}
+	line := func(mid string, out int) []byte {
+		return []byte(fmt.Sprintf(`{"type":"assistant","uuid":%q,"sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"id":%q,"role":"assistant","model":"claude-opus-4-8","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":%d}}}`, "u-"+mid, mid, out))
+	}
+	ev := func(mid string, out int, off int64) watcher.Event {
+		return watcher.Event{SessionID: "s", FilePath: "/p/s.jsonl", Offset: off, Bootstrap: true, Line: line(mid, out)}
+	}
+
+	db := open()
+	first := New(session.NewStore(), db, repo.NewResolver(), nil)
+	first.Process(ev("m1", 5, 10))
+	first.Stop()
+
+	broken := open()
+	broken.Close()
+	sessions := session.NewStore()
+	p := New(sessions, db, repo.NewResolver(), nil)
+	p.Stop() // flush manually so swapping p.db can't race the flush loop
+	if got := p.Restore([]string{"s"}); !got["s"] {
+		t.Fatal("session not restored")
+	}
+
+	p.db = broken
+	p.Process(ev("m2", 7, 20))
+	p.db = db
+	p.Process(ev("m3", 11, 30))
+	p.flush()
+
+	_, costs, err := db.LoadMessageDedup("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored int64
+	for _, c := range costs {
+		stored += c.OutputTokens
+	}
+	row, err := db.GetSession("s")
+	if err != nil || row == nil {
+		t.Fatalf("session row: %v", err)
+	}
+	live, _ := sessions.Get("s")
+	if row.OutputTokens != stored || live.OutputTokens != stored {
+		t.Errorf("output tokens: row %d, live %d, events %d; want all equal", row.OutputTokens, live.OutputTokens, stored)
+	}
+	saved, err := db.LoadFileOffsets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range saved {
+		if o.Path == "/p/s.jsonl" && o.Offset != 10 {
+			t.Errorf("saved offset %d, want 10 so the skipped line is re-read", o.Offset)
+		}
+	}
+}
