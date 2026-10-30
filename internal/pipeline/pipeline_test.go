@@ -1597,8 +1597,8 @@ func TestProcess_ChildInheritsParentRepoFromDB(t *testing.T) {
 	const childID = "agent-feedface12345678"
 
 	// Persist the parent to the DB ONLY (absent from the live store).
-	if err := db.SaveSession(&session.Session{ID: parentID, RepoID: "github.com/acme/gadget"}); err != nil {
-		t.Fatalf("SaveSession parent: %v", err)
+	if err := db.FlushSessions([]*session.Session{{ID: parentID, RepoID: "github.com/acme/gadget"}}); err != nil {
+		t.Fatalf("FlushSessions parent: %v", err)
 	}
 
 	childLine := makeJSONL(t, map[string]interface{}{
@@ -1764,7 +1764,7 @@ func TestProcess_RebuildErrorDedupFromDB(t *testing.T) {
 	}
 
 	// An assistant message with a message ID, so the restart-rebuild path
-	// (which only fires when LoadMessageDedup returns entries) actually runs —
+	// (which only fires when LoadMessageCosts returns entries) actually runs —
 	// that is the real-world shape where the inflation occurred.
 	assistantLine := makeJSONL(t, map[string]interface{}{
 		"type":      "assistant",

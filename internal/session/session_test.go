@@ -1,9 +1,7 @@
 package session
 
 import (
-	"fmt"
 	"math"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -286,67 +284,5 @@ func TestMessageCosts_MultipleMessages(t *testing.T) {
 	// msg_1 final output=800, msg_2 output=1000 → total=1800
 	if sess.OutputTokens != 1800 {
 		t.Errorf("OutputTokens: got %d, want 1800", sess.OutputTokens)
-	}
-}
-
-func TestLRUEviction_EvictsOldestHalf(t *testing.T) {
-	t.Parallel()
-	s := NewStore()
-
-	// Seed with >10k message IDs plus a few error entries.
-	s.Upsert("lru-session", func(sess *Session) {
-		// Add 50 error entries first.
-		for i := 0; i < 50; i++ {
-			key := fmt.Sprintf("err:e%d", i)
-			sess.MarkMessageIDSeen(key)
-		}
-		// Add 10001 normal entries (enough to exceed the cap after the update returns).
-		for i := 0; i < 10001; i++ {
-			key := fmt.Sprintf("msg-%d", i)
-			sess.MarkMessageIDSeen(key)
-		}
-		// Also set up seenMessageCosts to verify they are not touched.
-		sess.SetMessageCosts("cost-1", MessageCosts{CostUSD: 0.01})
-		sess.SetMessageCosts("cost-2", MessageCosts{CostUSD: 0.02})
-	})
-
-	// Retrieve the internal session (via another Upsert that does nothing)
-	// to inspect the eviction result.
-	var afterIDs int
-	var afterOrder int
-	var errSurvived int
-	var costEntries int
-	s.Upsert("lru-session", func(sess *Session) {
-		afterIDs = len(sess.seenMessageIDs)
-		afterOrder = sess.SeenOrderLen()
-		for k := range sess.seenMessageIDs {
-			if strings.HasPrefix(k, "err:") {
-				errSurvived++
-			}
-		}
-		costEntries = len(sess.seenMessageCosts)
-	})
-
-	// Total was 10051 entries. Oldest half of order = 10051/2 = 5025 entries.
-	// Of those 5025, the first 50 are error entries (preserved), then 4975 normal entries evicted.
-	// Remaining: 10051 - 4975 = 5076 entries in the map.
-	if afterIDs > maxSeenMessageIDs {
-		// Eviction should have reduced the map size.
-		t.Errorf("seenMessageIDs still exceeds cap: got %d, want <= %d", afterIDs, maxSeenMessageIDs)
-	}
-
-	// All 50 error entries must survive.
-	if errSurvived != 50 {
-		t.Errorf("error entries survived: got %d, want 50", errSurvived)
-	}
-
-	// seenMessageOrder should be consistent with seenMessageIDs.
-	if afterOrder != afterIDs {
-		t.Errorf("seenMessageOrder length (%d) != seenMessageIDs length (%d)", afterOrder, afterIDs)
-	}
-
-	// seenMessageCosts must not be touched.
-	if costEntries != 2 {
-		t.Errorf("seenMessageCosts entries: got %d, want 2", costEntries)
 	}
 }
