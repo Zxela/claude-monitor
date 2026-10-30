@@ -10,7 +10,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
