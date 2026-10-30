@@ -46,8 +46,8 @@
   --color-tool-result: #44cccc;
   --color-command: #9999bb;
   --color-hook: #aa77dd;
-  --color-error: #dd4455;
-  --color-result: #667788;
+  --color-error: #ef5b6b;
+  --color-result: #7f8fa1;
   --color-command-content: #aabbdd;
   --color-hook-content: #bb99dd;
 }
@@ -446,4 +446,16 @@ body {
   font-style: italic;
   opacity: 0.85;
   cursor: default;
+}
+
+/* Pulses, flashes and spinners loop indefinitely; honour the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -28,6 +28,7 @@ export function errorsOnlyFilters(): Record<string, boolean> {
     assistant: false,
     tool_use: false,
     tool_result: false,
+    skill: false,
     agent: false,
     hook: false,
     command: false,

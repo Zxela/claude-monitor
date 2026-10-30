@@ -167,7 +167,6 @@ function renderList(): void {
   yesterdayStart.setDate(yesterdayStart.getDate() - 1);
   const weekStart = new Date(todayStart);
   weekStart.setDate(weekStart.getDate() - 7);
-  const recentCutoff = now - 4 * 3600_000; // 4 hours
 
   // Group sessions
   const active: Session[] = [];
@@ -232,8 +231,14 @@ function renderList(): void {
     }
   }
 
-  // Save scroll + render
+  // Save scroll and keyboard focus + render. The list rebuilds every 5s, which
+  // otherwise dumps a Tab-focused card's focus back to <body>.
   const scrollTop = listEl.scrollTop;
+  const activeEl = document.activeElement as HTMLElement | null;
+  const focusedId = listEl.contains(activeEl)
+    ? activeEl?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId
+    : undefined;
+  const focusedErr = !!activeEl?.classList.contains('session-error-count');
   listEl.innerHTML = '';
 
   const filter = state.repoFilter;
@@ -243,27 +248,23 @@ function renderList(): void {
     s.totalCost === 0 &&
     s.inputTokens + s.outputTokens + s.cacheReadTokens === 0 &&
     s.messageCount < 4;
+  const matchesRepo = (s: Session) =>
+    !filter || s.cwd === filter || s.sessionName === filter;
   const topLevelFilter = (s: Session) =>
-    !s.parentId &&
-    !isTrivial(s) &&
-    (!filter || s.cwd === filter || s.sessionName === filter);
+    !s.parentId && !isTrivial(s) && matchesRepo(s);
+  // ACTIVE NOW renders trivial sessions too, so they count here.
+  const activeCount = active.filter(
+    (s) => !s.parentId && matchesRepo(s),
+  ).length;
   const recentCount =
-    // Count top-level active sessions only — subagents are inlined under their
-    // parent, never rendered as standalone cards. This matches #fc-active (line
-    // below) and the rendered ACTIVE NOW / RECENT card set.
-    active.filter((s) => !s.parentId).length +
-    [...lastHour, ...today].filter(
-      (s) =>
-        topLevelFilter(s) && new Date(s.lastActive).getTime() > recentCutoff,
-    ).length;
+    activeCount + [...lastHour, ...today].filter(topLevelFilter).length;
   const totalCount = Array.from(localSessions.values()).filter(
     topLevelFilter,
   ).length;
   const fcActive = el?.querySelector('#fc-active');
   const fcRecent = el?.querySelector('#fc-recent');
   const fcAll = el?.querySelector('#fc-all');
-  if (fcActive)
-    fcActive.textContent = String(active.filter((s) => !s.parentId).length);
+  if (fcActive) fcActive.textContent = String(activeCount);
   if (fcRecent) fcRecent.textContent = String(recentCount);
   if (fcAll) fcAll.textContent = String(totalCount);
   const topLevel = (sessions: Session[], includeTrivial = false) =>
@@ -326,6 +327,7 @@ function renderList(): void {
       listEl.appendChild(empty);
     }
     listEl.scrollTop = scrollTop;
+    restoreFocus(focusedId, focusedErr);
     return;
   }
 
@@ -432,6 +434,7 @@ function renderList(): void {
   }
 
   listEl.scrollTop = scrollTop;
+  restoreFocus(focusedId, focusedErr);
 
   // Scroll focused element into view
   if (state.focusedSessionId) {
@@ -444,4 +447,15 @@ function renderList(): void {
     const selected = listEl.querySelector<HTMLElement>(`.selected`);
     if (selected) selected.scrollIntoView({ block: 'nearest' });
   }
+}
+
+function restoreFocus(sessionId: string | undefined, errCount: boolean): void {
+  if (!sessionId || !listEl) return;
+  const card = listEl.querySelector<HTMLElement>(
+    `[data-session-id="${CSS.escape(sessionId)}"]`,
+  );
+  const target =
+    (errCount && card?.querySelector<HTMLElement>('.session-error-count')) ||
+    card;
+  target?.focus({ preventScroll: true });
 }

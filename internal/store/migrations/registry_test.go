@@ -442,6 +442,71 @@ func TestFailedMigration_RollsBack(t *testing.T) {
 	}
 }
 
+// Runner B reads version 0, then runner A applies every migration before B's
+// first write. B must not re-apply them on top of A's commits.
+func TestRunUp_ConcurrentRunnerDoesNotReapply(t *testing.T) {
+	saved := registry
+	defer func() { registry = saved }()
+	registry = nil
+
+	path := filepath.Join(t.TempDir(), "test.db")
+	open := func() *sql.DB {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		return db
+	}
+	dbA, dbB := open(), open()
+	// WAL lets A commit while B holds a read snapshot; rollback journal would deadlock.
+	if _, err := dbA.Exec(`PRAGMA journal_mode=WAL; CREATE TABLE runs (v INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+
+	var aErr error
+	ranA := false
+	Register(1, Migration{
+		Name: "one",
+		Up: func(tx *sql.Tx) error {
+			if !ranA {
+				ranA = true
+				_, aErr = RunUp(dbA)
+			}
+			_, err := tx.Exec(`INSERT INTO runs VALUES (1)`)
+			return err
+		},
+		Down: func(tx *sql.Tx) error { return nil },
+	})
+	Register(2, Migration{
+		Name: "two",
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`INSERT INTO runs VALUES (2)`)
+			return err
+		},
+		Down: func(tx *sql.Tx) error { return nil },
+	})
+
+	_, bErr := RunUp(dbB)
+	if aErr != nil {
+		t.Fatalf("runner A: %v", aErr)
+	}
+	if bErr == nil {
+		t.Error("runner B wrote on a stale snapshot; want an error")
+	}
+
+	var n int
+	if err := dbA.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("migrations ran %d times in total, want 2", n)
+	}
+	if v, err := GetVersion(dbA); err != nil || v != 2 {
+		t.Errorf("version = %d, %v; want 2", v, err)
+	}
+}
+
 // TestMigration017_ReattributesChildRepos runs the REAL registry to head, then
 // re-applies migration 017 against populated data (by rolling its version back to
 // 16 and running up again) to verify children — including a multi-level chain —
@@ -863,6 +928,71 @@ func TestDropCollapsedKeylessEvents(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'kept'`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("fts match for kept row = %d (err %v), want 1", n, err)
+	}
+}
+
+func TestSessionAITitlePRLink_UpDown(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	for _, col := range []string{"ai_title", "pr_links"} {
+		if !columnExists(t, db, "sessions", col) {
+			t.Fatalf("after RunUp: sessions.%s missing", col)
+		}
+	}
+
+	rollDownTo(t, db, "session_ai_title_pr_link")
+	for _, col := range []string{"ai_title", "pr_links"} {
+		if columnExists(t, db, "sessions", col) {
+			t.Errorf("after RunDown: sessions.%s should be dropped", col)
+		}
+	}
+	// Versions may have gaps; the next Down must find a registered migration.
+	if _, err := RunDown(db); err != nil {
+		t.Fatalf("RunDown below 025: %v", err)
+	}
+
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+	if !columnExists(t, db, "sessions", "pr_links") {
+		t.Error("pr_links not restored after re-RunUp")
+	}
+}
+
+func TestRecountSessionEvents(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("RunUp: %v", err)
+	}
+	rollDownTo(t, db, "recount_session_events")
+	for _, q := range []string{
+		`INSERT INTO sessions (id, event_count, message_count) VALUES ('s', 99, 42)`,
+		`INSERT INTO sessions (id, event_count, message_count) VALUES ('empty', 7, 5)`,
+		`INSERT INTO events (session_id, uuid, message_id, type, timestamp) VALUES ('s', 'a1', 'm1', 'assistant', '2026-10-01T00:00:00Z')`,
+		`INSERT INTO events (session_id, uuid, type, timestamp) VALUES ('s', 'u1', 'user', '2026-10-01T00:00:01Z')`,
+		`INSERT INTO events (session_id, uuid, type, timestamp) VALUES ('s', 'x1', 'system', '2026-10-01T00:00:02Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := RunUp(db); err != nil {
+		t.Fatalf("re-RunUp: %v", err)
+	}
+	var ev, msg int
+	if err := db.QueryRow(`SELECT event_count, message_count FROM sessions WHERE id='s'`).Scan(&ev, &msg); err != nil {
+		t.Fatal(err)
+	}
+	if ev != 3 || msg != 2 {
+		t.Errorf("counts = %d events, %d messages; want 3, 2", ev, msg)
+	}
+	if err := db.QueryRow(`SELECT event_count, message_count FROM sessions WHERE id='empty'`).Scan(&ev, &msg); err != nil {
+		t.Fatal(err)
+	}
+	if ev != 0 || msg != 0 {
+		t.Errorf("empty session counts = %d events, %d messages; want 0, 0", ev, msg)
 	}
 }
 

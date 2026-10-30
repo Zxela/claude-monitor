@@ -1,8 +1,10 @@
 package pipeline
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1960,5 +1962,215 @@ func TestProcess_KeylessLinesGetOwnRows(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("got %d rows, want 2 (one per distinct keyless line)", len(events))
+	}
+}
+
+func TestProcess_SessionMetadataLines(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	var details, updates int
+	p := New(sessions, db, repo.NewResolver(), func(_ *parser.Event, _ *session.Session, _, sendDetail bool) {
+		if sendDetail {
+			details++
+		} else {
+			updates++
+		}
+	})
+	defer p.Stop()
+
+	lines := []string{
+		`{"type":"assistant","sessionId":"s","uuid":"u1","timestamp":"2026-10-07T22:00:00Z","message":{"id":"m1","role":"assistant","content":"hi","stop_reason":"end_turn"}}`,
+		`{"type":"ai-title","aiTitle":"Multi-repo support","sessionId":"s"}`,
+		`{"type":"pr-link","sessionId":"s","prNumber":7,"prUrl":"https://old.example/7","prRepository":"g/r","timestamp":"2026-10-07T22:07:43Z"}`,
+		`{"type":"pr-link","sessionId":"s","prNumber":8,"prUrl":"https://example/8","prRepository":"g/r","timestamp":"2026-10-07T22:08:00Z"}`,
+		`{"type":"pr-link","sessionId":"s","prNumber":7,"prUrl":"https://example/7","prRepository":"g/r","timestamp":"2026-10-07T22:09:00Z"}`,
+	}
+	for _, l := range lines {
+		p.Process(watcher.Event{SessionID: "s", Line: []byte(l)})
+	}
+
+	sess, _ := sessions.Get("s")
+	if sess.AITitle != "Multi-repo support" {
+		t.Errorf("AITitle = %q", sess.AITitle)
+	}
+	if sess.SessionName != "" {
+		t.Errorf("SessionName = %q, want empty (AI title is kept apart)", sess.SessionName)
+	}
+	wantLinks := []session.PRLink{
+		{Number: 7, URL: "https://example/7", Repository: "g/r"},
+		{Number: 8, URL: "https://example/8", Repository: "g/r"},
+	}
+	if fmt.Sprint(sess.PRLinks) != fmt.Sprint(wantLinks) {
+		t.Errorf("PRLinks = %+v, want %+v", sess.PRLinks, wantLinks)
+	}
+	if sess.EventCount != 1 || sess.MessageCount != 1 {
+		t.Errorf("counts = events %d, messages %d; want 1, 1", sess.EventCount, sess.MessageCount)
+	}
+	if !sess.LastActive.Equal(time.Date(2026, 10, 7, 22, 0, 0, 0, time.UTC)) {
+		t.Errorf("LastActive = %v, metadata lines must not move it", sess.LastActive)
+	}
+	if details != 1 || updates != 4 {
+		t.Errorf("broadcasts = %d detail, %d update-only; want 1, 4", details, updates)
+	}
+
+	p.flush()
+	events, err := db.ListEvents("s", 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Errorf("stored events = %d, want 1", len(events))
+	}
+
+	// Restart: a fresh store must restore the metadata from the DB on the
+	// first line it sees, before any ai-title line is replayed.
+	sessions2 := session.NewStore()
+	p2 := New(sessions2, db, repo.NewResolver(), nil)
+	defer p2.Stop()
+	p2.Process(watcher.Event{SessionID: "s", Line: []byte(lines[0]), Bootstrap: true})
+	sess2, _ := sessions2.Get("s")
+	if sess2.AITitle != "Multi-repo support" || fmt.Sprint(sess2.PRLinks) != fmt.Sprint(wantLinks) {
+		t.Errorf("after restart: AITitle %q, PRLinks %+v", sess2.AITitle, sess2.PRLinks)
+	}
+}
+
+func TestProcess_SessionMetadataOnlyIsFlushed(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"assistant","sessionId":"s","uuid":"u1","message":{"id":"m1","role":"assistant","content":"hi"}}`)})
+	p.flush()
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"Later title","sessionId":"s"}`)})
+	p.flush()
+
+	row, err := db.GetSession("s")
+	if err != nil || row == nil {
+		t.Fatalf("GetSession: %v %v", row, err)
+	}
+	if row.AITitle != "Later title" {
+		t.Errorf("persisted AITitle = %q, want it flushed without a following event", row.AITitle)
+	}
+}
+
+func TestProcess_MetadataFirstAfterRestartKeepsSavedRow(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"user","uuid":"u1","sessionId":"s","cwd":"/work/app","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
+	p.Stop()
+	before, err := db.GetSession("s")
+	if err != nil || before == nil || before.CWD == "" {
+		t.Fatalf("setup: %+v %v", before, err)
+	}
+
+	// Restart where the first line seen is metadata, as when a Docker source
+	// is tailed from EOF.
+	p2 := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p2.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"Later title","sessionId":"s"}`)})
+	p2.Stop()
+
+	after, err := db.GetSession("s")
+	if err != nil || after == nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if after.CWD != before.CWD || after.RepoID != before.RepoID || after.StartedAt != before.StartedAt || after.EndedAt != before.EndedAt {
+		t.Errorf("saved row changed: before %+v, after %+v", before, after)
+	}
+	if after.AITitle != "Later title" {
+		t.Errorf("AITitle = %q", after.AITitle)
+	}
+}
+
+func TestFlush_RequeuesSessionsWhenSessionWriteFails(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	p.Stop() // keep the ticker out of the way
+	p.Process(watcher.Event{SessionID: "s", Line: []byte(`{"type":"ai-title","aiTitle":"T","sessionId":"s"}`)})
+	db.Close()
+	p.flush()
+
+	p.bufMu.Lock()
+	queued := p.dirty["s"]
+	p.bufMu.Unlock()
+	if !queued {
+		t.Error("session dropped from the dirty set after a failed write, so it is never retried")
+	}
+}
+
+func TestFlush_RetainsBatchWhenPersistFails(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: []byte(
+		`{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`)})
+	db.Close() // every write now fails
+	p.flush()
+
+	p.bufMu.Lock()
+	n := len(p.buffer)
+	p.bufMu.Unlock()
+	if n != 1 {
+		t.Errorf("buffer holds %d events after a failed persist, want 1 kept for retry", n)
+	}
+}
+
+func TestProcess_RetainedEventsDontTriggerFlush(t *testing.T) {
+	db := openTestDB(t)
+	p := New(session.NewStore(), db, repo.NewResolver(), nil)
+	defer p.Stop()
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+
+	line := func(i int) []byte {
+		return []byte(fmt.Sprintf(`{"type":"user","uuid":"u%d","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"hi"}}`, i))
+	}
+	for i := 0; i < maxBatchSize-1; i++ {
+		p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(i)})
+	}
+	db.Close()
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(maxBatchSize)}) // fills the batch; flush fails
+	p.Process(watcher.Event{SessionID: "s", Bootstrap: true, Line: line(maxBatchSize + 1)})
+
+	if n := strings.Count(logs.String(), "will retry"); n != 1 {
+		t.Errorf("got %d persist attempts, want 1: retained events must not count toward the next size-triggered flush", n)
+	}
+}
+
+// TestProcess_RestartReplayKeepsCounts replays the same file through a fresh
+// pipeline, as every startup does, and expects the counts not to move.
+func TestProcess_RestartReplayKeepsCounts(t *testing.T) {
+	db := openTestDB(t)
+	lines := [][]byte{
+		[]byte(`{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-01T00:00:00Z","message":{"role":"user","content":"go"}}`),
+		[]byte(`{"type":"assistant","uuid":"a1","sessionId":"s","timestamp":"2026-10-01T00:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"thinking","thinking":"hm"}]}}`),
+		[]byte(`{"type":"assistant","uuid":"a2","sessionId":"s","timestamp":"2026-10-01T00:00:02Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"done"}]}}`),
+		[]byte(`{"type":"summary","uuid":"sum1","sessionId":"s","timestamp":"2026-10-01T00:00:03Z","summary":"compacted"}`),
+		[]byte(`{"type":"user","uuid":"u2","sessionId":"s","timestamp":"2026-10-01T00:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","is_error":true,"content":"boom"}]}}`),
+	}
+
+	var want [3]int
+	for run := range 3 {
+		sessions := session.NewStore()
+		p := New(sessions, db, repo.NewResolver(), nil)
+		for _, l := range lines {
+			p.Process(watcher.Event{SessionID: "s", Line: l, Bootstrap: run > 0})
+		}
+		p.Stop()
+
+		sess, _ := sessions.Get("s")
+		got := [3]int{sess.EventCount, sess.MessageCount, sess.ErrorCount}
+		if run == 0 {
+			want = got
+			if got != [3]int{4, 3, 1} {
+				t.Fatalf("first pass counts = %v, want [4 3 1] (events, messages, errors)", got)
+			}
+			continue
+		}
+		if got != want {
+			t.Errorf("after restart %d counts = %v, want %v", run, got, want)
+		}
 	}
 }

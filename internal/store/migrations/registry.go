@@ -75,6 +75,20 @@ func RunUp(db *sql.DB) (int, error) {
 			return applied, fmt.Errorf("begin transaction for migration %d (%s): %w", rm.Version, rm.Migration.Name, err)
 		}
 
+		// Another process may have applied it since current was read. Reading
+		// the version inside the transaction pins the snapshot: if a concurrent
+		// commit lands, this transaction's first write fails with SQLITE_BUSY
+		// instead of applying the migration a second time.
+		var inTx int
+		if err := tx.QueryRow("PRAGMA user_version").Scan(&inTx); err != nil {
+			_ = tx.Rollback()
+			return applied, fmt.Errorf("read schema version: %w", err)
+		}
+		if rm.Version <= inTx {
+			_ = tx.Rollback()
+			continue
+		}
+
 		if err := rm.Migration.Up(tx); err != nil {
 			_ = tx.Rollback()
 			return applied, fmt.Errorf("migration %d (%s) failed: %w", rm.Version, rm.Migration.Name, err)

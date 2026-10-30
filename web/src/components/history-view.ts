@@ -11,8 +11,7 @@ import {
 import '../styles/views.css';
 
 function sessionIdentifier(s: Session): string {
-  if (s.sessionName) return s.sessionName;
-  return s.id.slice(0, 8);
+  return s.sessionName || s.aiTitle || s.id.slice(0, 8);
 }
 
 function projectLabel(s: Session): string {
@@ -156,10 +155,18 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
   if (changed.has('historyShowSubagents') && state.view === 'history') {
     show();
   }
-  // Refresh history when sessions update while viewing history (debounced)
-  if (changed.has('sessions') && state.view === 'history') {
-    if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
-    historyRefreshTimer = setTimeout(() => loadData(), 5000);
+  // Refresh history when sessions update while viewing history, at most every
+  // 5s. A debounce never fired while any agent was active, since each event
+  // restarted it.
+  if (
+    changed.has('sessions') &&
+    state.view === 'history' &&
+    !historyRefreshTimer
+  ) {
+    historyRefreshTimer = setTimeout(() => {
+      historyRefreshTimer = null;
+      loadData();
+    }, 5000);
   }
 }
 

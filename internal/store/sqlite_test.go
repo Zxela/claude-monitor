@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -563,7 +564,7 @@ func TestSearchFTS(t *testing.T) {
 			Event: &parser.Event{
 				Type: "assistant", ContentText: "reading parser.go",
 				ToolName: "Read", ToolDetail: "/home/user/parser.go",
-				Timestamp: time.Now(),
+				Timestamp: time.Now(), UUID: "u-read",
 			},
 		},
 		{
@@ -571,7 +572,7 @@ func TestSearchFTS(t *testing.T) {
 			Event: &parser.Event{
 				Type: "assistant", ContentText: "running tests",
 				ToolName: "Bash", ToolDetail: "go test ./...",
-				Timestamp: time.Now().Add(time.Second),
+				Timestamp: time.Now().Add(time.Second), UUID: "u-bash",
 			},
 		},
 	}}
@@ -3420,6 +3421,53 @@ func TestCompactHotToWarm_ClearsDuplicatePlaintext(t *testing.T) {
 	}
 	if plain {
 		t.Error("warm row still holds plaintext beside its gzip copy")
+	}
+}
+
+func TestSessionAITitlePRLinks_RoundTrip(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	now := time.Now().UTC()
+	links := []session.PRLink{
+		{Number: 14793, URL: "https://git.example.com/group/repo/-/merge_requests/14793", Repository: "group/repo"},
+		{Number: 12, URL: "https://github.com/o/r/pull/12"},
+	}
+	if err := db.FlushSessions([]*session.Session{{
+		ID: "titled", AITitle: "Fix login redirect", PRLinks: links, TotalCost: 1,
+		StartedAt: now.Add(-time.Hour), LastActive: now,
+	}}); err != nil {
+		t.Fatalf("FlushSessions: %v", err)
+	}
+	if err := db.SaveSession(&session.Session{
+		ID: "named", SessionName: "explicit", AITitle: "ignored for trends", TotalCost: 0.5,
+		StartedAt: now.Add(-time.Hour), LastActive: now,
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	row, err := db.GetSession("titled")
+	if err != nil || row == nil {
+		t.Fatalf("GetSession: %v, %v", row, err)
+	}
+	got := row.ToSession()
+	if got.AITitle != "Fix login redirect" {
+		t.Errorf("AITitle = %q", got.AITitle)
+	}
+	if !reflect.DeepEqual(got.PRLinks, links) {
+		t.Errorf("PRLinks = %+v, want %+v", got.PRLinks, links)
+	}
+
+	res, err := db.TrendData("24h", "")
+	if err != nil {
+		t.Fatalf("TrendData: %v", err)
+	}
+	names := map[string]string{}
+	for _, st := range res.BySession {
+		names[st.SessionID] = st.SessionName
+	}
+	if names["titled"] != "Fix login redirect" || names["named"] != "explicit" {
+		t.Errorf("trend names = %v", names)
 	}
 }
 

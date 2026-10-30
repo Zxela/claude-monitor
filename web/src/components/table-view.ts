@@ -24,17 +24,26 @@ let container: HTMLElement | null = null;
 let tableEl: HTMLElement | null = null;
 let sortKey: SortKey = 'lastActive';
 let sortDir: SortDir = 'desc';
+let pendingRender: ReturnType<typeof setTimeout> | null = null;
 
 export function render(mount: HTMLElement): void {
   container = mount;
   subscribe((_s, changed) => {
     if (
       changed.has('view') ||
-      changed.has('sessions') ||
       changed.has('grouped') ||
       changed.has('selectedSessionId')
     ) {
       renderTable();
+    } else if (changed.has('sessions') && state.view === 'table') {
+      // Every WebSocket event touches 'sessions'; batch those into at most
+      // one rebuild a second.
+      if (pendingRender === null) {
+        pendingRender = setTimeout(() => {
+          pendingRender = null;
+          renderTable();
+        }, 1000);
+      }
     }
   });
   renderTable();
@@ -149,6 +158,13 @@ function renderTable(): void {
 
   const sessions = sortSessions(getAllSessions());
 
+  // Every rebuild replaces the focused header or row, so find it again after.
+  const focused = tableEl.contains(document.activeElement)
+    ? (document.activeElement as HTMLElement)
+    : null;
+  const focusedSort = focused?.dataset.sort;
+  const focusedRow = focused?.dataset.sessionId;
+
   const cols: { key: SortKey; label: string; align?: string }[] = [
     { key: 'name', label: 'SESSION' },
     { key: 'status', label: 'STATUS' },
@@ -212,12 +228,15 @@ function renderTable(): void {
     })
     .join('');
 
+  const prevScroller = tableEl.querySelector('.table-scroll');
+  const prevTop = prevScroller?.scrollTop ?? 0;
+  const prevLeft = prevScroller?.scrollLeft ?? 0;
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border)">
       <span style="color:var(--cyan);font-size:var(--fs-base);letter-spacing:var(--tracking-label)">TABLE VIEW</span>
       <span style="color:var(--text-dim);font-size:var(--fs-sm)">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
     </div>
-    <div style="overflow:auto;flex:1">
+    <div class="table-scroll" style="overflow:auto;flex:1">
       <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono)">
         <thead>
           <tr>${headerCells}</tr>
@@ -227,9 +246,29 @@ function renderTable(): void {
     </div>
   `;
 
+  const scroller = tableEl.querySelector('.table-scroll')!;
+  scroller.scrollTop = prevTop;
+  scroller.scrollLeft = prevLeft;
+
   // Sort header click handlers
   tableEl.querySelectorAll<HTMLElement>('th[data-sort]').forEach((th) => {
+    th.setAttribute('tabindex', '0');
+    th.setAttribute(
+      'aria-sort',
+      sortKey !== th.dataset.sort
+        ? 'none'
+        : sortDir === 'asc'
+          ? 'ascending'
+          : 'descending',
+    );
     th.addEventListener('click', () => handleSort(th.dataset.sort as SortKey));
+    th.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleSort(th.dataset.sort as SortKey);
+      }
+    });
+    if (th.dataset.sort === focusedSort) th.focus({ preventScroll: true });
     th.addEventListener('mouseenter', () => {
       th.style.color = 'var(--text)';
     });
@@ -260,5 +299,14 @@ function renderTable(): void {
           view: 'list',
         });
       });
+      row.setAttribute('tabindex', '0');
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          update({ selectedSessionId: row.dataset.sessionId!, view: 'list' });
+        }
+      });
+      if (row.dataset.sessionId === focusedRow)
+        row.focus({ preventScroll: true });
     });
 }

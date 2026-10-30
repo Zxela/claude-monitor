@@ -789,6 +789,31 @@ func TestParseLine_ThinkingBeforeToolUseKeepsToolInput(t *testing.T) {
 	}
 }
 
+func TestParseLine_SessionMetadata(t *testing.T) {
+	title, err := ParseLine([]byte(`{"type":"ai-title","aiTitle":"Gitlab-statistics MR 7 multi-repo support","sessionId":"46145c73"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title.AITitle != "Gitlab-statistics MR 7 multi-repo support" {
+		t.Errorf("AITitle = %q", title.AITitle)
+	}
+
+	pr, err := ParseLine([]byte(`{"type":"pr-link","sessionId":"19a1","prNumber":14793,"prUrl":"https://git.example.com/group/repo/-/merge_requests/14793","prRepository":"group/repo","timestamp":"2026-10-07T22:07:43.001Z"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.PRNumber != 14793 || pr.PRURL != "https://git.example.com/group/repo/-/merge_requests/14793" || pr.PRRepository != "group/repo" {
+		t.Errorf("pr-link = %d %q %q", pr.PRNumber, pr.PRURL, pr.PRRepository)
+	}
+
+	for _, ev := range []*Event{title, pr} {
+		if !ev.IsSessionMetadata() || ev.IsInternal() || ev.IsConversationTurn() {
+			t.Errorf("%s: metadata=%v internal=%v turn=%v, want true false false",
+				ev.Type, ev.IsSessionMetadata(), ev.IsInternal(), ev.IsConversationTurn())
+		}
+	}
+}
+
 func TestComputeCost_Haiku55LongContextBoundary(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

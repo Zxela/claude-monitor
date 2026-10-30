@@ -20,7 +20,7 @@ info:
     into a path — `/api/repos/github.com%2Fowner%2Fname/stats`. An unencoded id
     spans multiple path segments and does not match the route, yielding a plain
     `404 page not found`.
-  version: "3.8.5" # x-release-please-version
+  version: "3.8.6" # x-release-please-version
 
 servers:
   - url: http://localhost:7700
@@ -111,7 +111,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
               example:
-                version: "3.8.5" # x-release-please-version
+                version: "3.8.6" # x-release-please-version
 
   /api/sessions:
     get:
@@ -1018,7 +1018,7 @@ components:
         version:
           type: string
           description: Build version string (set via ldflags at compile time).
-          example: "3.8.5" # x-release-please-version
+          example: "3.8.6" # x-release-please-version
 
     Session:
       type: object
@@ -1055,6 +1055,19 @@ components:
           description: >
             Optional session-level name from a custom-title or agent-name message.
           example: "Refactor auth module"
+        aiTitle:
+          type: string
+          description: >
+            Title Claude Code generated for the session (ai-title line). Clients
+            show it when sessionName is empty. Omitted when empty.
+          example: "Gitlab-statistics MR 7 multi-repo support"
+        prLinks:
+          type: array
+          description: >
+            Pull or merge requests Claude Code linked to the session (pr-link
+            lines), one entry per number holding the latest link. Omitted when empty.
+          items:
+            $ref: '#/components/schemas/PRLink'
         totalCost:
           type: number
           format: double
@@ -1172,6 +1185,21 @@ components:
           enum: [session, subagent, workflow_agent]
           example: "workflow_agent"
 
+    PRLink:
+      type: object
+      required: [number, url]
+      properties:
+        number:
+          type: integer
+          example: 14793
+        url:
+          type: string
+          example: "https://gitlab.example.com/group/repo/-/merge_requests/14793"
+        repository:
+          type: string
+          description: Repository path as Claude Code reported it. Omitted when empty.
+          example: "group/repo"
+
     GroupedSessions:
       type: object
       description: >
@@ -1270,6 +1298,12 @@ components:
             pretty-printed JSON input for tool_use blocks. Omitted when not
             applicable. May be empty for warm/cold events (retention compaction).
           example: "I'll refactor the auth module to use JWT tokens. First, let me..."
+        thinkingContent:
+          type: string
+          description: >
+            Text of the message's thinking block. Omitted when the message had
+            none, and dropped for cold events (retention compaction).
+          example: "The user wants JWT; check how sessions are stored first."
         toolName:
           type: string
           description: Name of the tool called (e.g. Bash, Read, Agent). Omitted when not a tool call.
@@ -1933,7 +1967,9 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         sessionName:
           type: string
-          description: Display name for the session.
+          description: >
+            Display name for the session: its sessionName, else its aiTitle,
+            else its task description.
           example: "claude-monitor"
         cost:
           type: number

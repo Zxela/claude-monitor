@@ -21,6 +21,7 @@ import { formatTokens, sessionDisplayName, escapeHtml } from '../utils';
 import '../styles/burn-rate.css';
 
 let panel: HTMLElement | null = null;
+let previousFocus: HTMLElement | null = null;
 let sparkCanvas: HTMLCanvasElement | null = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -46,10 +47,12 @@ export function dismiss(): void {
   closePanel();
 }
 
-function closePanel(): void {
+function closePanel(restoreFocus = false): void {
   if (panel) {
     panel.remove();
     panel = null;
+    if (restoreFocus) previousFocus?.focus();
+    previousFocus = null;
   }
   if (refreshTimer) {
     clearInterval(refreshTimer);
@@ -140,13 +143,22 @@ function togglePanel(anchor: HTMLElement): void {
   panel.className = 'burn-rate-panel';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Cost intelligence');
+  panel.setAttribute('tabindex', '-1');
   panel.addEventListener('click', (e) => e.stopPropagation());
+  panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      closePanel(true);
+    }
+  });
+  previousFocus = document.activeElement as HTMLElement | null;
 
   renderPanelContent();
 
   const statEl = anchor.closest('.topbar-stat') as HTMLElement;
   statEl.style.position = 'relative';
   statEl.appendChild(panel);
+  panel.focus();
 
   // Refresh dynamic values every 5 seconds (synced with sampling). Re-fetch
   // today's spend on the same cadence so PROJECTED TODAY tracks reality
@@ -176,6 +188,8 @@ function renderPanelContent(): void {
   ) as HTMLElement | null;
   const settingsOpen =
     prevSettings !== null && prevSettings.style.display !== 'none';
+  // Set/Clear rebuild the panel under the focused button.
+  const hadFocus = panel.contains(document.activeElement);
 
   panel.innerHTML = '';
 
@@ -263,6 +277,9 @@ function renderPanelContent(): void {
   // Settings toggle
   const toggle = document.createElement('div');
   toggle.className = 'burn-rate-settings-toggle';
+  toggle.setAttribute('role', 'button');
+  toggle.setAttribute('tabindex', '0');
+  toggle.setAttribute('aria-expanded', String(settingsOpen));
   toggle.textContent =
     (settingsOpen ? '\u25BC' : '\u25B6') + ' Budget Settings';
   panel.appendChild(toggle);
@@ -290,12 +307,20 @@ function renderPanelContent(): void {
     <label><input type="checkbox" class="notif-error" ${getSettings().error ? 'checked' : ''} /> Agent error alerts</label>
   `;
   panel.appendChild(settingsEl);
+  if (hadFocus) panel.focus();
 
   // Event listeners
   toggle.addEventListener('click', () => {
     const hidden = settingsEl.style.display === 'none';
     settingsEl.style.display = hidden ? '' : 'none';
     toggle.textContent = (hidden ? '\u25BC' : '\u25B6') + ' Budget Settings';
+    toggle.setAttribute('aria-expanded', String(hidden));
+  });
+  toggle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle.click();
+    }
   });
 
   const input = settingsEl.querySelector(

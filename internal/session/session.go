@@ -28,11 +28,20 @@ type MessageCosts struct {
 	CacheCreationTokens int64
 }
 
+// PRLink is a pull/merge request Claude Code linked to the session.
+type PRLink struct {
+	Number     int    `json:"number"`
+	URL        string `json:"url"`
+	Repository string `json:"repository,omitempty"`
+}
+
 // Session holds aggregated stats for a single Claude Code session (one JSONL file).
 type Session struct {
 	ID                  string                  `json:"id"`
 	RepoID              string                  `json:"repoId,omitempty"`
 	SessionName         string                  `json:"sessionName,omitempty"`
+	AITitle             string                  `json:"aiTitle,omitempty"` // Claude Code's generated title; shown when SessionName is empty
+	PRLinks             []PRLink                `json:"prLinks,omitempty"`
 	TotalCost           float64                 `json:"totalCost"`
 	InputTokens         int64                   `json:"inputTokens"`
 	OutputTokens        int64                   `json:"outputTokens"`
@@ -47,6 +56,7 @@ type Session struct {
 	seenMessageIDs      map[string]bool         `json:"-"`      // tracks message IDs to deduplicate streaming chunks
 	seenMessageCosts    map[string]MessageCosts `json:"-"`      // tracks per-message cost/tokens for dedup
 	seenMessageOrder    []string                `json:"-"`      // insertion order for LRU eviction
+	seenRows            map[string]struct{}     `json:"-"`      // dedup keys of event rows already counted; never reset
 	ParentID            string                  `json:"parentId,omitempty"`
 	Children            []string                `json:"children,omitempty"`
 	CWD                 string                  `json:"cwd,omitempty"`
@@ -64,6 +74,23 @@ type Session struct {
 	repoSourceRank      int                     `json:"-"`                    // resolution-authority rank of RepoID (repo.Source*); runtime-only, not persisted
 	repoToplevel        string                  `json:"-"`                    // git working-tree root of the pinned RepoID; runtime-only, used to detect SAME-repo upgrades, not persisted
 	repoInherited       bool                    `json:"-"`                    // RepoID was inherited from the parent (not resolved from this session's own cwd); runtime-only, not persisted
+}
+
+// SetPRLink records l, replacing any earlier link with the same number.
+// It builds a new slice because Get/All snapshots share the old one.
+func (s *Session) SetPRLink(l PRLink) {
+	links := make([]PRLink, 0, len(s.PRLinks)+1)
+	replaced := false
+	for _, cur := range s.PRLinks {
+		if cur.Number == l.Number {
+			cur, replaced = l, true
+		}
+		links = append(links, cur)
+	}
+	if !replaced {
+		links = append(links, l)
+	}
+	s.PRLinks = links
 }
 
 // RepoSourceRank reports the resolution-authority rank of the current RepoID
@@ -141,6 +168,25 @@ func (s *Session) SeenOrderLen() int {
 func (s *Session) ResetMessageIDs() {
 	s.seenMessageIDs = make(map[string]bool)
 	s.seenMessageOrder = nil
+}
+
+// MarkRowSeen records an event row's dedup key and reports whether it was new.
+// Unlike seenMessageIDs this set is neither evicted nor cleared on summary, so
+// the startup replay of an already-persisted line does not count it again.
+func (s *Session) MarkRowSeen(key string) bool {
+	if _, ok := s.seenRows[key]; ok {
+		return false
+	}
+	if s.seenRows == nil {
+		s.seenRows = make(map[string]struct{})
+	}
+	s.seenRows[key] = struct{}{}
+	return true
+}
+
+// SetSeenRows replaces the row-key set, used when restoring from the database.
+func (s *Session) SetSeenRows(keys map[string]struct{}) {
+	s.seenRows = keys
 }
 
 // SetDedupState bulk-sets the dedup maps, used when restoring state from the database.
@@ -242,6 +288,7 @@ func (s *Store) All() []*Session {
 		cp.seenMessageIDs = nil   // don't share internal dedup map
 		cp.seenMessageCosts = nil // don't share internal dedup map
 		cp.seenMessageOrder = nil // don't share internal dedup slice
+		cp.seenRows = nil
 		// Recalculate IsActive so callers always see fresh status.
 		th := activeThreshold
 		if cp.ParentID != "" && cp.Status == "waiting" {
@@ -300,5 +347,6 @@ func (s *Store) Get(id string) (*Session, bool) {
 	cp.seenMessageIDs = nil
 	cp.seenMessageCosts = nil
 	cp.seenMessageOrder = nil
+	cp.seenRows = nil
 	return &cp, true
 }

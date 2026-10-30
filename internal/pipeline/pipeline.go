@@ -25,6 +25,8 @@ const (
 	flushInterval = 2 * time.Second
 	maxBatchSize  = 200
 	maxMetaCache  = 500
+	// Events held for retry after PersistBatch fails.
+	maxRetainedEvents = 10 * maxBatchSize
 )
 
 // BroadcastFunc is called for each processed event. It receives the event,
@@ -53,8 +55,13 @@ type Pipeline struct {
 	linkMu             sync.Mutex
 	pendingParentLinks map[string]string // childSessionID → parentUUID (not yet in session store)
 
-	bufMu  sync.Mutex
-	buffer []store.EventInsert
+	// flushMu serializes whole flushes so a retried batch can't commit after a
+	// newer one for the same message (upserts are last-write-wins).
+	flushMu  sync.Mutex
+	bufMu    sync.Mutex
+	buffer   []store.EventInsert
+	retained int             // leading buffer events kept from a failed persist
+	dirty    map[string]bool // sessions changed by metadata lines, which add nothing to buffer
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -70,6 +77,7 @@ func New(sessions *session.Store, db *store.DB, resolver *repo.Resolver, broadca
 		broadcast:          broadcast,
 		metaCache:          make(map[string]*agentMeta),
 		pendingParentLinks: make(map[string]string),
+		dirty:              make(map[string]bool),
 		stopCh:             make(chan struct{}),
 	}
 	p.wg.Add(1)
@@ -196,6 +204,16 @@ func (p *Pipeline) Process(ev watcher.Event) {
 			// Recompute error_count deterministically from events so the badge
 			// matches the feed and cannot accumulate across re-bootstraps.
 			errCount, errCountErr := p.db.CountSessionErrors(ev.SessionID)
+			// Same for event/message counts: seed the row keys so replayed lines
+			// are not counted again on top of the restored totals.
+			rowKeys, evCount, turnCount, rowErr := p.db.LoadRowKeys(ev.SessionID)
+			if rowErr == nil {
+				for id := range ids {
+					if strings.HasPrefix(id, "err:") {
+						rowKeys[id] = struct{}{}
+					}
+				}
+			}
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
 				s.SetDedupState(ids, costs)
 				s.TotalCost = tc
@@ -221,9 +239,25 @@ func (p *Pipeline) Process(ev watcher.Event) {
 					s.WorkflowID = dbSess.WorkflowID
 					s.AgentID = dbSess.AgentID
 					s.AgentKind = dbSess.AgentKind
+					s.AITitle = dbSess.AITitle
+					s.PRLinks = dbSess.PRLinks
+					if event.IsSessionMetadata() {
+						// A metadata line sets nothing else, and Docker sources start at
+						// EOF, so without these the flush writes blanks over the saved row.
+						saved := dbSess.ToSession()
+						s.RepoID, s.SessionName, s.CWD = saved.RepoID, saved.SessionName, saved.CWD
+						s.GitBranch, s.Model, s.TaskDescription = saved.GitBranch, saved.Model, saved.TaskDescription
+						s.Version, s.Entrypoint = saved.Version, saved.Entrypoint
+						s.StartedAt, s.LastActive = saved.StartedAt, saved.LastActive
+					}
 				}
 				if errCountErr == nil {
 					s.ErrorCount = errCount
+				}
+				if rowErr == nil {
+					s.SetSeenRows(rowKeys)
+					s.EventCount = evCount
+					s.MessageCount = turnCount
 				}
 			})
 		}
@@ -255,6 +289,16 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	// Must run AFTER the Upsert above so the current session is visible to lookups.
 	p.resolvePendingLinks()
 
+	if event.IsSessionMetadata() {
+		if p.broadcast != nil && !ev.Bootstrap {
+			p.broadcast(event, sess, isNew, false)
+		}
+		p.bufMu.Lock()
+		p.dirty[ev.SessionID] = true
+		p.bufMu.Unlock()
+		return
+	}
+
 	// Stage 4a: Broadcast (immediate)
 	if p.broadcast != nil && !ev.Bootstrap {
 		sendDetail := !skipDetail(event)
@@ -272,8 +316,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		SessionID:   ev.SessionID,
 		Event:       event,
 		FullContent: fullContent,
+		Thinking:    event.ThinkingContent,
 	})
-	needFlush := len(p.buffer) >= maxBatchSize
+	needFlush := len(p.buffer)-p.retained >= maxBatchSize
 	p.bufMu.Unlock()
 
 	if needFlush {
@@ -283,37 +328,66 @@ func (p *Pipeline) Process(ev watcher.Event) {
 
 // flush persists buffered events and updates session aggregates.
 func (p *Pipeline) flush() {
+	p.flushMu.Lock()
+	defer p.flushMu.Unlock()
+
 	p.bufMu.Lock()
-	if len(p.buffer) == 0 {
+	if len(p.buffer) == 0 && len(p.dirty) == 0 {
 		p.bufMu.Unlock()
 		return
 	}
 	batch := p.buffer
 	p.buffer = nil
+	p.retained = 0
+	dirty := p.dirty
+	p.dirty = make(map[string]bool)
 	p.bufMu.Unlock()
 
-	// Persist events
-	if err := p.db.PersistBatch(&store.EventBatch{Events: batch}); err != nil {
-		log.Printf("batch persist error: %v", err)
+	// Persist events. On failure put the batch back for the next flush; past
+	// maxRetainedEvents give up so a dead database can't grow memory forever.
+	if len(batch) > 0 {
+		if err := p.db.PersistBatch(&store.EventBatch{Events: batch}); err != nil {
+			p.bufMu.Lock()
+			if len(batch)+len(p.buffer) <= maxRetainedEvents {
+				p.buffer = append(batch, p.buffer...)
+				p.retained = len(batch)
+				log.Printf("batch persist error, will retry %d events: %v", len(batch), err)
+			} else {
+				log.Printf("batch persist error, dropping %d events (retry buffer full): %v", len(batch), err)
+			}
+			p.bufMu.Unlock()
+		}
 	}
 
 	// Persist affected sessions + repo mappings in a single transaction
+	ids := make([]string, 0, len(batch)+len(dirty))
+	for _, ei := range batch {
+		ids = append(ids, ei.SessionID)
+	}
+	for id := range dirty {
+		ids = append(ids, id)
+	}
 	seen := make(map[string]bool)
 	var sessionsToFlush []*session.Session
-	for _, ei := range batch {
-		if seen[ei.SessionID] {
+	for _, id := range ids {
+		if seen[id] {
 			continue
 		}
-		seen[ei.SessionID] = true
+		seen[id] = true
 
-		sess, ok := p.sessions.Get(ei.SessionID)
+		sess, ok := p.sessions.Get(id)
 		if !ok {
 			continue
 		}
 		sessionsToFlush = append(sessionsToFlush, sess)
 	}
 	if err := p.db.FlushSessions(sessionsToFlush); err != nil {
-		log.Printf("session flush error: %v", err)
+		log.Printf("session flush error, sessions requeued: %v", err)
+		p.bufMu.Lock()
+		for _, sess := range sessionsToFlush {
+			p.dirty[sess.ID] = true
+		}
+		p.bufMu.Unlock()
 	}
 }
 
@@ -337,6 +411,10 @@ func (p *Pipeline) flushLoop() {
 // parentRepoID is the pre-resolved repo_id of that parent (may be empty); when
 // set, a child session inherits it instead of resolving its own (worktree) cwd.
 func (p *Pipeline) applyEvent(s *session.Session, msg *parser.Event, ev watcher.Event, r *repo.Repo, resolvedParentID, parentRepoID string) {
+	if msg.IsSessionMetadata() {
+		applySessionMetadata(s, msg)
+		return
+	}
 	p.applyRepoResolution(s, msg, r, parentRepoID)
 	p.applySessionMeta(s, msg, ev)
 	p.applyParentDetection(s, msg, ev, resolvedParentID)
@@ -546,6 +624,21 @@ func (p *Pipeline) applySessionMeta(s *session.Session, msg *parser.Event, ev wa
 	}
 }
 
+// applySessionMetadata records ai-title and pr-link lines. It deliberately
+// skips cost, counts, status and timestamps so they never show as activity.
+func applySessionMetadata(s *session.Session, msg *parser.Event) {
+	switch msg.Type {
+	case "ai-title":
+		if msg.AITitle != "" {
+			s.AITitle = msg.AITitle
+		}
+	case "pr-link":
+		if msg.PRNumber > 0 && msg.PRURL != "" {
+			s.SetPRLink(session.PRLink{Number: msg.PRNumber, URL: msg.PRURL, Repository: msg.PRRepository})
+		}
+	}
+}
+
 // resolveParentID determines the parent session ID for a subagent event.
 // It is called OUTSIDE of any session store lock to avoid re-entrancy deadlocks.
 // When msg.ParentUUID names a known session, that UUID is returned directly.
@@ -684,23 +777,15 @@ func isHarnessInjectedContent(text string) bool {
 }
 
 func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
-	// Error tracking. Dedup on the stable event identity (message_id, else the
-	// per-line uuid) so a re-emitted error line cannot be counted twice and an
-	// empty-message_id error is still deduped on restart/replay.
-	if msg.IsError {
-		errIdentity := msg.MessageID
-		if errIdentity == "" {
-			errIdentity = msg.UUID
-		}
-		if errIdentity != "" {
-			errKey := "err:" + errIdentity
-			if !s.HasSeenMessageID(errKey) {
-				s.MarkMessageIDSeen(errKey)
-				s.ErrorCount++
-			}
-		} else {
-			s.ErrorCount++
-		}
+	key := msg.MessageID
+	if key == "" {
+		key = msg.UUID
+	}
+
+	// Error tracking, deduped on the stable event identity so a re-emitted or
+	// replayed error line is counted once.
+	if msg.IsError && (key == "" || s.MarkRowSeen("err:"+key)) {
+		s.ErrorCount++
 	}
 
 	// Cost/token dedup
@@ -720,20 +805,14 @@ func (p *Pipeline) applyCostDedup(s *session.Session, msg *parser.Event) {
 		})
 	}
 
-	// Message count (conversation turns only)
-	if msg.IsConversationTurn() {
-		if msg.MessageID != "" {
-			if !s.HasSeenMessageID(msg.MessageID) {
-				s.MarkMessageIDSeen(msg.MessageID)
-				s.MessageCount++
-			}
-		} else {
+	// One event row per dedup key: streamed chunks of a message share it, and
+	// the startup replay of persisted lines finds it already seen.
+	if key == "" || s.MarkRowSeen(key) {
+		s.EventCount++
+		if msg.IsConversationTurn() {
 			s.MessageCount++
 		}
 	}
-
-	// Event count (all JSONL lines)
-	s.EventCount++
 }
 
 // applyStatusUpdate updates timestamps, handles summary resets, and sets session status.
