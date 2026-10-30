@@ -61,12 +61,15 @@ jobs:
           done
           sha256sum *.tar.gz > checksums.txt
 
+      # No --clobber: rebuilt tarballs get new checksums, so replacing assets the
+      # tap already points at would break installs, and a rebuilt old tag would
+      # then downgrade the tap. Delete the assets first to rebuild on purpose.
       - name: Upload binaries to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${TAG_NAME}" dist/*.tar.gz dist/checksums.txt \
-            --clobber --repo "${{ github.repository }}"
+            --repo "${{ github.repository }}"
 
       # Zxela/homebrew-tap holds the only copy of the formula. github.token
       # cannot write to another repo, hence the PAT.
