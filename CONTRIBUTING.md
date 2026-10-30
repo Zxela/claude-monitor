@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Go** >= 1.27.3 (see note below)
-- **Node.js** >= 22
+- **Node.js** >= 22.22.2 (or >= 24.15.0 on Node 24; floor set by jsdom)
 - **npm**
 - **make**
 
