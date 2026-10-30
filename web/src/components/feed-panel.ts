@@ -90,6 +90,8 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
     if (state.selectedSessionId) {
       renderFeedPanel();
+      // renderFeedPanel emptied the feed, so the load guard must not skip.
+      currentLoadSessionId = null;
       loadRecentMessages(state.selectedSessionId);
     } else {
       // Back to multi-session mode

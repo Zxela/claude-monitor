@@ -90,6 +90,8 @@ function onStateChange(_state: AppState, changed: Set<string>): void {
 
 async function open(sid: string): Promise<void> {
   await loadEvents(sid);
+  // The user may have left the timeline while events loaded.
+  if (state.view !== 'timeline' || state.selectedSessionId !== sid) return;
   show();
 }
 
