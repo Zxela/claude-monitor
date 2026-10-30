@@ -1899,3 +1899,40 @@ func TestProcess_RebuildErrorDedupFromDB_ErrorsOnlySession(t *testing.T) {
 		t.Errorf("ErrorCount after replay = %d, want 1 (errors-only session must rebuild err: keys)", sess2.ErrorCount)
 	}
 }
+
+func TestProcess_IgnoresInternalLines(t *testing.T) {
+	db := openTestDB(t)
+	sessions := session.NewStore()
+	var broadcasts int
+	p := New(sessions, db, repo.NewResolver(), func(*parser.Event, *session.Session, bool, bool) {
+		broadcasts++
+	})
+	defer p.Stop()
+
+	p.Process(watcher.Event{SessionID: "s", Line: makeJSONL(t, map[string]interface{}{
+		"type": "assistant", "sessionId": "s", "uuid": "u1",
+		"timestamp": time.Now().Format(time.RFC3339Nano),
+		"message":   map[string]interface{}{"id": "m1", "role": "assistant", "content": "hi", "stop_reason": "end_turn"},
+	})})
+	p.Process(watcher.Event{SessionID: "s", Line: makeJSONL(t, map[string]interface{}{
+		"type": "api-request-blob", "sessionId": "s", "hash": "h",
+		"message": map[string]interface{}{"role": "user", "content": []map[string]interface{}{
+			{"type": "tool_result", "tool_use_id": "t1", "is_error": true, "content": "boom"},
+		}},
+	})})
+	p.Process(watcher.Event{SessionID: "s", Line: makeJSONL(t, map[string]interface{}{
+		"type": "mode", "sessionId": "s", "mode": "default",
+	})})
+
+	sess, _ := sessions.Get("s")
+	if sess.EventCount != 1 || sess.MessageCount != 1 || sess.ErrorCount != 0 {
+		t.Errorf("counts = events %d, messages %d, errors %d; want 1, 1, 0",
+			sess.EventCount, sess.MessageCount, sess.ErrorCount)
+	}
+	if sess.Status != "waiting" {
+		t.Errorf("Status = %q, want waiting (blob must not flip it)", sess.Status)
+	}
+	if broadcasts != 1 {
+		t.Errorf("broadcasts = %d, want 1", broadcasts)
+	}
+}

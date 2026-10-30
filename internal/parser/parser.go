@@ -102,6 +102,7 @@ type rawUsage struct {
 type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`    // for thinking blocks
 	Name      string          `json:"name,omitempty"`        // for tool_use blocks
 	ID        string          `json:"id,omitempty"`          // tool_use block ID
 	Content   json.RawMessage `json:"content,omitempty"`     // for tool_result blocks (string or array)
@@ -164,6 +165,20 @@ type Event struct {
 	IsMeta     bool   `json:"isMeta,omitempty"`
 	Version    string `json:"version,omitempty"`
 	Entrypoint string `json:"entrypoint,omitempty"`
+}
+
+// IsInternal reports Claude Code's own bookkeeping lines: request logs, mode
+// latches, cost snapshots. api-request-blob in particular carries
+// message.role and tool_result blocks that would otherwise pass for real turns.
+func (m *Event) IsInternal() bool {
+	switch m.Type {
+	case "api-request", "api-request-blob", "api-request-shape",
+		"mode", "permission-mode", "atis-latch", "last-prompt",
+		"tools-used", "cost-state", "file-history-delta", "ai-title", "pr-link":
+		return true
+	default:
+		return false
+	}
 }
 
 // IsConversationTurn returns true if this message represents a real
@@ -571,12 +586,16 @@ func extractContent(raw json.RawMessage) contentInfo {
 				}
 			}
 		case "thinking":
-			if b.Text != "" {
+			thought := b.Thinking
+			if thought == "" {
+				thought = b.Text
+			}
+			if thought != "" {
 				if info.thinkingContent == "" {
-					info.thinkingContent = b.Text
+					info.thinkingContent = thought
 				}
 				if info.fullText == "" {
-					info.fullText = b.Text
+					info.fullText = thought
 				}
 			}
 			if info.text == "" {

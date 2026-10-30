@@ -756,3 +756,15 @@ func TestParseLine_ToolUseResultAsObject(t *testing.T) {
 		t.Errorf("AgentType should be 'general-purpose', got %q", msg.AgentType)
 	}
 }
+
+func TestParseLine_ThinkingKey(t *testing.T) {
+	t.Parallel()
+	line := []byte(`{"type":"assistant","uuid":"u","message":{"role":"assistant","content":[{"type":"thinking","thinking":"weighing options","signature":"x"},{"type":"text","text":"done"}]}}`)
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.ThinkingContent != "weighing options" {
+		t.Errorf("ThinkingContent = %q, want %q", msg.ThinkingContent, "weighing options")
+	}
+}
