@@ -166,7 +166,9 @@ function renderFeedPanel(): void {
   // Feed content area
   feedContent = document.createElement('div');
   feedContent.className = 'feed-content';
-  feedContent.setAttribute('aria-live', 'polite');
+  // Not a live region: a busy agent emits several events a second, and
+  // announcing each one drowns out everything else.
+  feedContent.setAttribute('role', 'region');
   const sess = state.selectedSessionId
     ? state.sessions.get(state.selectedSessionId)
     : null;
