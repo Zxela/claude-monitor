@@ -206,7 +206,10 @@ export function replayWindowStart(count: number): number {
 
 let scrubFrame: number | null = null;
 
+// Stop playback before deferring: a tick before the frame would overwrite
+// the scrubber value the user just picked.
 function onScrub(): void {
+  stopPlayback();
   if (scrubFrame !== null) return;
   scrubFrame = requestAnimationFrame(() => {
     scrubFrame = null;

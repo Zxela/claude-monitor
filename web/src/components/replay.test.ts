@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   clampSpeed,
   stepDelayFor,
@@ -118,5 +118,65 @@ describe('replay teardown', () => {
     update({ view: 'history' });
     expect(state.replaySessionId).toBeNull();
     expect(mount.querySelector('.replay-panel')).toBeNull();
+  });
+});
+
+describe('replay scrubbing during playback', () => {
+  it('keeps the scrubbed position when a playback tick fires before the frame', async () => {
+    const { state, update } = await import('../state');
+    const { render, open, togglePlay } = await import('./replay');
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const events = Array.from({ length: 10 }, (_, i) => ({
+        id: i,
+        sessionId: 's2',
+        type: 'message',
+        role: 'assistant',
+        contentPreview: `e${i}`,
+        costUSD: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        isError: false,
+        timestamp: '2026-01-01T00:00:00Z',
+      }));
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ events }))) as typeof fetch;
+      const mount = document.createElement('div');
+      render(mount);
+      update({ view: 'list', selectedSessionId: 's2' });
+      open('s2');
+      await vi.waitFor(() =>
+        expect(mount.querySelector('.replay-progress')?.textContent).toBe(
+          '0 / 10',
+        ),
+      );
+
+      togglePlay();
+      vi.advanceTimersByTime(250);
+      const scrubber =
+        mount.querySelector<HTMLInputElement>('.replay-scrubber')!;
+      expect(scrubber.value).toBe('1');
+
+      scrubber.value = '7';
+      scrubber.dispatchEvent(new Event('input'));
+      vi.advanceTimersByTime(1000);
+      for (const cb of frames.splice(0)) cb(0);
+
+      expect(scrubber.value).toBe('7');
+      expect(mount.querySelector('.replay-progress')?.textContent).toBe(
+        '7 / 10',
+      );
+      expect(state.replayPlaying).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });
