@@ -84,7 +84,7 @@ func TestMain(m *testing.M) {
 	// Kill the server and clean up.
 	_ = srv.Process.Kill()
 	os.Remove(testBinary)
-	os.RemoveAll(home)
+	_ = os.RemoveAll(home)
 
 	os.Exit(code)
 }
