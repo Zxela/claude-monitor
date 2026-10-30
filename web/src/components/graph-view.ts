@@ -453,7 +453,9 @@ function simulate(): void {
     (n) =>
       Math.abs(n.vx) < SETTLE_THRESHOLD && Math.abs(n.vy) < SETTLE_THRESHOLD,
   );
-  const anyAttention = nodes.some((n) => needsAttention(n.session));
+  // Only a pulsing ring needs frames; a reduced-motion ring is static.
+  const anyAttention =
+    !prefersReducedMotion() && nodes.some((n) => needsAttention(n.session));
   if (allSettled && !anyAttention) {
     settledFrames++;
   } else if (!allSettled) {
@@ -461,9 +463,16 @@ function simulate(): void {
   }
 }
 
+function prefersReducedMotion(): boolean {
+  return (
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  );
+}
+
 function draw(): void {
   if (!ctx || !canvas) return;
   ctx.clearRect(0, 0, logicalW, logicalH);
+  const reduceMotion = prefersReducedMotion();
 
   // Edges (use cached nodeMap)
   ctx.strokeStyle = 'rgba(100,100,140,0.3)';
@@ -506,7 +515,7 @@ function draw(): void {
 
     // Pulsing ring for nodes that need attention
     if (needsAttention(n.session)) {
-      const pulse = (Math.sin(Date.now() / 500) + 1) / 2;
+      const pulse = reduceMotion ? 1 : (Math.sin(Date.now() / 500) + 1) / 2;
       ctx.globalAlpha = 0.3 + pulse * 0.7;
       const ringColor = n.session.status === 'waiting' ? '#ffa64a' : '#ff6b6b';
       ctx.strokeStyle = ringColor;
