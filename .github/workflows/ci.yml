@@ -153,13 +153,31 @@ jobs:
           govulncheck $(go list ./... | grep -v /node_modules/)
         continue-on-error: true  # informational — stdlib vulns may not have patches yet
 
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t claude-monitor:ci .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name cm -p 127.0.0.1:7799:7700 claude-monitor:ci
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:7799/health && exit 0
+            sleep 1
+          done
+          docker logs cm
+          exit 1
+
   # Create or update the release PR on pushes to main
   release-please:
     permissions:
       contents: write
       pull-requests: write
     if: github.ref == 'refs/heads/main'
-    needs: [build-and-test, lint, api-spec]
+    needs: [build-and-test, lint, api-spec, docker]
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}

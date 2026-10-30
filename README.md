@@ -231,13 +231,12 @@ Session history is persisted to a SQLite database at `~/.claude-monitor/history.
 docker build -t claude-monitor .
 
 docker run \
-  -v ~/.claude:/home/node/.claude:ro \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -v ~/.claude:/home/app/.claude:ro \
   -p 127.0.0.1:7700:7700 \
   claude-monitor
 ```
 
-> **Security:** Always bind to `127.0.0.1`. The dashboard exposes all session content including tool inputs/outputs.
+> **Security:** Always publish on `127.0.0.1`. The dashboard exposes all session content including tool inputs/outputs.
 
 ## Architecture
 

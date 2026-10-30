@@ -1,6 +1,9 @@
 .git
-node_modules
+**/node_modules
 dist
+web/dist
+cmd/claude-monitor/static
+/claude-monitor
 nohup.out
 *.exe
 .env
