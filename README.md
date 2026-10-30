@@ -87,7 +87,14 @@ claude-monitor --port 8080 --watch /path/to/.claude/projects
 | `--watch` | — | Additional directory to watch (repeatable) |
 | `--docker` | `false` | Auto-discover `.claude/projects` mounts from running Docker containers |
 | `--docker-socket` | `/var/run/docker.sock` | Path to Docker socket |
+| `--rebuild-history` | `false` | Re-read every JSONL file from the start instead of resuming from saved offsets, and re-run the one-time workflow-identity backfill |
 | `--swagger` | `false` | Deprecated no-op (retained for compatibility); API docs are always served at `/api` |
+
+### History Ingest
+
+claude-monitor stores how far it has read each JSONL file in `~/.claude-monitor/history.db`. On restart it restores sessions from the database and reads only the bytes written since, so startup does not grow with the size of your history. The first start after upgrading reads everything once. A file that was truncated or replaced is read again from the start.
+
+To discard the saved positions and rebuild from the logs, start once with `--rebuild-history`.
 
 ### Environment Variables
 

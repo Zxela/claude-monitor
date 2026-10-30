@@ -393,49 +393,59 @@ func (d *DB) ClearCwdRepos() error {
 
 // --- Sessions ---
 
-// SaveSession upserts a session into the sessions table from live session state.
-func (d *DB) SaveSession(s *session.Session) error {
-	var endedAt string
-	var startedAt string
-	// Store timestamps in canonical UTC RFC3339 ("…Z") so window-boundary and
-	// bucketing comparisons (which are lexical TEXT compares in SQLite) are valid
-	// regardless of the source time's zone. Production times are already UTC.
+// sessionUpsertSQL writes a session's aggregates plus the runtime state a
+// restart restores (status, exact timestamps, repo resolution provenance).
+const sessionUpsertSQL = `INSERT INTO sessions
+	(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
+	 started_at, ended_at, total_cost, input_tokens, output_tokens,
+	 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
+	 version, entrypoint, workflow_id, agent_id, agent_kind,
+	 status, last_active_exact, started_at_exact, repo_source_rank, repo_toplevel, repo_inherited)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+	 repo_id=excluded.repo_id,
+	 parent_id=excluded.parent_id,
+	 session_name=excluded.session_name,
+	 task_description=excluded.task_description,
+	 cwd=excluded.cwd,
+	 branch=excluded.branch,
+	 model=excluded.model,
+	 started_at=excluded.started_at,
+	 ended_at=excluded.ended_at,
+	 total_cost=excluded.total_cost,
+	 input_tokens=excluded.input_tokens,
+	 output_tokens=excluded.output_tokens,
+	 cache_read_tokens=excluded.cache_read_tokens,
+	 cache_creation_tokens=excluded.cache_creation_tokens,
+	 message_count=excluded.message_count,
+	 event_count=excluded.event_count,
+	 error_count=excluded.error_count,
+	 version=excluded.version,
+	 entrypoint=excluded.entrypoint,
+	 workflow_id=excluded.workflow_id,
+	 agent_id=excluded.agent_id,
+	 agent_kind=excluded.agent_kind,
+	 status=excluded.status,
+	 last_active_exact=excluded.last_active_exact,
+	 started_at_exact=excluded.started_at_exact,
+	 repo_source_rank=excluded.repo_source_rank,
+	 repo_toplevel=excluded.repo_toplevel,
+	 repo_inherited=excluded.repo_inherited`
+
+func sessionUpsertArgs(s *session.Session) []any {
+	// started_at/ended_at stay canonical UTC RFC3339 ("…Z") so window-boundary
+	// and bucketing comparisons (lexical TEXT compares in SQLite) are valid.
+	// The *_exact columns keep full precision for restoring the live session.
+	var endedAt, startedAt, lastActiveExact, startedAtExact string
 	if !s.LastActive.IsZero() {
 		endedAt = s.LastActive.UTC().Format(time.RFC3339)
+		lastActiveExact = s.LastActive.Format(time.RFC3339Nano)
 	}
 	if !s.StartedAt.IsZero() {
 		startedAt = s.StartedAt.UTC().Format(time.RFC3339)
+		startedAtExact = s.StartedAt.Format(time.RFC3339Nano)
 	}
-
-	_, err := d.db.Exec(`INSERT INTO sessions
-		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
-		 started_at, ended_at, total_cost, input_tokens, output_tokens,
-		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-		 version, entrypoint, workflow_id, agent_id, agent_kind)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-		 repo_id=excluded.repo_id,
-		 parent_id=excluded.parent_id,
-		 session_name=excluded.session_name,
-		 task_description=excluded.task_description,
-		 cwd=excluded.cwd,
-		 branch=excluded.branch,
-		 model=excluded.model,
-		 started_at=excluded.started_at,
-		 ended_at=excluded.ended_at,
-		 total_cost=excluded.total_cost,
-		 input_tokens=excluded.input_tokens,
-		 output_tokens=excluded.output_tokens,
-		 cache_read_tokens=excluded.cache_read_tokens,
-		 cache_creation_tokens=excluded.cache_creation_tokens,
-		 message_count=excluded.message_count,
-		 event_count=excluded.event_count,
-		 error_count=excluded.error_count,
-		 version=excluded.version,
-		 entrypoint=excluded.entrypoint,
-		 workflow_id=excluded.workflow_id,
-		 agent_id=excluded.agent_id,
-		 agent_kind=excluded.agent_kind`,
+	return []any{
 		s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
 		s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
 		s.TotalCost, s.InputTokens, s.OutputTokens,
@@ -443,8 +453,14 @@ func (d *DB) SaveSession(s *session.Session) error {
 		s.MessageCount, s.EventCount, s.ErrorCount,
 		s.Version, s.Entrypoint,
 		s.WorkflowID, s.AgentID, s.AgentKind,
-	)
-	if err != nil {
+		s.Status, lastActiveExact, startedAtExact,
+		s.RepoSourceRank(), s.RepoToplevel(), s.RepoInherited(),
+	}
+}
+
+// SaveSession upserts a session into the sessions table from live session state.
+func (d *DB) SaveSession(s *session.Session) error {
+	if _, err := d.db.Exec(sessionUpsertSQL, sessionUpsertArgs(s)...); err != nil {
 		return fmt.Errorf("SaveSession: %w", err)
 	}
 	return nil
@@ -466,69 +482,35 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 		}
 	}()
 
-	sessStmt, err := tx.Prepare(`INSERT INTO sessions
-		(id, repo_id, parent_id, session_name, task_description, cwd, branch, model,
-		 started_at, ended_at, total_cost, input_tokens, output_tokens,
-		 cache_read_tokens, cache_creation_tokens, message_count, event_count, error_count,
-		 version, entrypoint, workflow_id, agent_id, agent_kind)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-		 repo_id=excluded.repo_id,
-		 parent_id=excluded.parent_id,
-		 session_name=excluded.session_name,
-		 task_description=excluded.task_description,
-		 cwd=excluded.cwd,
-		 branch=excluded.branch,
-		 model=excluded.model,
-		 started_at=excluded.started_at,
-		 ended_at=excluded.ended_at,
-		 total_cost=excluded.total_cost,
-		 input_tokens=excluded.input_tokens,
-		 output_tokens=excluded.output_tokens,
-		 cache_read_tokens=excluded.cache_read_tokens,
-		 cache_creation_tokens=excluded.cache_creation_tokens,
-		 message_count=excluded.message_count,
-		 event_count=excluded.event_count,
-		 error_count=excluded.error_count,
-		 version=excluded.version,
-		 entrypoint=excluded.entrypoint,
-		 workflow_id=excluded.workflow_id,
-		 agent_id=excluded.agent_id,
-		 agent_kind=excluded.agent_kind`)
+	if err := upsertSessions(tx, sessions); err != nil {
+		return fmt.Errorf("FlushSessions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("FlushSessions commit: %w", err)
+	}
+	return nil
+}
+
+func upsertSessions(tx *sql.Tx, sessions []*session.Session) error {
+	if len(sessions) == 0 {
+		return nil
+	}
+	sessStmt, err := tx.Prepare(sessionUpsertSQL)
 	if err != nil {
-		return fmt.Errorf("FlushSessions prepare session: %w", err)
+		return fmt.Errorf("prepare session: %w", err)
 	}
 	defer sessStmt.Close()
 
 	cwdStmt, err := tx.Prepare(`INSERT INTO cwd_repos (cwd, repo_id) VALUES (?, ?)
 		ON CONFLICT(cwd) DO UPDATE SET repo_id=excluded.repo_id`)
 	if err != nil {
-		return fmt.Errorf("FlushSessions prepare cwd: %w", err)
+		return fmt.Errorf("prepare cwd: %w", err)
 	}
 	defer cwdStmt.Close()
 
 	for _, s := range sessions {
-		var endedAt string
-		var startedAt string
-		// Canonical UTC storage — see SaveSession. Keeps lexical window/bucket
-		// comparisons valid; production times are already UTC.
-		if !s.LastActive.IsZero() {
-			endedAt = s.LastActive.UTC().Format(time.RFC3339)
-		}
-		if !s.StartedAt.IsZero() {
-			startedAt = s.StartedAt.UTC().Format(time.RFC3339)
-		}
-
-		if _, err := sessStmt.Exec(
-			s.ID, s.RepoID, s.ParentID, s.SessionName, s.TaskDescription,
-			s.CWD, s.GitBranch, s.Model, startedAt, endedAt,
-			s.TotalCost, s.InputTokens, s.OutputTokens,
-			s.CacheReadTokens, s.CacheCreationTokens,
-			s.MessageCount, s.EventCount, s.ErrorCount,
-			s.Version, s.Entrypoint,
-			s.WorkflowID, s.AgentID, s.AgentKind,
-		); err != nil {
-			return fmt.Errorf("FlushSessions save %s: %w", s.ID, err)
+		if _, err := sessStmt.Exec(sessionUpsertArgs(s)...); err != nil {
+			return fmt.Errorf("save %s: %w", s.ID, err)
 		}
 
 		// Skip inherited child pins: their cwd is the child's own (worktree)
@@ -537,15 +519,114 @@ func (d *DB) FlushSessions(sessions []*session.Session) error {
 		// same directory after a restart seeds the resolver cache from this table.
 		if s.CWD != "" && s.RepoID != "" && !s.RepoInherited() {
 			if _, err := cwdStmt.Exec(s.CWD, s.RepoID); err != nil {
-				return fmt.Errorf("FlushSessions cwdRepo %s: %w", s.ID, err)
+				return fmt.Errorf("cwdRepo %s: %w", s.ID, err)
 			}
 		}
 	}
+	return nil
+}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("FlushSessions commit: %w", err)
+// FileOffset is how far a JSONL file has been read and persisted: Offset is
+// the byte just past the last line whose events are stored, Inode identifies
+// the file so a replaced one is not resumed mid-way.
+type FileOffset struct {
+	Path      string
+	SessionID string
+	Offset    int64
+	Inode     uint64
+}
+
+// LoadFileOffsets returns every saved file offset.
+func (d *DB) LoadFileOffsets() ([]FileOffset, error) {
+	rows, err := d.rdb.Query(`SELECT path, session_id, byte_offset, inode FROM file_offsets`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FileOffset
+	for rows.Next() {
+		var o FileOffset
+		var ino int64
+		if err := rows.Scan(&o.Path, &o.SessionID, &o.Offset, &ino); err != nil {
+			return nil, err
+		}
+		o.Inode = uint64(ino)
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func upsertOffsets(tx *sql.Tx, offsets []FileOffset) error {
+	if len(offsets) == 0 {
+		return nil
+	}
+	stmt, err := tx.Prepare(`INSERT INTO file_offsets (path, session_id, byte_offset, inode) VALUES (?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET session_id=excluded.session_id,
+			byte_offset=excluded.byte_offset, inode=excluded.inode`)
+	if err != nil {
+		return fmt.Errorf("prepare offset: %w", err)
+	}
+	defer stmt.Close()
+	for _, o := range offsets {
+		if _, err := stmt.Exec(o.Path, o.SessionID, o.Offset, int64(o.Inode)); err != nil {
+			return fmt.Errorf("save offset %s: %w", o.Path, err)
+		}
 	}
 	return nil
+}
+
+// RestoreSessions loads the given sessions as the live store holds them,
+// including the runtime state that SessionRow does not carry. Dedup state is
+// not loaded; the sessions are marked DedupPending.
+func (d *DB) RestoreSessions(ids []string) ([]*session.Session, error) {
+	const chunk = 500
+	var out []*session.Session
+	for len(ids) > 0 {
+		n := min(chunk, len(ids))
+		batch := ids[:n]
+		ids = ids[n:]
+
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		rows, err := d.rdb.Query(`SELECT `+sessionSelectCols+`,
+			status, last_active_exact, started_at_exact, repo_source_rank, repo_toplevel, repo_inherited
+			FROM sessions WHERE id IN (?`+strings.Repeat(",?", len(batch)-1)+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var r SessionRow
+			var status, lastActive, startedAt, toplevel string
+			var rank int
+			var inherited bool
+			dest := append(r.scanDest(), &status, &lastActive, &startedAt, &rank, &toplevel, &inherited)
+			if err := rows.Scan(dest...); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			s := r.ToSession()
+			s.Status = status
+			if t, err := time.Parse(time.RFC3339Nano, lastActive); err == nil {
+				s.LastActive = t
+			}
+			if t, err := time.Parse(time.RFC3339Nano, startedAt); err == nil {
+				s.StartedAt = t
+			}
+			s.SetRepoSourceRank(rank)
+			s.SetRepoToplevel(toplevel)
+			s.SetRepoInherited(inherited)
+			s.SetDedupPending(true)
+			out = append(out, s)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // LoadMessageDedup returns the message-ID dedup maps for a session from persisted events.
@@ -838,20 +919,25 @@ func (d *DB) RepoExists(id string) (bool, error) {
 	}
 }
 
+// scanDest returns scan targets in sessionSelectCols order.
+func (r *SessionRow) scanDest() []any {
+	return []any{
+		&r.ID, &r.RepoID, &r.ParentID, &r.SessionName,
+		&r.TaskDescription, &r.CWD, &r.Branch, &r.Model,
+		&r.StartedAt, &r.EndedAt,
+		&r.TotalCost, &r.InputTokens, &r.OutputTokens,
+		&r.CacheReadTokens, &r.CacheCreationTokens,
+		&r.MessageCount, &r.EventCount, &r.ErrorCount,
+		&r.Version, &r.Entrypoint,
+		&r.WorkflowID, &r.AgentID, &r.AgentKind,
+	}
+}
+
 func scanSessionRows(rows *sql.Rows) ([]SessionRow, error) {
 	var result []SessionRow
 	for rows.Next() {
 		var r SessionRow
-		if err := rows.Scan(
-			&r.ID, &r.RepoID, &r.ParentID, &r.SessionName,
-			&r.TaskDescription, &r.CWD, &r.Branch, &r.Model,
-			&r.StartedAt, &r.EndedAt,
-			&r.TotalCost, &r.InputTokens, &r.OutputTokens,
-			&r.CacheReadTokens, &r.CacheCreationTokens,
-			&r.MessageCount, &r.EventCount, &r.ErrorCount,
-			&r.Version, &r.Entrypoint,
-			&r.WorkflowID, &r.AgentID, &r.AgentKind,
-		); err != nil {
+		if err := rows.Scan(r.scanDest()...); err != nil {
 			return result, err
 		}
 		result = append(result, r)
@@ -1410,9 +1496,14 @@ func percentile(sorted []float64, p float64) float64 {
 
 // --- Events ---
 
-// EventBatch holds events to be persisted in a single transaction.
+// EventBatch holds events to be persisted in a single transaction, with the
+// sessions they touched and the file offsets they were read up to. Writing the
+// offsets in the same transaction means an offset is never saved ahead of the
+// events and session totals it covers.
 type EventBatch struct {
-	Events []EventInsert
+	Events   []EventInsert
+	Sessions []*session.Session
+	Offsets  []FileOffset
 }
 
 // EventInsert holds data for a single event to insert.
@@ -1422,9 +1513,10 @@ type EventInsert struct {
 	FullContent string // goes to event_content table
 }
 
-// PersistBatch inserts a batch of events and updates session aggregates in a single transaction.
+// PersistBatch inserts a batch of events, upserts the batch's sessions and
+// saves its file offsets in a single transaction.
 func (d *DB) PersistBatch(batch *EventBatch) error {
-	if len(batch.Events) == 0 {
+	if len(batch.Events) == 0 && len(batch.Sessions) == 0 && len(batch.Offsets) == 0 {
 		return nil
 	}
 
@@ -1609,6 +1701,12 @@ func (d *DB) PersistBatch(batch *EventBatch) error {
 		}
 	}
 
+	if err := upsertSessions(tx, batch.Sessions); err != nil {
+		return err
+	}
+	if err := upsertOffsets(tx, batch.Offsets); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

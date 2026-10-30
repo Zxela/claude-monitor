@@ -60,7 +60,13 @@ type Pipeline struct {
 	flushMu  sync.Mutex
 	bufMu    sync.Mutex
 	buffer   []store.EventInsert
-	retained int // leading buffer events kept from a failed persist
+	retained int                         // leading buffer events kept from a failed persist
+	offsets  map[string]store.FileOffset // path → read position covered by buffer
+	// Files whose offsets are no longer saved this run because a batch of
+	// theirs was dropped; the next start re-reads them from the last saved
+	// offset.
+	offsetHold map[string]bool
+	dirty      map[string]bool // sessions changed without an event of their own in buffer
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -76,6 +82,9 @@ func New(sessions *session.Store, db *store.DB, resolver *repo.Resolver, broadca
 		broadcast:          broadcast,
 		metaCache:          make(map[string]*agentMeta),
 		pendingParentLinks: make(map[string]string),
+		offsets:            make(map[string]store.FileOffset),
+		offsetHold:         make(map[string]bool),
+		dirty:              make(map[string]bool),
 		stopCh:             make(chan struct{}),
 	}
 	p.wg.Add(1)
@@ -93,6 +102,37 @@ func (p *Pipeline) Stop() {
 	p.flush() // final flush
 }
 
+// Restore loads sessions from the database into the live store, as they were
+// when last persisted, so their files can be resumed from saved offsets
+// instead of replayed. It returns the IDs it restored. Dedup state is loaded
+// lazily by Process when a restored session receives its next line.
+func (p *Pipeline) Restore(ids []string) map[string]bool {
+	rows, err := p.db.RestoreSessions(ids)
+	if err != nil {
+		log.Printf("restore sessions: %v (re-reading their files instead)", err)
+		return nil
+	}
+	restored := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		p.sessions.Upsert(r.ID, func(s *session.Session) { *s = *r })
+		restored[r.ID] = true
+	}
+	for _, r := range rows {
+		if r.ParentID == "" {
+			continue
+		}
+		if restored[r.ParentID] {
+			p.sessions.LinkChild(r.ParentID, r.ID)
+			continue
+		}
+		// The parent may still arrive from a file read in full.
+		p.linkMu.Lock()
+		p.pendingParentLinks[r.ID] = r.ParentID
+		p.linkMu.Unlock()
+	}
+	return restored
+}
+
 // resolvePendingLinks checks all pending child→parent links and wires up any
 // whose parent session has now been created in the session store.
 func (p *Pipeline) resolvePendingLinks() {
@@ -103,9 +143,11 @@ func (p *Pipeline) resolvePendingLinks() {
 		// avoids re-entering the store lock from inside the Upsert closure below.
 		if parent, ok := p.sessions.Get(parentUUID); ok {
 			parentRepoID := parent.RepoID
+			changed := false
 			p.sessions.Upsert(childID, func(s *session.Session) {
 				if s.ParentID == "" {
 					s.ParentID = parentUUID
+					changed = true
 				}
 				// Back-fill repo inheritance for the child-before-parent ordering:
 				// when the child arrived first, its initial event resolved its own
@@ -115,14 +157,23 @@ func (p *Pipeline) resolvePendingLinks() {
 				if parentRepoID != "" {
 					// The pin is now inherited — flag it so subsequent flushes don't
 					// persist this child's worktree cwd → parent repo in cwd_repos.
+					changed = changed || !s.RepoInherited()
 					s.SetRepoInherited(true)
 					if s.RepoID != parentRepoID {
 						s.RepoID = parentRepoID
 						s.SetRepoSourceRank(repo.SourceGitRemote)
 						s.SetRepoToplevel("")
+						changed = true
 					}
 				}
 			})
+			// The child may have no further lines, so nothing else would persist
+			// this, and a restart that restores it from the DB would undo it.
+			if changed {
+				p.bufMu.Lock()
+				p.dirty[childID] = true
+				p.bufMu.Unlock()
+			}
 			p.sessions.LinkChild(parentUUID, childID)
 			delete(p.pendingParentLinks, childID)
 		}
@@ -137,9 +188,11 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		if !ev.Bootstrap {
 			log.Printf("parse error (%s): %v (line prefix: %.120s)", ev.FilePath, err, ev.Line)
 		}
+		p.markRead(ev)
 		return
 	}
 	if event.IsInternal() {
+		p.markRead(ev)
 		return
 	}
 	// Lines with neither uuid nor message.id (queue-operation, custom-title,
@@ -161,9 +214,9 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	}
 
 	// Pre-read subagent meta.json (only for new sessions).
-	_, exists := p.sessions.Get(ev.SessionID)
+	existing, exists := p.sessions.Get(ev.SessionID)
 	isNew := !exists
-	if isNew {
+	if isNew || existing.DedupPending() {
 		p.loadMeta(ev)
 		// Rebuild dedup state from DB if this session was previously persisted.
 		// After a restart, in-memory dedup maps are empty, which would cause
@@ -213,6 +266,7 @@ func (p *Pipeline) Process(ev watcher.Event) {
 				}
 			}
 			p.sessions.Upsert(ev.SessionID, func(s *session.Session) {
+				s.SetDedupPending(false)
 				s.SetDedupState(ids, costs)
 				s.TotalCost = tc
 				s.InputTokens = ti
@@ -294,6 +348,7 @@ func (p *Pipeline) Process(ev watcher.Event) {
 		Event:       event,
 		FullContent: fullContent,
 	})
+	p.noteOffsetLocked(ev)
 	needFlush := len(p.buffer)-p.retained >= maxBatchSize
 	p.bufMu.Unlock()
 
@@ -302,52 +357,100 @@ func (p *Pipeline) Process(ev watcher.Event) {
 	}
 }
 
-// flush persists buffered events and updates session aggregates.
+// markRead records that ev's line needs nothing persisted, so its file offset
+// can be saved with the next batch.
+func (p *Pipeline) markRead(ev watcher.Event) {
+	p.bufMu.Lock()
+	p.noteOffsetLocked(ev)
+	p.bufMu.Unlock()
+}
+
+// noteOffsetLocked records ev's end offset. Caller must hold bufMu and must
+// already have buffered ev's event, if it has one: a flush saves this offset
+// together with the buffer, so it never covers a line that isn't persisted.
+func (p *Pipeline) noteOffsetLocked(ev watcher.Event) {
+	if ev.FilePath == "" || ev.Offset <= 0 || p.offsetHold[ev.FilePath] {
+		return
+	}
+	p.offsets[ev.FilePath] = store.FileOffset{
+		Path:      ev.FilePath,
+		SessionID: ev.SessionID,
+		Offset:    ev.Offset,
+		Inode:     ev.Inode,
+	}
+}
+
+// flush persists buffered events, the sessions they touched and the file
+// offsets they cover in one transaction.
 func (p *Pipeline) flush() {
 	p.flushMu.Lock()
 	defer p.flushMu.Unlock()
 
 	p.bufMu.Lock()
-	if len(p.buffer) == 0 {
+	if len(p.buffer) == 0 && len(p.offsets) == 0 && len(p.dirty) == 0 {
 		p.bufMu.Unlock()
 		return
 	}
 	batch := p.buffer
 	p.buffer = nil
 	p.retained = 0
+	offsets := make([]store.FileOffset, 0, len(p.offsets))
+	for _, o := range p.offsets {
+		offsets = append(offsets, o)
+	}
+	clear(p.offsets)
+	ids := make([]string, 0, len(batch)+len(p.dirty))
+	for id := range p.dirty {
+		ids = append(ids, id)
+	}
+	clear(p.dirty)
 	p.bufMu.Unlock()
 
-	// Persist events. On failure put the batch back for the next flush; past
-	// maxRetainedEvents give up so a dead database can't grow memory forever.
-	if err := p.db.PersistBatch(&store.EventBatch{Events: batch}); err != nil {
-		p.bufMu.Lock()
-		if len(batch)+len(p.buffer) <= maxRetainedEvents {
-			p.buffer = append(batch, p.buffer...)
-			p.retained = len(batch)
-			log.Printf("batch persist error, will retry %d events: %v", len(batch), err)
-		} else {
-			log.Printf("batch persist error, dropping %d events (retry buffer full): %v", len(batch), err)
-		}
-		p.bufMu.Unlock()
+	for _, ei := range batch {
+		ids = append(ids, ei.SessionID)
 	}
-
-	// Persist affected sessions + repo mappings in a single transaction
 	seen := make(map[string]bool)
 	var sessionsToFlush []*session.Session
-	for _, ei := range batch {
-		if seen[ei.SessionID] {
+	for _, id := range ids {
+		if seen[id] {
 			continue
 		}
-		seen[ei.SessionID] = true
+		seen[id] = true
 
-		sess, ok := p.sessions.Get(ei.SessionID)
+		sess, ok := p.sessions.Get(id)
 		if !ok {
 			continue
 		}
 		sessionsToFlush = append(sessionsToFlush, sess)
 	}
-	if err := p.db.FlushSessions(sessionsToFlush); err != nil {
-		log.Printf("session flush error: %v", err)
+
+	// On failure put the batch back for the next flush; past maxRetainedEvents
+	// give up so a dead database can't grow memory forever.
+	err := p.db.PersistBatch(&store.EventBatch{Events: batch, Sessions: sessionsToFlush, Offsets: offsets})
+	if err == nil {
+		return
+	}
+	p.bufMu.Lock()
+	defer p.bufMu.Unlock()
+	for _, id := range ids {
+		p.dirty[id] = true
+	}
+	if len(batch)+len(p.buffer) <= maxRetainedEvents {
+		p.buffer = append(batch, p.buffer...)
+		p.retained = len(batch)
+		for _, o := range offsets {
+			if _, newer := p.offsets[o.Path]; !newer {
+				p.offsets[o.Path] = o
+			}
+		}
+		log.Printf("batch persist error, will retry %d events: %v", len(batch), err)
+		return
+	}
+	log.Printf("batch persist error, dropping %d events (retry buffer full): %v", len(batch), err)
+	// A later batch's offset for these files would skip the lines lost here.
+	for _, o := range offsets {
+		p.offsetHold[o.Path] = true
+		delete(p.offsets, o.Path)
 	}
 }
 

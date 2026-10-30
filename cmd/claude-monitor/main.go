@@ -319,7 +319,7 @@ func main() {
 	dockerEnabled := flag.Bool("docker", false, "auto-discover .claude/projects mounts from running Docker containers")
 	dockerSocket := flag.String("docker-socket", "/var/run/docker.sock", "path to Docker socket")
 	swaggerEnabled := flag.Bool("swagger", false, "deprecated: API docs are always served at /api (flag retained for backward compatibility, no effect)")
-	rebuildHistory := flag.Bool("rebuild-history", false, "force the one-time v013 workflow-identity backfill to re-run (ignores its done-marker). Historical JSONL is re-ingested on every startup regardless of this flag.")
+	rebuildHistory := flag.Bool("rebuild-history", false, "re-read every JSONL file from the start instead of resuming from saved offsets, and re-run the one-time v013 workflow-identity backfill")
 	// Handle --version before any other initialization.
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Printf("claude-monitor %s\n", version)
@@ -359,7 +359,7 @@ Examples:
   claude-monitor                                  # Start with defaults (localhost:7700)
   claude-monitor --port 8080 --watch /extra/path  # Custom port + extra watch dir
   claude-monitor --broadcast                      # All interfaces (API docs always at /api)
-  claude-monitor --rebuild-history                # Force the workflow-identity backfill to re-run
+  claude-monitor --rebuild-history                # Re-read all history from scratch
 `)
 	}
 
@@ -430,15 +430,9 @@ Examples:
 	// agent_kind). Runs synchronously AFTER migrations (inside store.Open) and
 	// BEFORE the watcher's bootstrap scan (fw.Start below), so live ingestion sees
 	// already-linked rows. It is marker-guarded (settings key "backfill_v013_done")
-	// so steady-state startups short-circuit with no walk.
-	//
-	// Re-INGEST of historical JSONL happens on EVERY startup regardless of this
-	// flag: the watcher reads every tracked file from offset 0 during bootstrap
-	// (idempotent — PersistBatch dedups on (session_id, COALESCE(message_id,uuid))
-	// and the pipeline rebuilds dedup state from the DB). --rebuild-history's only
-	// effect is forcing THIS v013 identity backfill to re-run past its done-marker.
-	// Include any --watch dirs so agent transcripts under custom watch paths are
-	// linked too (the done-marker would otherwise permanently skip them).
+	// so steady-state startups short-circuit with no walk; --rebuild-history
+	// forces it past the marker. Include any --watch dirs so agent transcripts
+	// under custom watch paths are linked too.
 	backfillPaths := append(store.DefaultBackfillBasePaths(), []string(extraPaths)...)
 	if res, err := historyDB.RunBackfillV013(backfillPaths, *rebuildHistory); err != nil {
 		// Never Fatalf: a partial/failed backfill must not block the daemon. The
@@ -514,6 +508,20 @@ Examples:
 	fw.SetBootstrapCallback(func(ev watcher.Event) {
 		pipe.Process(ev)
 	})
+
+	// Resume each file from where the last run persisted it; files without a
+	// usable offset (first run, truncated, replaced) are read from the start.
+	if *rebuildHistory {
+		log.Println("--rebuild-history: re-reading all history from the start")
+	} else if saved, err := historyDB.LoadFileOffsets(); err != nil {
+		log.Printf("warning: could not load file offsets, re-reading all history: %v", err)
+	} else {
+		offsets := make(map[string]watcher.FileOffset, len(saved))
+		for _, o := range saved {
+			offsets[o.Path] = watcher.FileOffset{Offset: o.Offset, Inode: o.Inode}
+		}
+		fw.Resume(offsets, pipe.Restore)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -807,3 +807,208 @@ func TestEmit_BlocksInsteadOfDropping(t *testing.T) {
 		t.Fatal("emit blocked after shutdown")
 	}
 }
+
+// bootstrapLines runs one bootstrap over dir with the given saved offsets and
+// returns the emitted events once lines stop arriving.
+func bootstrapLines(t *testing.T, dir string, offsets map[string]FileOffset, restore func([]string) map[string]bool) []Event {
+	t.Helper()
+	w := newTestWatcher(t, []string{dir})
+	var mu sync.Mutex
+	var got []Event
+	w.SetBootstrapCallback(func(ev Event) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+	if offsets != nil {
+		w.Resume(offsets, restore)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.Start(ctx)
+	// The bootstrap holds w.mu from the first scan until every file is read.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		w.mu.Lock()
+		done := len(w.states) > 0 && !w.bootstrapping
+		w.mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("bootstrap did not finish")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]Event(nil), got...)
+}
+
+func restoreAll(ids []string) map[string]bool {
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m[id] = true
+	}
+	return m
+}
+
+func TestWatcher_EventOffsetsAreLineEnds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	content := "{\"a\":1}\n\n  {\"b\":2}\n{\"c\":3}\n{\"partial\""
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evs := bootstrapLines(t, dir, nil, nil)
+	want := []int64{8, 19, 27}
+	if len(evs) != len(want) {
+		t.Fatalf("got %d events, want %d", len(evs), len(want))
+	}
+	info, _ := os.Stat(path)
+	for i, ev := range evs {
+		if ev.Offset != want[i] {
+			t.Errorf("event %d offset = %d, want %d", i, ev.Offset, want[i])
+		}
+		if ev.Inode != inodeOf(info) {
+			t.Errorf("event %d inode = %d, want %d", i, ev.Inode, inodeOf(info))
+		}
+	}
+}
+
+func TestWatcher_ResumeFromSavedOffset(t *testing.T) {
+	line1 := `{"type":"user","n":1}` + "\n"
+	line2 := `{"type":"user","n":2}` + "\n"
+	line3 := `{"type":"user","n":3}` + "\n"
+	write := func(t *testing.T, path, s string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := func(path string, off int64) map[string]FileOffset {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]FileOffset{path: {Offset: off, Inode: inodeOf(info)}}
+	}
+	saveAt := int64(len(line1) + len(line2))
+
+	t.Run("resumes", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sess.jsonl")
+		write(t, path, line1+line2+line3)
+		var asked []string
+		evs := bootstrapLines(t, dir, saved(path, saveAt), func(ids []string) map[string]bool {
+			asked = ids
+			return restoreAll(ids)
+		})
+		if len(asked) != 1 || asked[0] != "sess" {
+			t.Errorf("restore asked for %v, want [sess]", asked)
+		}
+		if len(evs) != 1 || !strings.Contains(string(evs[0].Line), `"n":3`) {
+			t.Fatalf("got %d events (%v), want only line 3", len(evs), evs)
+		}
+		if evs[0].Offset != saveAt+int64(len(line3)) || !evs[0].Bootstrap {
+			t.Errorf("offset = %d bootstrap = %v", evs[0].Offset, evs[0].Bootstrap)
+		}
+	})
+
+	t.Run("truncated", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sess.jsonl")
+		write(t, path, line1+line2)
+		offsets := saved(path, saveAt)
+		write(t, path, line3)
+		if evs := bootstrapLines(t, dir, offsets, restoreAll); len(evs) != 1 || !strings.Contains(string(evs[0].Line), `"n":3`) {
+			t.Fatalf("got %d events, want the one line now in the file", len(evs))
+		}
+	})
+
+	t.Run("replaced", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sess.jsonl")
+		write(t, path, line1+line2)
+		offsets := saved(path, saveAt)
+		tmp := filepath.Join(t.TempDir(), "new.jsonl")
+		write(t, tmp, line3+line1+line2)
+		if err := os.Rename(tmp, path); err != nil {
+			t.Fatal(err)
+		}
+		if evs := bootstrapLines(t, dir, offsets, restoreAll); len(evs) != 3 {
+			t.Fatalf("got %d events, want all 3 lines of the replacement file", len(evs))
+		}
+	})
+
+	t.Run("not a line boundary", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sess.jsonl")
+		write(t, path, line1+line2+line3)
+		if evs := bootstrapLines(t, dir, saved(path, saveAt-3), restoreAll); len(evs) != 3 {
+			t.Fatalf("got %d events, want a full read", len(evs))
+		}
+	})
+
+	t.Run("session not restored", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sess.jsonl")
+		write(t, path, line1+line2+line3)
+		none := func([]string) map[string]bool { return nil }
+		if evs := bootstrapLines(t, dir, saved(path, saveAt), none); len(evs) != 3 {
+			t.Fatalf("got %d events, want a full read", len(evs))
+		}
+	})
+
+	t.Run("no saved offset", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sess.jsonl")
+		other := filepath.Join(dir, "other.jsonl")
+		write(t, path, line1+line2+line3)
+		write(t, other, line1)
+		evs := bootstrapLines(t, dir, saved(path, saveAt), restoreAll)
+		var fromOther int
+		for _, ev := range evs {
+			if ev.FilePath == other {
+				fromOther++
+			}
+		}
+		if len(evs) != 2 || fromOther != 1 {
+			t.Fatalf("got %d events (%d from other.jsonl), want line 3 plus all of other.jsonl", len(evs), fromOther)
+		}
+	})
+}
+
+func TestWatcher_ReplacedFileWhileRunning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r.jsonl")
+	if err := os.WriteFile(path, []byte(`{"n":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := newTestWatcher(t, []string{dir})
+	w.SetBootstrapCallback(func(Event) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := w.Start(ctx)
+	waitTracked(t, w, path, 2*time.Second)
+
+	// Same size, different file: only the inode tells them apart.
+	tmp := filepath.Join(t.TempDir(), "r.jsonl")
+	if err := os.WriteFile(tmp, []byte(`{"n":2}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendToFile(path, `{"n":3}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-events:
+		if !strings.Contains(string(ev.Line), `"n":2`) {
+			t.Errorf("first line after replacement = %s, want n:2", ev.Line)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no event after replacement")
+	}
+}
