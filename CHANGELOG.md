@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.8.6](https://github.com/Zxela/claude-monitor/compare/v3.8.5...v3.8.6) (2026-10-30)
+
+
+### Bug Fixes
+
+* claim the port before init, and tidy shutdown ordering ([#300](https://github.com/Zxela/claude-monitor/issues/300)) ([a3de7c1](https://github.com/Zxela/claude-monitor/commit/a3de7c188323ab23b32bfbad34c59eecad7448ff))
+* **deps:** bump Go toolchain to 1.27.3 and gate CI on govulncheck ([#282](https://github.com/Zxela/claude-monitor/issues/282)) ([9d552cb](https://github.com/Zxela/claude-monitor/commit/9d552cb01c5f906297ea8243df5e3fc46c02f11f))
+* **docker:** make the image build and reachable, and build it in CI ([#285](https://github.com/Zxela/claude-monitor/issues/285)) ([2207b84](https://github.com/Zxela/claude-monitor/commit/2207b84225664504a7bc75bc0a3f4abf36e94d4d))
+* **ingest:** stop silently dropping lines and failed batches ([#299](https://github.com/Zxela/claude-monitor/issues/299)) ([89077a4](https://github.com/Zxela/claude-monitor/commit/89077a4738f7c258ceef512644ef2d32123f0301))
+* **install:** verify the tarball against the release's checksums.txt ([#301](https://github.com/Zxela/claude-monitor/issues/301)) ([d523dfe](https://github.com/Zxela/claude-monitor/commit/d523dfe2881f3a84cdf0d3f1692427c6de4bb4b8))
+* **parser:** read thinking text and ignore Claude Code bookkeeping lines ([#292](https://github.com/Zxela/claude-monitor/issues/292)) ([5de5271](https://github.com/Zxela/claude-monitor/commit/5de52714a64ab4e4b056b920fc19d174bf4dcf06))
+* **pipeline:** stop event, message and error counts growing on every restart ([#297](https://github.com/Zxela/claude-monitor/issues/297)) ([fe42a8d](https://github.com/Zxela/claude-monitor/commit/fe42a8df6bcbbefb118d0ab3393fc676695a97d7))
+* **pricing:** add Claude 5.x model rates and reprice their stored events ([#283](https://github.com/Zxela/claude-monitor/issues/283)) ([ca17d41](https://github.com/Zxela/claude-monitor/commit/ca17d41b641163fb29e8afea7f2ca2c06eea139e))
+* **security:** add CSP and nosniff headers; pin Swagger UI with SRI ([#290](https://github.com/Zxela/claude-monitor/issues/290)) ([2de90e0](https://github.com/Zxela/claude-monitor/commit/2de90e0e2eec425ae784d8531b44abb103190d0f))
+* **security:** block DNS rebinding with a Host allowlist ([#286](https://github.com/Zxela/claude-monitor/issues/286)) ([6659c0d](https://github.com/Zxela/claude-monitor/commit/6659c0dfbeb5966f052b39520f1897fe2b3ac758))
+* **security:** keep ~/.claude-monitor and history.db owner-only ([#288](https://github.com/Zxela/claude-monitor/issues/288)) ([8c44046](https://github.com/Zxela/claude-monitor/commit/8c44046586217a498687e718750418e3f64bf813))
+* **store:** keep thinking and tool fields when a message spans several lines ([#310](https://github.com/Zxela/claude-monitor/issues/310)) ([2629ddf](https://github.com/Zxela/claude-monitor/commit/2629ddfe390e6878ba10f1b62a5ebafcf4a42d7e))
+* **store:** stop keyless lines collapsing into one row and misfiling content ([#295](https://github.com/Zxela/claude-monitor/issues/295)) ([d2ba8cc](https://github.com/Zxela/claude-monitor/commit/d2ba8cc6878d8d06b4779dea44185d2889bd823e))
+* **store:** stop startup re-ingest from undoing retention compaction ([#296](https://github.com/Zxela/claude-monitor/issues/296)) ([74551eb](https://github.com/Zxela/claude-monitor/commit/74551eb0552a926f38e8ae289b1d9803ef83087d))
+* **web:** close replay on navigation and keep scrubbing responsive ([#305](https://github.com/Zxela/claude-monitor/issues/305)) ([4bee768](https://github.com/Zxela/claude-monitor/commit/4bee7683c5f66c932c66bcc2a085de5b39034ca6))
+* **web:** escape session names and log-derived labels rendered as HTML ([#287](https://github.com/Zxela/claude-monitor/issues/287)) ([c0d3d26](https://github.com/Zxela/claude-monitor/commit/c0d3d26fcc2f56b2a6b310d46cae90d78b84fae1))
+* **web:** keep table scroll and sidebar focus across live re-renders ([#306](https://github.com/Zxela/claude-monitor/issues/306)) ([cbca8fc](https://github.com/Zxela/claude-monitor/commit/cbca8fc4ca14afd4bae22c7b0654cd32eef65280))
+* **web:** reload the feed after switching views with a session selected ([#289](https://github.com/Zxela/claude-monitor/issues/289)) ([455f5e5](https://github.com/Zxela/claude-monitor/commit/455f5e51bc24af97b0c338b30c4e40fdc834882e))
+* **web:** session list counts and feed filter bugs ([#314](https://github.com/Zxela/claude-monitor/issues/314)) ([17c0abd](https://github.com/Zxela/claude-monitor/commit/17c0abd298c725c11f614ee9c261f0ed0e031794))
+* **web:** stop screen readers announcing every event ([#303](https://github.com/Zxela/claude-monitor/issues/303)) ([97e9d14](https://github.com/Zxela/claude-monitor/commit/97e9d146c9a24a27eba5faa23bb6b6588276aa98))
+
 ## [3.8.5](https://github.com/Zxela/claude-monitor/compare/v3.8.4...v3.8.5) (2026-08-05)
 
 
