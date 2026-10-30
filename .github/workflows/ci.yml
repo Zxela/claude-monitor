@@ -171,7 +171,7 @@ jobs:
       contents: write
       pull-requests: write
     if: github.ref == 'refs/heads/main'
-    needs: [build-and-test, frontend-node-floor, lint, api-spec]
+    needs: [build-and-test, lint, api-spec]
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
