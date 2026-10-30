@@ -1987,6 +1987,9 @@ func TestProcess_RetainedEventsDontTriggerFlush(t *testing.T) {
 	db := openTestDB(t)
 	p := New(session.NewStore(), db, repo.NewResolver(), nil)
 	defer p.Stop()
+	// A ticker flush would log its own retry and race the logs read below.
+	p.stopOnce.Do(func() { close(p.stopCh) })
+	p.wg.Wait()
 
 	var logs bytes.Buffer
 	log.SetOutput(&logs)
