@@ -400,7 +400,7 @@ describe('feed panel filters', () => {
     expect(visibleTypes(mount)).toEqual([]);
   });
 
-  it.skip('errors-only view hides skill entries (bug: errorsOnlyFilters has no skill key)', async () => {
+  it('errors-only view hides skill entries', async () => {
     mocks.fetchSessionEvents.mockResolvedValue([
       ev({ role: 'assistant', toolName: 'Skill', contentPreview: 'sk' }),
       ev({ isError: true, contentPreview: 'boom', timestamp: at(1) }),
