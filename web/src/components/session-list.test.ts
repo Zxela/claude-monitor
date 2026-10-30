@@ -216,7 +216,7 @@ describe('session list filtering', () => {
     expect(count(mount, 'all')).toBe('2');
   });
 
-  it.skip('ACTIVE count honours the repo filter (bug: #fc-active counts every repo)', async () => {
+  it('ACTIVE count honours the repo filter', async () => {
     const { mount, update } = await setup([
       makeSession({
         id: 'a',
