@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.9.1](https://github.com/Zxela/claude-monitor/compare/v3.9.0...v3.9.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **pipeline:** drop unused path/filepath import ([#330](https://github.com/Zxela/claude-monitor/issues/330)) ([5a9a4f8](https://github.com/Zxela/claude-monitor/commit/5a9a4f8d6e7507a41956809d36c82efb8fa432ba))
+
 ## [3.9.0](https://github.com/Zxela/claude-monitor/compare/v3.8.6...v3.9.0) (2026-10-30)
 
 
