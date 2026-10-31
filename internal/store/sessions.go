@@ -81,7 +81,7 @@ func (r *SessionRow) ToSession() *session.Session {
 		AITitle:             r.AITitle,
 		PRLinks:             r.PRLinks,
 		IsActive:            false,
-		Status:              "idle",
+		Status:              session.StatusIdle,
 		CostRate:            0,
 	}
 	if r.StartedAt != "" {
@@ -170,7 +170,7 @@ func sessionUpsertArgs(s *session.Session) []any {
 		s.Version, s.Entrypoint,
 		s.WorkflowID, s.AgentID, s.AgentKind,
 		s.AITitle, encodePRLinks(s.PRLinks),
-		s.Status, lastActiveExact, startedAtExact,
+		s.LastTurn(), lastActiveExact, startedAtExact,
 		pin.Rank, pin.Toplevel, pin.Inherited,
 	}
 }
@@ -261,7 +261,7 @@ func (d *DB) RestoreSessions(ids []string) ([]*session.Session, error) {
 				return nil, err
 			}
 			s := r.ToSession()
-			s.Status = status
+			s.SetLastTurn(status)
 			if t, err := time.Parse(time.RFC3339Nano, lastActive); err == nil {
 				s.LastActive = t
 			}

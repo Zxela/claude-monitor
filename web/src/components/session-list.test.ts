@@ -18,6 +18,7 @@ function makeSession(over: Partial<Session> & { id: string }): Session {
     eventCount: 5,
     lastActive: ago(10 * MIN),
     isActive: false,
+    needsAttention: false,
     startedAt: ago(2 * HOUR),
     status: 'idle',
     costRate: 0,
