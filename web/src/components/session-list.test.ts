@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Session } from '../types';
 
-const NOW = new Date(2026, 2, 10, 15, 0, 0);
+const NOW = new Date(2026, 2, 13, 15, 0, 0); // Friday
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
@@ -122,6 +122,22 @@ describe('session list grouping', () => {
     expect(
       groupByLabel(mount, 'TODAY')!.classList.contains('time-group-collapsed'),
     ).toBe(false);
+  });
+
+  it('starts THIS WEEK on the ISO-week Monday, like the server', async () => {
+    const { mount } = await setup([
+      makeSession({ id: 'monday', lastActive: ago(4 * 24 * HOUR) }),
+      makeSession({ id: 'sunday', lastActive: ago(5 * 24 * HOUR) }),
+    ]);
+    filterBtn(mount, 'all').click();
+    for (const label of ['THIS WEEK', 'OLDER']) {
+      groupByLabel(mount, label)!
+        .querySelector<HTMLElement>('.time-group-header')!
+        .click();
+    }
+
+    expect(cardIds(groupByLabel(mount, 'THIS WEEK')!)).toEqual(['monday']);
+    expect(cardIds(groupByLabel(mount, 'OLDER')!)).toEqual(['sunday']);
   });
 
   it('shows only the active section under ACTIVE, or an empty message', async () => {
